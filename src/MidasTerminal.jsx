@@ -25002,10 +25002,17 @@ function EjecucionInteligenteModule() {
 // de la estrategia trend-following (SMA 20/100) en BTC/ETH, capital simulado
 // USD 1000. Lee paper_equity/paper_state/paper_trades (worker paper-trader).
 // ═══════════════════════════════════════════════════════════════════════
+const PAPER_STRATS = [
+  { id: "trend", label: "Tendencia 20/100", color: "#34d399", desc: "BTC+ETH" },
+  { id: "trend_filt", label: "+ Filtro anti-whipsaw", color: "#60a5fa", desc: "BTC+ETH, no entra si la tendencia no viene subiendo" },
+  { id: "trend_multi", label: "Multi-activo", color: "#a78bfa", desc: "BTC+ETH+SOL" },
+];
+
 function PaperTradingModule() {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
+  const [sel, setSel] = useState("trend");
   const isOwner = user?.id === PAPER_OWNER_ID;
 
   useEffect(() => {
@@ -25014,9 +25021,9 @@ function PaperTradingModule() {
     (async () => {
       try {
         const [eq, st, tr] = await Promise.all([
-          supabase.from("paper_equity").select("d,asset,price,position,sleeve_equity,bh_equity,is_live").order("d", { ascending: true }).limit(20000),
+          supabase.from("paper_equity").select("strategy,d,asset,sleeve_equity,bh_equity,is_live").order("d", { ascending: true }).limit(40000),
           supabase.from("paper_state").select("*"),
-          supabase.from("paper_trades").select("*").order("d", { ascending: false }).limit(40),
+          supabase.from("paper_trades").select("*").order("d", { ascending: false }).limit(300),
         ]);
         if (!mounted) return;
         setData({ eq: eq.data || [], st: st.data || [], tr: tr.data || [] });
@@ -25025,95 +25032,111 @@ function PaperTradingModule() {
     return () => { mounted = false; };
   }, [isOwner, tick]);
 
-  if (!isOwner) {
-    return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Pantalla privada.</div>;
-  }
+  if (!isOwner) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Pantalla privada.</div>;
   if (!data) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando paper trading…</div>;
 
-  // Curva total = suma de sleeves por fecha; benchmark buy&hold idem.
-  const byDate = {};
-  for (const r of data.eq) {
-    const e = byDate[r.d] || { d: r.d, strat: 0, bh: 0, live: false };
-    e.strat += Number(r.sleeve_equity) || 0;
-    e.bh += Number(r.bh_equity) || 0;
-    e.live = e.live || r.is_live;
-    byDate[r.d] = e;
-  }
-  const curve = Object.values(byDate).sort((a, b) => (a.d < b.d ? -1 : 1));
-  const last = curve.length ? curve[curve.length - 1] : null;
-  const totalNow = last ? last.strat : 1000;
-  const bhNow = last ? last.bh : 1000;
-  const pnl = totalNow - 1000, pnlPct = pnl / 1000 * 100;
-  const bhPnlPct = (bhNow / 1000 - 1) * 100;
-  let peak = -Infinity, dd = 0;
-  for (const c of curve) { if (c.strat > peak) peak = c.strat; if (peak > 0) dd = Math.min(dd, c.strat / peak - 1); }
-  const liveStart = curve.find((c) => c.live)?.d || null;
-  const stByAsset = {}; for (const s of data.st) stByAsset[s.asset] = s;
-
-  const lines = [
-    { label: "Estrategia", color: "#34d399", data: curve.map((c) => ({ fecha: c.d, valor: c.strat })) },
-    { label: "Comprar y holdear", color: C.dim, data: curve.map((c) => ({ fecha: c.d, valor: c.bh })) },
-  ];
-  const fUsd = (n) => (n == null ? "—" : `US$ ${Number(n).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`);
+  const fUsd = (n) => (n == null ? "—" : `US$ ${Number(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`);
   const fPct = (n) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(1)}%`;
   const fmtD = (iso) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "");
-  const Card = ({ label, value, sub, color }) => (
-    <div style={{ flex: "1 1 150px", minWidth: 140, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
-      <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{sub}</div>}
-    </div>
-  );
-  const PosBadge = ({ asset }) => {
-    const s = stByAsset[asset];
-    const long = s?.position === "long";
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <strong style={{ color: C.text }}>{asset}</strong>
-        <span style={{ padding: "2px 8px", fontSize: 10, fontWeight: 700, borderRadius: 3, color: long ? "#34d399" : C.dim, background: long ? "rgba(52,211,153,0.12)" : "rgba(255,255,255,0.04)" }}>
-          {long ? "COMPRADO" : "EN CASH (USD)"}
-        </span>
-      </span>
-    );
-  };
+
+  // Curva por estrategia (suma de sleeves por fecha) + benchmark buy&hold (de 'trend').
+  const perStrat = PAPER_STRATS.map((su) => {
+    const byDate = {};
+    for (const r of data.eq) {
+      if (r.strategy !== su.id) continue;
+      const e = byDate[r.d] || { d: r.d, eq: 0, live: false };
+      e.eq += Number(r.sleeve_equity) || 0;
+      e.live = e.live || r.is_live;
+      byDate[r.d] = e;
+    }
+    const curve = Object.values(byDate).sort((a, b) => (a.d < b.d ? -1 : 1));
+    const now = curve.length ? curve[curve.length - 1].eq : 1000;
+    let peak = -Infinity, mdd = 0;
+    for (const c of curve) { if (c.eq > peak) peak = c.eq; if (peak > 0) mdd = Math.min(mdd, c.eq / peak - 1); }
+    return { ...su, curve, now, pnlPct: (now / 1000 - 1) * 100, mdd: mdd * 100, liveStart: curve.find((c) => c.live)?.d || null };
+  });
+  const bhByDate = {};
+  for (const r of data.eq) { if (r.strategy !== "trend") continue; bhByDate[r.d] = (bhByDate[r.d] || 0) + (Number(r.bh_equity) || 0); }
+  const bhCurve = Object.entries(bhByDate).map(([d, v]) => ({ fecha: d, valor: v })).sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+  const bhNow = bhCurve.length ? bhCurve[bhCurve.length - 1].valor : 1000;
+  const best = perStrat.reduce((a, b) => (b.now > a.now ? b : a), perStrat[0]);
+  const days = perStrat[0]?.curve.length || 0;
+  const liveStart = perStrat[0]?.liveStart;
+
+  const lines = [
+    ...perStrat.map((s) => ({ label: s.label, color: s.color, data: s.curve.map((c) => ({ fecha: c.d, valor: c.eq })) })),
+    { label: "Comprar y holdear", color: C.dim, data: bhCurve },
+  ];
+
+  const selData = perStrat.find((s) => s.id === sel) || perStrat[0];
+  const selStates = data.st.filter((s) => s.strategy === sel);
+  const selTrades = data.tr.filter((t) => t.strategy === sel).slice(0, 25);
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
       <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Paper Cripto · Trend-Following</h1>
-          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
-            Simulación con US$ 1.000 (500 BTC + 500 ETH) de la estrategia de seguimiento de tendencia (cruce de medias 20/100, fee 0,26%/lado de Kraken). Sin plata real todavía: medimos cómo se comporta antes de arriesgar. La línea verde es la estrategia; la gris, comprar y holdear.
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Paper Cripto · Estrategias en paralelo</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 780 }}>
+            Tres variantes de seguimiento de tendencia simuladas con US$ 1.000 cada una (fee 0,26%/lado de Kraken), sin plata real. Comparamos cuál aguanta mejor — sobre todo en drawdown, no solo en retorno. Comprar-y-holdear es la línea gris de referencia.
           </p>
         </div>
         <button onClick={() => setTick((t) => t + 1)} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>Actualizar</button>
       </div>
 
+      {/* Tarjetas comparativas por estrategia */}
       <div className="flex" style={{ gap: 10, flexWrap: "wrap" }}>
-        <Card label="Valor hoy (de US$ 1.000)" value={fUsd(totalNow)} sub={`${fPct(pnlPct)} · ${fUsd(pnl)}`} color={pnl >= 0 ? "#34d399" : "#f87171"} />
-        <Card label="Si hubieras holdeado" value={fUsd(bhNow)} sub={fPct(bhPnlPct)} color={C.muted} />
-        <Card label="Ventaja vs holdear" value={fPct(pnlPct - bhPnlPct)} sub="cuánto le gana la estrategia" color={C.accent} />
-        <Card label="Peor caída (drawdown)" value={`${dd.toFixed(1)}%`} sub="máxima desde un pico" color="#f87171" />
-      </div>
-
-      <div className="flex items-center" style={{ gap: 16, margin: "14px 2px 0", flexWrap: "wrap", fontSize: 12 }}>
-        <span style={{ color: C.dim }}>Posición actual:</span>
-        <PosBadge asset="BTC" />
-        <PosBadge asset="ETH" />
-        {liveStart && <span style={{ marginLeft: "auto", fontSize: 10, color: C.dim }}>en vivo desde {fmtD(liveStart)} · histórico simulado antes</span>}
+        {perStrat.map((s) => (
+          <div key={s.id} style={{ flex: "1 1 200px", minWidth: 180, border: `1px solid ${s.id === best.id ? s.color : C.border}`, borderRadius: 8, padding: "12px 14px", background: s.id === best.id ? "rgba(52,211,153,0.05)" : "transparent" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color }} />
+              <span style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{s.label}</span>
+              {s.id === best.id && <span style={{ marginLeft: "auto", fontSize: 8.5, color: s.color, fontWeight: 700 }}>MEJOR</span>}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: s.pnlPct >= 0 ? "#34d399" : "#f87171", fontVariantNumeric: "tabular-nums" }}>{fUsd(s.now)}</div>
+            <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct(s.pnlPct)} · peor caída {s.mdd.toFixed(0)}% · {s.desc}</div>
+          </div>
+        ))}
+        <div style={{ flex: "1 1 160px", minWidth: 150, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>Comprar y holdear</div>
+          <div style={{ fontSize: 20, fontWeight: 600, color: C.muted, fontVariantNumeric: "tabular-nums" }}>{fUsd(bhNow)}</div>
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct((bhNow / 1000 - 1) * 100)} · referencia</div>
+        </div>
       </div>
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Evolución del capital</h3>
-          <span style={{ fontSize: 10, color: C.dim }}>{curve.length} días</span>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Evolución del capital · las tres estrategias</h3>
+          <span style={{ fontSize: 10, color: C.dim }}>{days} días{liveStart ? ` · en vivo desde ${fmtD(liveStart)}` : " · histórico simulado"}</span>
         </div>
-        <BcraMultiLine lines={lines} height={230} fmtY={fUsd} />
+        <BcraMultiLine lines={lines} height={250} fmtY={fUsd} />
       </div>
 
+      {/* Detalle de una estrategia */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: "0 0 8px 0" }}>Últimas operaciones</h3>
-        {data.tr.length === 0 ? (
+        <div className="flex items-center" style={{ gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: C.muted, marginRight: 4 }}>Detalle:</span>
+          {PAPER_STRATS.map((s) => (
+            <button key={s.id} onClick={() => setSel(s.id)}
+              style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${sel === s.id ? s.color : C.border}`, background: sel === s.id ? "rgba(124,156,255,0.10)" : "transparent", color: sel === s.id ? C.text : C.muted, borderRadius: 4 }}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center" style={{ gap: 14, marginBottom: 10, flexWrap: "wrap", fontSize: 12 }}>
+          <span style={{ color: C.dim }}>Posición actual:</span>
+          {selStates.length === 0 ? <span style={{ color: C.dim }}>—</span> : selStates.map((s) => (
+            <span key={s.asset} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <strong style={{ color: C.text }}>{s.asset}</strong>
+              <span style={{ padding: "2px 8px", fontSize: 10, fontWeight: 700, borderRadius: 3, color: s.position === "long" ? "#34d399" : C.dim, background: s.position === "long" ? "rgba(52,211,153,0.12)" : "rgba(255,255,255,0.04)" }}>
+                {s.position === "long" ? "COMPRADO" : "EN CASH (USD)"}
+              </span>
+            </span>
+          ))}
+        </div>
+
+        {selTrades.length === 0 ? (
           <div style={{ color: C.dim, fontSize: 12 }}>Sin operaciones todavía.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -25124,17 +25147,15 @@ function PaperTradingModule() {
                   <th style={{ padding: "7px 10px", fontWeight: 600 }}>Activo</th>
                   <th style={{ padding: "7px 10px", fontWeight: 600 }}>Acción</th>
                   <th style={{ padding: "7px 10px", fontWeight: 600, textAlign: "right" }}>Precio</th>
-                  <th style={{ padding: "7px 10px", fontWeight: 600, textAlign: "right" }}>Fee</th>
                 </tr>
               </thead>
               <tbody>
-                {data.tr.map((t) => (
+                {selTrades.map((t) => (
                   <tr key={t.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                     <td style={{ padding: "6px 10px", color: C.muted }}>{fmtD(t.d)}</td>
                     <td style={{ padding: "6px 10px", color: C.text, fontWeight: 600 }}>{t.asset}</td>
                     <td style={{ padding: "6px 10px", color: t.side === "buy" ? "#34d399" : "#f87171", fontWeight: 600 }}>{t.side === "buy" ? "COMPRA" : "VENTA"}</td>
                     <td style={{ padding: "6px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.muted }}>US$ {Number(t.price).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</td>
-                    <td style={{ padding: "6px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.dim }}>US$ {Number(t.fee_usd).toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -25144,7 +25165,7 @@ function PaperTradingModule() {
       </div>
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
-        El histórico (hasta ayer) es una simulación retrospectiva con la misma regla aplicada a los precios reales de Kraken. Desde el arranque en vivo, el worker actualiza una vez por día. Nada de esto opera plata real: cuando la validación nos convenza, recién ahí conectamos la ejecución con los US$ 1.000.
+        El histórico es retrospectivo (misma regla sobre precios reales de Kraken); desde el arranque en vivo el worker actualiza 1×/día. Nada opera plata real: cuando una variante nos convenza por su comportamiento —especialmente en las rachas malas— conectamos la ejecución con los US$ 1.000.
       </p>
     </div>
   );
