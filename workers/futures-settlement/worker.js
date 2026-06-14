@@ -469,6 +469,13 @@ async function generateAdjustments(positions, endSettleDate) {
       continue;
     }
     if (closeDate < lookbackFloor || closeDate > endSettleDate) continue;
+    // Corte de reconciliacion (mismo criterio que los abiertos): si ya hay un
+    // ajuste para este (user,ticker) en o despues del cierre, el realizado ya
+    // fue contado -> no regenerar. Sin esto, una reimportacion de posiciones
+    // (que borra los adjustments viejos pero deja vivo su cash_movement)
+    // regeneraba el realizado de cierres recientes -> doble caja al confirmar.
+    const cutoverC = lastAdjByUserTicker[`${g.userId}__${g.ticker}`] || null;
+    if (cutoverC && closeDate <= cutoverC) continue;
     if (existingSet.has(`${g.userId}__${g.ticker}__${closeDate}`)) continue;
 
     // P&L realizado = (suma vendido - suma comprado) x multiplicador. Para
