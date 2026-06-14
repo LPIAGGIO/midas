@@ -25020,13 +25020,25 @@ function PaperTradingModule() {
     let mounted = true;
     (async () => {
       try {
-        const [eq, st, tr] = await Promise.all([
-          supabase.from("paper_equity").select("strategy,d,asset,sleeve_equity,bh_equity,is_live").order("d", { ascending: true }).limit(40000),
+        // El server capa los SELECT a 1000 filas; paper_equity las supera
+        // (cientos de días × varios sleeves) → paginar por (d,strategy,asset).
+        let eqAll = [], from = 0;
+        for (;;) {
+          const { data, error } = await supabase.from("paper_equity")
+            .select("strategy,d,asset,sleeve_equity,bh_equity,is_live")
+            .order("d", { ascending: true }).order("strategy", { ascending: true }).order("asset", { ascending: true })
+            .range(from, from + 999);
+          if (error || !data || !data.length) break;
+          eqAll = eqAll.concat(data);
+          if (data.length < 1000) break;
+          from += 1000;
+        }
+        const [st, tr] = await Promise.all([
           supabase.from("paper_state").select("*"),
           supabase.from("paper_trades").select("*").order("d", { ascending: false }).limit(300),
         ]);
         if (!mounted) return;
-        setData({ eq: eq.data || [], st: st.data || [], tr: tr.data || [] });
+        setData({ eq: eqAll, st: st.data || [], tr: tr.data || [] });
       } catch { if (mounted) setData({ eq: [], st: [], tr: [] }); }
     })();
     return () => { mounted = false; };
