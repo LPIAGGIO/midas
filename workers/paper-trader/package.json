@@ -1,0 +1,13 @@
+{
+  "name": "paper-trader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Paper trading de la estrategia trend-following cripto (BTC/ETH) sobre Kraken, capital simulado USD 1000",
+  "main": "worker.js",
+  "scripts": { "start": "node worker.js" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "ws": "^8.20.1"
+  }
+}
