@@ -25006,6 +25006,9 @@ const PAPER_STRATS = [
   { id: "trend", label: "Tendencia 20/100", color: "#34d399", desc: "BTC+ETH" },
   { id: "trend_filt", label: "+ Filtro anti-whipsaw", color: "#60a5fa", desc: "BTC+ETH, no entra si la tendencia no viene subiendo" },
   { id: "trend_multi", label: "Multi-activo", color: "#a78bfa", desc: "BTC+ETH+SOL" },
+  { id: "trend_stop", label: "+ Stop-loss 12%", color: "#fb923c", desc: "BTC+ETH, corta a −12% de la entrada" },
+  { id: "trend_slow", label: "Cruce lento 50/200", color: "#fbbf24", desc: "BTC+ETH, opera muy poco" },
+  { id: "donchian", label: "Ruptura 50 días", color: "#f472b6", desc: "BTC+ETH, entra al romper máximos" },
 ];
 
 function PaperTradingModule() {
