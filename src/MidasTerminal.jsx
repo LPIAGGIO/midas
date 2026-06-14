@@ -25014,7 +25014,7 @@ function PaperTradingModule() {
     (async () => {
       try {
         const [eq, st, tr] = await Promise.all([
-          supabase.from("paper_equity").select("d,asset,price,position,sleeve_equity,bh_equity,is_live").order("d", { ascending: true }),
+          supabase.from("paper_equity").select("d,asset,price,position,sleeve_equity,bh_equity,is_live").order("d", { ascending: true }).limit(20000),
           supabase.from("paper_state").select("*"),
           supabase.from("paper_trades").select("*").order("d", { ascending: false }).limit(40),
         ]);
