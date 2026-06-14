@@ -964,31 +964,44 @@ function MidasApp() {
                 defaultTicker="AMZN"
                 quickPicks={["AMZN", "GOOGL", "MSTR", "NU", "GLOB"]}
               />
+            ) : active === "bandas-cambiarias" ? (
+              <BandasCambiariasModule key={active} />
             ) : active === "dolar-divisas" ? (
               <DolarDivisasModule key={active} />
             ) : active === "reservas" ? (
-              <MacroChartModule
+              <BcraSeriesModule
                 key={active}
-                title="Reservas Internacionales BCRA"
-                subtitle="Saldos mensuales"
-                seriesId="92.1_RID_0_0_32"
-                units="Millones de USD"
+                title="Reservas Internacionales"
+                subtitle="Reservas internacionales del BCRA (USD millones, diaria). Fuente: API Estadísticas Monetarias BCRA."
+                unit="usdmm"
+                series={[{ id: 1, label: "Reservas internacionales", color: "#60a5fa" }]}
+                note="Serie diaria oficial. La descomposición de la variación (por compra de divisas, organismos, etc.) está en Dólar y Divisas."
               />
             ) : active === "base-monetaria" ? (
-              <MacroChartModule
+              <BcraSeriesModule
                 key={active}
-                title="Base Monetaria"
-                subtitle="Saldo diario"
-                seriesId="331.2_SALDO_BASERIA__15"
-                units="Millones de $"
+                title="Base Monetaria y Agregados"
+                subtitle="Base monetaria y circulación monetaria (ARS millones, diaria), con la variación interanual del M2 privado."
+                unit="arsmm"
+                series={[
+                  { id: 15, label: "Base monetaria", color: "#60a5fa" },
+                  { id: 16, label: "Circulación monetaria", color: "#a78bfa" },
+                ]}
+                extraCards={[{ id: 25, label: "M2 privado (var. i.a.)", unit: "pct" }]}
+                note="La base monetaria es el dinero primario emitido por el BCRA; la circulación es la parte en billetes y monedas en poder del público y los bancos."
               />
             ) : active === "tasas" ? (
-              <MacroChartModule
+              <BcraSeriesModule
                 key={active}
-                title="Tasa de Política Monetaria"
-                subtitle="BCRA · TNA"
-                seriesId="89.2_TS_INTE_PM_0_D_16"
-                units="% TNA"
+                title="Tasas de Interés"
+                subtitle="Tasas de referencia del BCRA (% TNA, diaria): TAMAR (mayoristas), BADLAR (plazos fijos grandes) y plazo fijo minorista a 30 días."
+                unit="pct"
+                series={[
+                  { id: 44, label: "TAMAR", color: "#60a5fa" },
+                  { id: 7, label: "BADLAR", color: "#a78bfa" },
+                  { id: 12, label: "Plazo fijo 30d", color: "#34d399" },
+                ]}
+                note="TAMAR es la tasa de plazos fijos mayoristas (≥$1.000 M), referencia del mercado; BADLAR la de depósitos grandes de bancos privados; el plazo fijo 30d es la tasa minorista típica."
               />
             ) : active === "rem" ? (
               <RemTcModule key={active} />
@@ -24233,6 +24246,255 @@ function RemTcModule() {
  * Los PPP salen de las operaciones crudas (Σ qty×precio / Σ qty por lado).
  * Cauciones se excluyen (no son trading de un instrumento).
  */
+// ═══════════════════════════════════════════════════════════════════════
+// BcraMultiLine + BcraSeriesModule — módulo genérico para series del BCRA
+// (tasas, base monetaria, reservas). Reemplaza los MacroChartModule
+// mensuales de datos.gob.ar por series DIARIAS de la API BCRA v4.0, con
+// tarjetas de resumen + gráfico multi-serie con hover y selector de rango.
+// ═══════════════════════════════════════════════════════════════════════
+function BcraMultiLine({ lines, height = 190, fmtY }) {
+  const [hi, setHi] = useState(null);
+  const fechas = useMemo(() => {
+    const set = new Set();
+    lines.forEach((l) => l.data.forEach((d) => set.add(d.fecha)));
+    return Array.from(set).sort();
+  }, [lines]);
+  const maps = useMemo(() => lines.map((l) => { const m = {}; l.data.forEach((d) => { m[d.fecha] = d.valor; }); return m; }), [lines]);
+  if (!fechas.length) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: C.dim, fontSize: 12 }}>sin datos en el rango</div>;
+  const allVals = lines.flatMap((l) => l.data.map((d) => d.valor));
+  const minY = Math.min(...allVals), maxY = Math.max(...allVals), rng = (maxY - minY) || 1;
+  const W = 900, H = height, padL = 4, padR = 4, padT = 10, padB = 14;
+  const x = (i) => padL + (i / (fechas.length - 1 || 1)) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - minY) / rng) * (H - padT - padB);
+  const pathFor = (m) => { let started = false, d = ""; fechas.forEach((f, i) => { const v = m[f]; if (v == null) { started = false; return; } d += `${started ? "L" : "M"}${x(i)},${y(v)} `; started = true; }); return d.trim(); };
+  const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * W; setHi(Math.max(0, Math.min(fechas.length - 1, Math.round((px - padL) / (W - padL - padR) * (fechas.length - 1))))); };
+  const idx = hi != null ? hi : fechas.length - 1;
+  const curFecha = fechas[idx];
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, marginBottom: 4 }}>
+        <span style={{ color: C.dim }}>{curFecha}</span>
+        {lines.map((l, k) => { const v = maps[k][curFecha]; return <span key={l.label} style={{ color: l.color, fontWeight: 600 }}>{l.label} {v != null ? (fmtY ? fmtY(v) : v) : "—"}</span>; })}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height, display: "block", cursor: "crosshair" }} onMouseMove={onMove} onMouseLeave={() => setHi(null)}>
+        {lines.map((l, k) => <path key={k} d={pathFor(maps[k])} fill="none" stroke={l.color} strokeWidth="1.4" vectorEffect="non-scaling-stroke" />)}
+        {hi != null && <line x1={x(idx)} x2={x(idx)} y1={padT} y2={H - padB} stroke={C.muted} strokeWidth="0.5" vectorEffect="non-scaling-stroke" />}
+      </svg>
+    </div>
+  );
+}
+
+function bcraFmtUnit(u, n) {
+  if (n == null) return "—";
+  if (u === "pct") return `${Number(n).toFixed(2)}%`;
+  if (u === "usdmm") return `US$ ${Math.round(n).toLocaleString("es-AR")} M`;
+  if (u === "arsmm") return n >= 1e6 ? `$${(n / 1e6).toFixed(2)} bill` : `$${Math.round(n).toLocaleString("es-AR")} M`;
+  return String(n);
+}
+
+function BcraSeriesModule({ title, subtitle, note, series, unit, extraCards = [] }) {
+  const [range, setRange] = useState("1a");
+  const [data, setData] = useState({});
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let mounted = true;
+    const days = range === "90d" ? 90 : range === "1a" ? 365 : 1825;
+    const hasta = new Date().toISOString().slice(0, 10);
+    const desde = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    const all = [...series, ...extraCards];
+    (async () => {
+      setLoading(true);
+      const entries = await Promise.all(all.map(async (s) => {
+        try {
+          const r = await fetch(`/api/bcra?var=${s.id}&desde=${desde}&hasta=${hasta}`);
+          const j = r.ok ? await r.json() : null;
+          const det = j?.results?.[0]?.detalle || [];
+          return [s.id, det.map((x) => ({ fecha: x.fecha, valor: Number(x.valor) })).filter((x) => x.fecha && Number.isFinite(x.valor)).sort((a, b) => (a.fecha < b.fecha ? -1 : 1))];
+        } catch { return [s.id, []]; }
+      }));
+      if (!mounted) return;
+      setData(Object.fromEntries(entries)); setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [range]);
+  const last = (id) => { const a = data[id] || []; return a.length ? a[a.length - 1] : null; };
+  const lines = series.map((s) => ({ label: s.label, color: s.color, data: data[s.id] || [] }));
+  const Card = ({ label, value, sub, color }) => (
+    <div style={{ flex: "1 1 150px", minWidth: 140, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
+      <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>{title}</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 720 }}>{subtitle}</p>
+        </div>
+        <div className="flex items-center" style={{ gap: 6 }}>
+          {["90d", "1a", "max"].map((r) => (
+            <button key={r} onClick={() => setRange(r)}
+              style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${range === r ? C.accent : C.border}`, background: range === r ? "rgba(124,156,255,0.12)" : "transparent", color: range === r ? C.accent : C.muted, borderRadius: 4 }}>
+              {r === "90d" ? "90 días" : r === "1a" ? "1 año" : "5 años"}
+            </button>
+          ))}
+        </div>
+      </div>
+      {loading && !Object.keys(data).length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando series del BCRA…</div>
+      ) : (
+        <>
+          <div className="flex" style={{ gap: 10, flexWrap: "wrap" }}>
+            {series.map((s) => { const l = last(s.id); return <Card key={s.id} label={s.label} value={bcraFmtUnit(unit, l?.valor)} sub={l ? `al ${l.fecha}` : ""} color={s.color} />; })}
+            {extraCards.map((s) => { const l = last(s.id); return <Card key={s.id} label={s.label} value={bcraFmtUnit(s.unit, l?.valor)} sub={l ? `al ${l.fecha}` : ""} />; })}
+          </div>
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 14 }}>
+            <BcraMultiLine lines={lines} height={210} fmtY={(n) => bcraFmtUnit(unit, n)} />
+          </div>
+          {note && <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>{note}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Bandas Cambiarias — spot mayorista (A3500) vs banda BCRA piso/techo.
+// Reusa projectBand() (crawl 1%/mes hasta dic-25, luego inflación T-2 del
+// REM) y useRemFx() para el remIpc. Spot real de la API BCRA (var 5).
+// ═══════════════════════════════════════════════════════════════════════
+function BandChart({ pts, height = 240 }) {
+  const [hi, setHi] = useState(null);
+  if (!pts || pts.length < 2) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: C.dim, fontSize: 12 }}>sin datos</div>;
+  const W = 900, H = height, padL = 4, padR = 4, padT = 12, padB = 16;
+  const all = pts.flatMap((p) => [p.piso, p.techo, p.spot].filter((v) => v != null));
+  const minY = Math.min(...all) * 0.98, maxY = Math.max(...all) * 1.02, rng = (maxY - minY) || 1;
+  const x = (i) => padL + (i / (pts.length - 1)) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - minY) / rng) * (H - padT - padB);
+  const lastReal = pts.reduce((acc, p, i) => (p.spot != null ? i : acc), 0);
+  const topEdge = pts.map((p, i) => `${i ? "L" : "M"}${x(i)},${y(p.techo)}`).join(" ");
+  const botEdge = pts.slice().reverse().map((p, k) => `L${x(pts.length - 1 - k)},${y(p.piso)}`).join(" ");
+  const lineOf = (key) => { let started = false; let d = ""; pts.forEach((p, i) => { if (p[key] == null) { started = false; return; } d += `${started ? "L" : "M"}${x(i)},${y(p[key])} `; started = true; }); return d.trim(); };
+  const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * W; setHi(Math.max(0, Math.min(pts.length - 1, Math.round((px - padL) / (W - padL - padR) * (pts.length - 1))))); };
+  const cur = hi != null ? pts[hi] : pts[lastReal];
+  const f = (n) => (n == null ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 16, fontSize: 11, marginBottom: 4, flexWrap: "wrap" }}>
+        <span style={{ color: C.dim }}>{cur.fecha}</span>
+        <span style={{ color: "#f87171" }}>techo {f(cur.techo)}</span>
+        <span style={{ color: C.text, fontWeight: 600 }}>spot {f(cur.spot)}</span>
+        <span style={{ color: "#34d399" }}>piso {f(cur.piso)}</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height, display: "block", cursor: "crosshair" }} onMouseMove={onMove} onMouseLeave={() => setHi(null)}>
+        <path d={`${topEdge} ${botEdge} Z`} fill="rgba(124,156,255,0.07)" stroke="none" />
+        <path d={lineOf("techo")} fill="none" stroke="#f87171" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+        <path d={lineOf("piso")} fill="none" stroke="#34d399" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+        <path d={lineOf("spot")} fill="none" stroke={C.text} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+        {lastReal < pts.length - 1 && <line x1={x(lastReal)} x2={x(lastReal)} y1={padT} y2={H - padB} stroke={C.dim} strokeDasharray="3 3" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />}
+        {hi != null && <line x1={x(hi)} x2={x(hi)} y1={padT} y2={H - padB} stroke={C.muted} strokeWidth="0.5" vectorEffect="non-scaling-stroke" />}
+      </svg>
+    </div>
+  );
+}
+
+function BandasCambiariasModule() {
+  const { remIpc } = useRemFx();
+  const [spot, setSpot] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      try {
+        const hasta = new Date().toISOString().slice(0, 10);
+        const r = await fetch(`/api/bcra?var=5&desde=${BAND_START_DATE}&hasta=${hasta}`);
+        const j = r.ok ? await r.json() : null;
+        const det = j?.results?.[0]?.detalle || [];
+        const arr = det.map((x) => ({ fecha: x.fecha, valor: Number(x.valor) })).filter((x) => x.fecha && Number.isFinite(x.valor)).sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+        if (mounted) setSpot(arr);
+      } finally { if (mounted) setLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const pts = useMemo(() => {
+    const out = spot.map((s) => ({ fecha: s.fecha, spot: s.valor, piso: projectBand(s.fecha, "floor", remIpc), techo: projectBand(s.fecha, "ceiling", remIpc) }));
+    // proyección futura: 90 días, cada 15
+    const start = spot.length ? new Date(spot[spot.length - 1].fecha + "T00:00:00") : new Date();
+    for (let k = 1; k <= 6; k++) {
+      const dt = new Date(start.getTime() + k * 15 * 86400000);
+      const iso = dt.toISOString().slice(0, 10);
+      out.push({ fecha: iso, spot: null, piso: projectBand(iso, "floor", remIpc), techo: projectBand(iso, "ceiling", remIpc) });
+    }
+    return out;
+  }, [spot, remIpc]);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const sLast = spot.length ? spot[spot.length - 1].valor : null;
+  const piso = projectBand(today, "floor", remIpc);
+  const techo = projectBand(today, "ceiling", remIpc);
+  const mid = (piso + techo) / 2;
+  const pos = sLast != null ? Math.min(1, Math.max(0, (sLast - piso) / (techo - piso))) : null;
+  const fAr = (n) => (n == null ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
+  const Card = ({ label, value, sub, color }) => (
+    <div style={{ flex: "1 1 150px", minWidth: 140, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
+      <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Bandas Cambiarias</h1>
+        <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 720 }}>
+          El dólar mayorista (A3500) contra la banda de flotación del BCRA. Régimen vigente desde el 14/04/2025: piso $1.000 / techo $1.400, crawling ±1%/mes hasta dic-2025, luego ajuste por inflación. Verde = piso (el BCRA compra), rojo = techo (vende para defender).
+        </p>
+      </div>
+
+      {loading && !spot.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando banda…</div>
+      ) : (
+        <>
+          <div className="flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+            <Card label="Spot mayorista" value={fAr(sLast)} sub={spot.length ? `al ${spot[spot.length - 1].fecha}` : ""} />
+            <Card label="Piso de la banda" value={fAr(piso)} sub="hoy · zona de compra BCRA" color="#34d399" />
+            <Card label="Techo de la banda" value={fAr(techo)} sub="hoy · zona de venta BCRA" color="#f87171" />
+            <Card label="Margen hasta el techo" value={sLast != null ? `${((techo / sLast - 1) * 100).toFixed(1)}%` : "—"} sub={`mitad ${fAr(mid)}`} color={C.accent} />
+          </div>
+
+          {pos != null && (
+            <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                <span style={{ color: "#34d399" }}>{fAr(piso)}</span>
+                <span style={{ color: C.text }}>spot {fAr(sLast)} · {(pos * 100).toFixed(0)}% de la banda</span>
+                <span style={{ color: "#f87171" }}>{fAr(techo)}</span>
+              </div>
+              <div style={{ position: "relative", height: 12, borderRadius: 6, background: "linear-gradient(90deg, rgba(52,211,153,0.35), rgba(124,156,255,0.2), rgba(248,113,113,0.35))" }}>
+                <div style={{ position: "absolute", left: "50%", top: -2, bottom: -2, width: 1, background: C.dim }} />
+                <div style={{ position: "absolute", left: `calc(${(pos * 100).toFixed(1)}% - 1px)`, top: -3, bottom: -3, width: 3, background: C.text, borderRadius: 2 }} />
+              </div>
+            </div>
+          )}
+
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Histórico y proyección</h3>
+              <span style={{ fontSize: 10, color: C.dim }}>desde 14/04/2025 · línea punteada = proyección</span>
+            </div>
+            <BandChart pts={pts} height={250} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Dólar y Divisas (BCRA) — reservas, compras/ventas diarias de divisas
 // (intervención), y tipo de cambio oficial. Fuente: API Estadísticas
