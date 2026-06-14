@@ -24470,14 +24470,24 @@ function BandasCambiariasModule() {
 
           {pos != null && (
             <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginBottom: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                <span style={{ color: "#34d399" }}>{fAr(piso)}</span>
-                <span style={{ color: C.text }}>spot {fAr(sLast)} · {(pos * 100).toFixed(0)}% de la banda</span>
-                <span style={{ color: "#f87171" }}>{fAr(techo)}</span>
+              {/* etiqueta del spot flotando justo arriba de su marcador (se mueve con pos) */}
+              <div style={{ position: "relative", height: 34 }}>
+                <div style={{ position: "absolute", left: `${Math.min(92, Math.max(8, pos * 100)).toFixed(1)}%`, transform: "translateX(-50%)", textAlign: "center", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em" }}>spot hoy</div>
+                  <div style={{ fontSize: 13, color: C.text, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fAr(sLast)} · {(pos * 100).toFixed(0)}%</div>
+                </div>
               </div>
               <div style={{ position: "relative", height: 12, borderRadius: 6, background: "linear-gradient(90deg, rgba(52,211,153,0.35), rgba(124,156,255,0.2), rgba(248,113,113,0.35))" }}>
+                {/* tick de la mitad */}
                 <div style={{ position: "absolute", left: "50%", top: -2, bottom: -2, width: 1, background: C.dim }} />
-                <div style={{ position: "absolute", left: `calc(${(pos * 100).toFixed(1)}% - 1px)`, top: -3, bottom: -3, width: 3, background: C.text, borderRadius: 2 }} />
+                {/* marcador del spot */}
+                <div style={{ position: "absolute", left: `calc(${(pos * 100).toFixed(1)}% - 1.5px)`, top: -4, bottom: -4, width: 3, background: C.text, borderRadius: 2 }} />
+              </div>
+              {/* referencias fijas debajo: piso · mitad · techo */}
+              <div style={{ position: "relative", height: 16, marginTop: 6, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                <span style={{ position: "absolute", left: 0, color: "#34d399" }}>piso {fAr(piso)}</span>
+                <span style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", color: C.dim }}>mitad {fAr(mid)}</span>
+                <span style={{ position: "absolute", right: 0, color: "#f87171" }}>techo {fAr(techo)}</span>
               </div>
             </div>
           )}
