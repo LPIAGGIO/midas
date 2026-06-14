@@ -32,6 +32,8 @@ const STRATS = [
   { id: "trend_filt", label: "+ Filtro anti-whipsaw", type: "sma", fast: 20, slow: 100, filter: true, assets: ["BTC", "ETH"] },
   { id: "trend_multi", label: "Multi-activo (+SOL)", type: "sma", fast: 20, slow: 100, assets: ["BTC", "ETH", "SOL"] },
   { id: "trend_stop", label: "+ Stop-loss 12%", type: "sma", fast: 20, slow: 100, stop: 0.12, assets: ["BTC", "ETH"] },
+  { id: "trend_stop8", label: "+ Stop-loss 8%", type: "sma", fast: 20, slow: 100, stop: 0.08, assets: ["BTC", "ETH"] },
+  { id: "trend_stop18", label: "+ Stop-loss 18%", type: "sma", fast: 20, slow: 100, stop: 0.18, assets: ["BTC", "ETH"] },
   { id: "trend_slow", label: "Cruce lento 50/200", type: "sma", fast: 50, slow: 200, assets: ["BTC", "ETH"] },
   { id: "donchian", label: "Ruptura 50 días", type: "donchian", n: 50, assets: ["BTC", "ETH"] },
 ];
