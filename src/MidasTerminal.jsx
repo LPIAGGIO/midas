@@ -184,6 +184,7 @@ const NAV = [
     type: "group",
     children: [
       { id: "bandas-cambiarias", label: "Bandas Cambiarias", icon: ArrowUpDown },
+      { id: "dolar-divisas", label: "Dólar y Divisas", icon: Banknote },
       { id: "reservas", label: "Reservas", icon: Vault },
       { id: "rem", label: "REM", icon: BarChart3 },
       { id: "tasas", label: "Tasas", icon: Gauge },
@@ -963,6 +964,8 @@ function MidasApp() {
                 defaultTicker="AMZN"
                 quickPicks={["AMZN", "GOOGL", "MSTR", "NU", "GLOB"]}
               />
+            ) : active === "dolar-divisas" ? (
+              <DolarDivisasModule key={active} />
             ) : active === "reservas" ? (
               <MacroChartModule
                 key={active}
@@ -24230,6 +24233,178 @@ function RemTcModule() {
  * Los PPP salen de las operaciones crudas (Σ qty×precio / Σ qty por lado).
  * Cauciones se excluyen (no son trading de un instrumento).
  */
+// ═══════════════════════════════════════════════════════════════════════
+// Dólar y Divisas (BCRA) — reservas, compras/ventas diarias de divisas
+// (intervención), y tipo de cambio oficial. Fuente: API Estadísticas
+// Monetarias BCRA v4.0 vía proxy /api/bcra. Variables: 1 reservas (USD MM),
+// 78 variación de reservas por compra de divisas (compras/ventas diarias,
+// USD MM, signo = compra/venta = intervención), 5 TC mayorista, 4 minorista.
+// ═══════════════════════════════════════════════════════════════════════
+function BcraChart({ series, kind = "line", color = "#60a5fa", fmtY, height = 150 }) {
+  const [hi, setHi] = useState(null);
+  if (!series || series.length < 2) {
+    return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: C.dim, fontSize: 12 }}>sin datos en el rango</div>;
+  }
+  const W = 900, H = height, padL = 4, padR = 4, padT = 12, padB = 14;
+  const ys = series.map((d) => d.valor);
+  let minY = Math.min(...ys), maxY = Math.max(...ys);
+  if (kind === "bar") { minY = Math.min(0, minY); maxY = Math.max(0, maxY); }
+  const rng = (maxY - minY) || 1;
+  const x = (i) => padL + (i / (series.length - 1)) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - minY) / rng) * (H - padT - padB);
+  const zeroY = y(0);
+  const onMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width * W;
+    let i = Math.round((px - padL) / (W - padL - padR) * (series.length - 1));
+    setHi(Math.max(0, Math.min(series.length - 1, i)));
+  };
+  const cur = hi != null ? series[hi] : series[series.length - 1];
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+        <span>{cur.fecha}</span>
+        <span style={{ color: C.text, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtY ? fmtY(cur.valor) : cur.valor}</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height, display: "block", cursor: "crosshair" }} onMouseMove={onMove} onMouseLeave={() => setHi(null)}>
+        {kind === "bar" && <line x1={padL} x2={W - padR} y1={zeroY} y2={zeroY} stroke={C.border} strokeWidth="0.5" vectorEffect="non-scaling-stroke" />}
+        {kind === "line" ? (
+          <polyline fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" points={series.map((d, i) => `${x(i)},${y(d.valor)}`).join(" ")} />
+        ) : (
+          series.map((d, i) => (
+            <rect key={i} x={x(i) - 1.4} y={Math.min(zeroY, y(d.valor))} width="2.8" height={Math.max(0.5, Math.abs(y(d.valor) - zeroY))} fill={d.valor >= 0 ? "#34d399" : "#f87171"} />
+          ))
+        )}
+        {hi != null && <line x1={x(hi)} x2={x(hi)} y1={padT} y2={H - padB} stroke={C.muted} strokeWidth="0.5" vectorEffect="non-scaling-stroke" />}
+      </svg>
+    </div>
+  );
+}
+
+function DolarDivisasModule() {
+  const [range, setRange] = useState("1a");
+  const [d, setD] = useState({ res: [], compras: [], may: [], min: [] });
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const today = new Date();
+    const days = range === "90d" ? 90 : range === "1a" ? 365 : 1825;
+    const fmt = (dt) => dt.toISOString().slice(0, 10);
+    const desde = fmt(new Date(today.getTime() - days * 86400000));
+    const hasta = fmt(today);
+    const yearStart = `${today.getFullYear()}-01-01`;
+    const fetchVar = async (id, from) => {
+      try {
+        const r = await fetch(`/api/bcra?var=${id}&desde=${from}&hasta=${hasta}`);
+        if (!r.ok) return [];
+        const j = await r.json();
+        const det = j?.results?.[0]?.detalle || [];
+        return det.map((x) => ({ fecha: x.fecha, valor: Number(x.valor) }))
+          .filter((x) => x.fecha && Number.isFinite(x.valor))
+          .sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+      } catch { return []; }
+    };
+    (async () => {
+      setLoading(true); setErr(null);
+      try {
+        // compras: traigo desde inicio de año (para el acumulado) o el rango si es más largo.
+        const comprasFrom = days > 365 ? desde : (yearStart < desde ? yearStart : desde);
+        const [res, compras, may, min] = await Promise.all([
+          fetchVar(1, desde), fetchVar(78, comprasFrom), fetchVar(5, desde), fetchVar(4, desde),
+        ]);
+        if (!mounted) return;
+        if (!res.length && !compras.length && !may.length) setErr("No se pudo leer la API del BCRA.");
+        setD({ res, compras, may, min });
+      } finally { if (mounted) setLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, [range]);
+
+  const ym = new Date().toISOString().slice(0, 7);
+  const yr = new Date().toISOString().slice(0, 4);
+  const sum = (arr) => arr.reduce((s, x) => s + x.valor, 0);
+  const comprasMes = sum(d.compras.filter((x) => x.fecha.startsWith(ym)));
+  const comprasAnio = sum(d.compras.filter((x) => x.fecha.startsWith(yr)));
+  const comprasRange = range === "90d" ? d.compras.filter((x) => x.fecha >= new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)) : d.compras;
+  const last = (arr) => (arr.length ? arr[arr.length - 1] : null);
+  const fMM = (n) => (n == null ? "—" : `US$ ${Math.round(n).toLocaleString("es-AR")} M`);
+  const fSign = (n) => (n == null ? "—" : `${n >= 0 ? "+" : "−"}US$ ${Math.abs(Math.round(n)).toLocaleString("es-AR")} M`);
+  const fAr = (n) => (n == null ? "—" : `$${Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+
+  const Card = ({ label, value, sub, color }) => (
+    <div style={{ flex: "1 1 160px", minWidth: 150, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
+      <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+  const Section = ({ title, hint, children }) => (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 14 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>{title}</h3>
+        {hint && <span style={{ fontSize: 10, color: C.dim }}>{hint}</span>}
+      </div>
+      {children}
+    </div>
+  );
+
+  const resLast = last(d.res), mayLast = last(d.may), minLast = last(d.min);
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Dólar y Divisas</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 720 }}>
+            Reservas, compras y ventas diarias de divisas del BCRA (intervención cambiaria) y tipo de cambio oficial. Fuente: API Estadísticas Monetarias del BCRA.
+          </p>
+        </div>
+        <div className="flex items-center" style={{ gap: 6 }}>
+          {["90d", "1a", "max"].map((r) => (
+            <button key={r} onClick={() => setRange(r)}
+              style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${range === r ? C.accent : C.border}`, background: range === r ? "rgba(124,156,255,0.12)" : "transparent", color: range === r ? C.accent : C.muted, borderRadius: 4 }}>
+              {r === "90d" ? "90 días" : r === "1a" ? "1 año" : "5 años"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {err && <div style={{ padding: 12, border: `1px solid ${C.border}`, borderRadius: 6, color: "#f87171", fontSize: 12, marginBottom: 12 }}>{err}</div>}
+      {loading && !d.res.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando series del BCRA…</div>
+      ) : (
+        <>
+          <div className="flex" style={{ gap: 10, flexWrap: "wrap" }}>
+            <Card label="Reservas internacionales" value={fMM(resLast?.valor)} sub={resLast ? `al ${resLast.fecha}` : ""} color="#60a5fa" />
+            <Card label="Compras netas — mes" value={fSign(comprasMes)} sub={`${ym} · BCRA en el MULC`} color={comprasMes >= 0 ? "#34d399" : "#f87171"} />
+            <Card label="Compras netas — año" value={fSign(comprasAnio)} sub={`acumulado ${yr}`} color={comprasAnio >= 0 ? "#34d399" : "#f87171"} />
+            <Card label="Dólar mayorista" value={fAr(mayLast?.valor)} sub={mayLast ? `al ${mayLast.fecha} · A3500` : ""} />
+            <Card label="Dólar minorista" value={fAr(minLast?.valor)} sub={minLast ? `prom. vendedor` : ""} />
+          </div>
+
+          <Section title="Evolución de reservas internacionales" hint="USD millones · diaria">
+            <BcraChart series={d.res} kind="line" color="#60a5fa" height={170} fmtY={fMM} />
+          </Section>
+
+          <Section title="Compras y ventas diarias de divisas (intervención)" hint="USD millones · verde compra / rojo venta">
+            <BcraChart series={comprasRange} kind="bar" height={150} fmtY={fSign} />
+          </Section>
+
+          <Section title="Tipo de cambio oficial" hint="mayorista A3500 · $ por USD">
+            <BcraChart series={d.may} kind="line" color="#a78bfa" height={150} fmtY={fAr} />
+          </Section>
+
+          <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
+            Las compras/ventas son la variación de reservas por operaciones de divisas del BCRA (variable 78): positivo = el BCRA compró (acumula), negativo = vendió (defendió). La intervención fina del MULC se publica con rezago en el balance cambiario; esta serie es el proxy oficial diario.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Ejecución Inteligente — CEDEAR (BCBA) vs papel USA directo (NYSE/NASDAQ).
 //
