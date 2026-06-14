@@ -24252,6 +24252,31 @@ function RemTcModule() {
 // mensuales de datos.gob.ar por series DIARIAS de la API BCRA v4.0, con
 // tarjetas de resumen + gráfico multi-serie con hover y selector de rango.
 // ═══════════════════════════════════════════════════════════════════════
+// Eje X de fechas para los gráficos BCRA (SVG con preserveAspectRatio=none:
+// las etiquetas van como HTML debajo, alineadas por % al índice). Formato
+// mes-año en rangos largos (>200 días), día/mes en cortos.
+function BcraXAxis({ fechas }) {
+  if (!fechas || fechas.length < 2) return null;
+  const n = fechas.length;
+  const spanDays = (new Date(fechas[n - 1]) - new Date(fechas[0])) / 86400000;
+  const longRange = spanDays > 200;
+  const M = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const fmt = (iso) => {
+    if (!iso || iso.length < 10) return "";
+    const yy = iso.slice(2, 4), mm = +iso.slice(5, 7), dd = iso.slice(8, 10);
+    return longRange ? `${M[mm - 1]} '${yy}` : `${dd}/${String(mm).padStart(2, "0")}`;
+  };
+  const ticks = 6;
+  const idxs = [...new Set(Array.from({ length: ticks }, (_, k) => Math.round((k / (ticks - 1)) * (n - 1))))];
+  return (
+    <div style={{ position: "relative", height: 14, marginTop: 4 }}>
+      {idxs.map((i) => (
+        <span key={i} style={{ position: "absolute", left: `${(i / (n - 1)) * 100}%`, transform: i === 0 ? "none" : i === n - 1 ? "translateX(-100%)" : "translateX(-50%)", fontSize: 9.5, color: C.dim, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmt(fechas[i])}</span>
+      ))}
+    </div>
+  );
+}
+
 function BcraMultiLine({ lines, height = 190, fmtY }) {
   const [hi, setHi] = useState(null);
   const fechas = useMemo(() => {
@@ -24280,6 +24305,7 @@ function BcraMultiLine({ lines, height = 190, fmtY }) {
         {lines.map((l, k) => <path key={k} d={pathFor(maps[k])} fill="none" stroke={l.color} strokeWidth="1.4" vectorEffect="non-scaling-stroke" />)}
         {hi != null && <line x1={x(idx)} x2={x(idx)} y1={padT} y2={H - padB} stroke={C.muted} strokeWidth="0.5" vectorEffect="non-scaling-stroke" />}
       </svg>
+      <BcraXAxis fechas={fechas} />
     </div>
   );
 }
@@ -24396,6 +24422,7 @@ function BandChart({ pts, height = 240 }) {
         {lastReal < pts.length - 1 && <line x1={x(lastReal)} x2={x(lastReal)} y1={padT} y2={H - padB} stroke={C.dim} strokeDasharray="3 3" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />}
         {hi != null && <line x1={x(hi)} x2={x(hi)} y1={padT} y2={H - padB} stroke={C.muted} strokeWidth="0.5" vectorEffect="non-scaling-stroke" />}
       </svg>
+      <BcraXAxis fechas={pts.map((p) => p.fecha)} />
     </div>
   );
 }
@@ -24549,6 +24576,7 @@ function BcraChart({ series, kind = "line", color = "#60a5fa", fmtY, height = 15
         )}
         {hi != null && <line x1={x(hi)} x2={x(hi)} y1={padT} y2={H - padB} stroke={C.muted} strokeWidth="0.5" vectorEffect="non-scaling-stroke" />}
       </svg>
+      <BcraXAxis fechas={series.map((s) => s.fecha)} />
     </div>
   );
 }
