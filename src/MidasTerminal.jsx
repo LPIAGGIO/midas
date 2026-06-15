@@ -213,6 +213,7 @@ const NAV = [
     type: "group",
     children: [
       { id: "compara-dolar", label: "Cotizaciones Dólar", icon: DollarSign },
+      { id: "semaforo-merval", label: "Semáforo del Merval", icon: Gauge },
       { id: "carry-trade", label: "Carry Trade", icon: ArrowRightLeft },
       { id: "futuros-caucion", label: "Futuros vs Caución", icon: Scale },
       { id: "sintetico-dlr", label: "Sintético DLR", icon: Layers },
@@ -1018,6 +1019,8 @@ function MidasApp() {
               <PaperCedearsModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
+            ) : active === "semaforo-merval" ? (
+              <SemaforoMervalModule key={active} />
             ) : active === "desarbitrajes" ? (
               <DesarbitrajesModule key={active} />
             ) : active === "flujo-posiciones" ? (
@@ -25190,6 +25193,114 @@ function PaperTradingModule() {
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
         El histórico es retrospectivo (misma regla sobre precios reales de Kraken); desde el arranque en vivo el worker actualiza 1×/día. Nada opera plata real: cuando una variante nos convenza por su comportamiento —especialmente en las rachas malas— conectamos la ejecución con los US$ 1.000.
       </p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Semáforo del Merval — señal macro de timing para acciones argentinas.
+// Combina riesgo país (nivel + tendencia), brecha cambiaria e inflación en
+// un veredicto risk-on / cautela / risk-off. El riesgo país manda: el rally
+// argentino arranca cuando comprime y se derrumba cuando se dispara.
+// ═══════════════════════════════════════════════════════════════════════
+function SemaforoMervalModule() {
+  const macro = useMacroIndicators();
+  const [extra, setExtra] = useState(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [dol, rpSerie] = await Promise.all([
+          fetch("/api/dolares").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+          fetch("https://api.argentinadatos.com/v1/finanzas/indices/riesgo-pais").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        ]);
+        let brecha = null, ccl = null, oficial = null;
+        if (Array.isArray(dol)) {
+          const find = (c) => { const x = dol.find((y) => (y.casa || "").toLowerCase() === c); return x ? Number(x.venta) : null; };
+          ccl = find("contadoconliqui"); oficial = find("mayorista") || find("oficial");
+          if (ccl && oficial) brecha = (ccl / oficial - 1) * 100;
+        }
+        let rpTrend = null;
+        if (Array.isArray(rpSerie) && rpSerie.length > 21) {
+          const lv = Number(rpSerie[rpSerie.length - 1].valor), pv = Number(rpSerie[rpSerie.length - 21].valor);
+          if (lv && pv) rpTrend = (lv / pv - 1) * 100;
+        }
+        if (mounted) setExtra({ brecha, ccl, oficial, rpTrend });
+      } catch { if (mounted) setExtra({}); }
+    })();
+    return () => { mounted = false; };
+  }, [tick]);
+
+  const d = macro?.data || {};
+  const rp = d.riesgoPais, infl = d.inflacionMensual;
+  const brecha = extra?.brecha, rpTrend = extra?.rpTrend;
+
+  // Señales: +1 favorable, 0 neutro, −1 adverso.
+  let rpSig = rp == null ? 0 : rp < 700 ? 1 : rp > 1100 ? -1 : 0;
+  if (rpTrend != null) { if (rpTrend < -5) rpSig = Math.min(1, rpSig + 1); if (rpTrend > 8) rpSig = Math.max(-1, rpSig - 1); }
+  const brSig = brecha == null ? 0 : brecha < 15 ? 1 : brecha > 40 ? -1 : 0;
+  const inflSig = infl == null ? 0 : infl < 3 ? 1 : infl > 6 ? -1 : 0;
+  const score = 2 * rpSig + 1.5 * brSig + inflSig;
+  const verdict = score >= 1.5 ? "on" : score <= -1.5 ? "off" : "neutral";
+  const V = {
+    on: { c: "#34d399", t: "RISK-ON", s: "Viento de cola para acciones argentinas" },
+    neutral: { c: "#fbbf24", t: "CAUTELA", s: "Señales mixtas — selectivo, sin sobreexponerse" },
+    off: { c: "#f87171", t: "RISK-OFF", s: "Momento de cuidarse — el riesgo manda sobre el precio" },
+  }[verdict];
+
+  const loading = macro?.loading && !macro?.data;
+  const sigColor = (s) => (s > 0 ? "#34d399" : s < 0 ? "#f87171" : "#fbbf24");
+  const sigTxt = (s) => (s > 0 ? "favorable" : s < 0 ? "adverso" : "neutro");
+  const fmtN = (n, dec = 0) => (n == null ? "—" : Number(n).toLocaleString("es-AR", { minimumFractionDigits: dec, maximumFractionDigits: dec }));
+
+  const Comp = ({ label, value, sub, sig }) => (
+    <div style={{ flex: "1 1 200px", minWidth: 180, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", borderLeft: `3px solid ${sigColor(sig)}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ fontSize: 11, color: C.dim }}>{label}</span>
+        <span style={{ fontSize: 9.5, color: sigColor(sig), fontWeight: 700, textTransform: "uppercase" }}>{sigTxt(sig)}</span>
+      </div>
+      <div style={{ fontSize: 19, fontWeight: 600, color: C.text, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1000, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Semáforo del Merval</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 720 }}>
+            Señal de timing para acciones argentinas. El mercado entero sube cuando el riesgo país comprime y el dólar se calma, y se derrumba cuando pasa lo contrario — más que cualquier gráfico de la acción. Esto combina esos drivers macro en un solo veredicto.
+          </p>
+        </div>
+        <button onClick={() => setTick((t) => t + 1)} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>Actualizar</button>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando indicadores macro…</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 18, border: `1px solid ${V.c}`, borderRadius: 10, padding: "18px 22px", background: `${V.c}10`, marginBottom: 16 }}>
+            <div style={{ width: 54, height: 54, borderRadius: "50%", background: V.c, flex: "0 0 auto", boxShadow: `0 0 18px ${V.c}55` }} />
+            <div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: V.c, letterSpacing: "0.02em" }}>{V.t}</div>
+              <div style={{ fontSize: 13, color: C.text, marginTop: 2 }}>{V.s}</div>
+            </div>
+          </div>
+
+          <div className="flex" style={{ gap: 10, flexWrap: "wrap" }}>
+            <Comp label="Riesgo país" sig={rpSig} value={`${fmtN(rp)} pb`} sub={rpTrend != null ? `${rpTrend >= 0 ? "▲" : "▼"} ${Math.abs(rpTrend).toFixed(1)}% en ~1 mes` : "el driver #1"} />
+            <Comp label="Brecha cambiaria (CCL/oficial)" sig={brSig} value={brecha != null ? `${brecha.toFixed(1)}%` : "—"} sub={extra?.ccl ? `CCL $${fmtN(extra.ccl)} · mayorista $${fmtN(extra.oficial)}` : "estrés del dólar"} />
+            <Comp label="Inflación mensual" sig={inflSig} value={infl != null ? `${infl.toFixed(1)}%` : "—"} sub="bajando = alivio" />
+          </div>
+
+          <p style={{ fontSize: 11.5, color: C.dim, margin: "18px 2px 0", lineHeight: 1.6, maxWidth: 780 }}>
+            <strong style={{ color: C.muted }}>Cómo leerlo:</strong> es una guía de <strong>cuándo</strong> el contexto acompaña para estar en acciones AR, no de <strong>qué</strong> acción comprar. <span style={{ color: "#34d399" }}>Verde</span> = el macro empuja a favor (probamos que en acciones AR el timing técnico no sirve, pero el timing macro sí tiene sentido). <span style={{ color: "#fbbf24" }}>Amarillo</span> = mixto, ser selectivo. <span style={{ color: "#f87171" }}>Rojo</span> = el riesgo manda, cuidarse. El riesgo país pesa más que el resto porque es el que históricamente prende y apaga el rally argentino.
+          </p>
+        </>
+      )}
     </div>
   );
 }
