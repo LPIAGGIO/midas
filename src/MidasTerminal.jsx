@@ -232,6 +232,7 @@ const NAV = [
       { id: "calc-precio-bonos", label: "Precio de Bonos", icon: Tag },
       { id: "calc-mep-ccl", label: "MEP / CCL", icon: Repeat },
       { id: "calc-comisiones", label: "Comisiones", icon: BadgePercent },
+      { id: "calc-kelly", label: "Criterio de Kelly", icon: Percent },
     ],
   },
   {
@@ -1015,6 +1016,8 @@ function MidasApp() {
               <PaperTradingModule key={active} />
             ) : active === "paper-cedears" ? (
               <PaperCedearsModule key={active} />
+            ) : active === "calc-kelly" ? (
+              <KellyCalcModule key={active} />
             ) : active === "desarbitrajes" ? (
               <DesarbitrajesModule key={active} />
             ) : active === "flujo-posiciones" ? (
@@ -25186,6 +25189,83 @@ function PaperTradingModule() {
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
         El histórico es retrospectivo (misma regla sobre precios reales de Kraken); desde el arranque en vivo el worker actualiza 1×/día. Nada opera plata real: cuando una variante nos convenza por su comportamiento —especialmente en las rachas malas— conectamos la ejecución con los US$ 1.000.
+      </p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Calculadora — Criterio de Kelly. Fracción óptima del capital a arriesgar
+// para maximizar el crecimiento geométrico, dado el win rate y el tamaño
+// medio de aciertos/errores. f* = W/l − (1−W)/g  (g,l fraccionales).
+// ═══════════════════════════════════════════════════════════════════════
+function KellyCalcModule() {
+  const [win, setWin] = useState(50);     // % de operaciones ganadoras
+  const [gain, setGain] = useState(20);   // ganancia media por acierto (%)
+  const [loss, setLoss] = useState(10);   // pérdida media por error (%)
+  const [capital, setCapital] = useState(10000);
+
+  const W = Math.min(1, Math.max(0, win / 100));
+  const g = gain / 100, l = loss / 100;
+  const valid = g > 0 && l > 0;
+  const f = valid ? W / l - (1 - W) / g : null;        // Kelly completo (fracción)
+  const edge = valid ? W * g - (1 - W) * l : null;      // retorno esperado por unidad
+  const R = valid ? g / l : null;                       // ratio ganancia/pérdida
+  const fPos = f != null ? Math.max(0, f) : 0;
+  const half = fPos / 2;
+  const fmtPct = (x) => `${(x * 100).toFixed(1)}%`;
+  const fmtUsd = (x) => `$${Math.round(x).toLocaleString("es-AR")}`;
+
+  const Field = ({ label, value, setValue, suffix, step = 1, hint }) => (
+    <div style={{ flex: "1 1 150px", minWidth: 130 }}>
+      <label style={{ display: "block", fontSize: 11, color: C.dim, marginBottom: 5 }}>{label}</label>
+      <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.border}`, borderRadius: 6, overflow: "hidden" }}>
+        <input type="number" value={value} step={step} onChange={(e) => setValue(e.target.value === "" ? 0 : Number(e.target.value))}
+          style={{ flex: 1, padding: "8px 10px", fontSize: 14, background: "transparent", color: C.text, border: "none", outline: "none", width: "100%", fontVariantNumeric: "tabular-nums" }} />
+        {suffix && <span style={{ padding: "0 10px", fontSize: 12, color: C.dim }}>{suffix}</span>}
+      </div>
+      {hint && <div style={{ fontSize: 9.5, color: C.dim, marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
+  const Res = ({ label, value, sub, color, big }) => (
+    <div style={{ flex: big ? "1 1 220px" : "1 1 160px", minWidth: big ? 200 : 150, border: `1px solid ${big ? C.accent : C.border}`, borderRadius: 8, padding: "14px 16px", background: big ? "rgba(124,156,255,0.05)" : "transparent" }}>
+      <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: big ? 26 : 20, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 920, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Criterio de Kelly</h1>
+      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 18px 0", maxWidth: 720 }}>
+        Cuánto del capital conviene arriesgar en cada operación para que el capital crezca lo más rápido posible a largo plazo, sin riesgo de fundirse. Cargá tus números (de un backtest o tu historial real) y te dice la fracción óptima.
+      </p>
+
+      <div className="flex" style={{ gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+        <Field label="Operaciones ganadoras" value={win} setValue={setWin} suffix="%" hint="de cada 100, cuántas ganás" />
+        <Field label="Ganancia media (acierto)" value={gain} setValue={setGain} suffix="%" hint="cuánto ganás cuando acertás" />
+        <Field label="Pérdida media (error)" value={loss} setValue={setLoss} suffix="%" hint="cuánto perdés cuando errás" />
+        <Field label="Capital" value={capital} setValue={setCapital} suffix="$" step={1000} />
+      </div>
+
+      {!valid ? (
+        <div style={{ padding: 16, border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 13 }}>Cargá ganancia y pérdida mayores a cero.</div>
+      ) : f <= 0 ? (
+        <div style={{ padding: 16, border: `1px solid #f87171`, borderRadius: 8, color: "#f87171", fontSize: 13 }}>
+          <strong>Sin ventaja.</strong> Con estos números la estrategia no tiene edge (Kelly da {fmtPct(f)}). No conviene arriesgar capital: a la larga perdés. Necesitás más aciertos, ganancias más grandes o pérdidas más chicas.
+        </div>
+      ) : (
+        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
+          <Res big label="Medio Kelly (recomendado)" value={fmtPct(half)} sub={`${fmtUsd(Math.min(1, half) * capital)} de ${fmtUsd(capital)}`} color="#34d399" />
+          <Res label="Kelly completo" value={fmtPct(fPos)} sub={fPos > 1 ? "más de 100% = con apalancamiento" : "máximo teórico (volátil)"} color={C.text} />
+          <Res label="Ganancia esperada por operación" value={fmtPct(edge)} sub="sobre lo arriesgado" color={edge >= 0 ? "#34d399" : "#f87171"} />
+          <Res label="Relación ganancia / pérdida" value={`${R.toFixed(2)} : 1`} sub="cuánto ganás por cada $1 que arriesgás" color={C.muted} />
+        </div>
+      )}
+
+      <p style={{ fontSize: 11.5, color: C.dim, margin: "18px 2px 0", lineHeight: 1.6, maxWidth: 760 }}>
+        <strong style={{ color: C.muted }}>Cómo usarlo:</strong> el <strong>Kelly completo</strong> es el máximo matemático, pero es muy volátil y castiga fuerte cualquier error en tus números — casi nadie lo usa entero. En la práctica se opera <strong>medio Kelly o menos</strong>: casi todo el crecimiento, con la mitad de los sustos. Si Kelly da más de 100%, significa que el edge es tan bueno que sugeriría apalancarse — ahí conviene capear a lo que tengas y no estirarse. Y si da negativo, el mensaje es claro: no hay con qué, no arriesgues.
       </p>
     </div>
   );
