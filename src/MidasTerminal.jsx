@@ -25099,6 +25099,9 @@ function PaperTradingModule() {
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ border: "1px solid rgba(251,191,36,0.35)", background: "rgba(251,191,36,0.07)", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 11.5, color: "#fbbf24", lineHeight: 1.55 }}>
+        <strong>Simulación (paper trading) — no es recomendación de inversión.</strong> Capital ficticio de US$ 1.000, sin plata real. Son estrategias en validación, no señales para operar; los resultados pasados no garantizan rendimientos futuros. Decidí tus inversiones por tu cuenta y bajo tu responsabilidad.
+      </div>
       <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Paper Cripto · Estrategias en paralelo</h1>
@@ -25552,6 +25555,9 @@ function PaperCedearsModule() {
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ border: "1px solid rgba(251,191,36,0.35)", background: "rgba(251,191,36,0.07)", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 11.5, color: "#fbbf24", lineHeight: 1.55 }}>
+        <strong>Simulación (paper trading) — no es recomendación de inversión.</strong> Capital ficticio de US$ 1.000, sin plata real. Es una estrategia en validación, no señales para operar; los resultados pasados no garantizan rendimientos futuros. Decidí tus inversiones por tu cuenta y bajo tu responsabilidad.
+      </div>
       <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Paper CEDEARs · Momentum</h1>
