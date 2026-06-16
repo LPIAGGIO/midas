@@ -234,6 +234,7 @@ const NAV = [
       { id: "calc-mep-ccl", label: "MEP / CCL", icon: Repeat },
       { id: "calc-comisiones", label: "Comisiones", icon: BadgePercent },
       { id: "calc-kelly", label: "Criterio de Kelly", icon: Percent },
+      { id: "calc-montecarlo", label: "Monte Carlo", icon: Activity },
     ],
   },
   {
@@ -1019,6 +1020,8 @@ function MidasApp() {
               <PaperCedearsModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
+            ) : active === "calc-montecarlo" ? (
+              <MonteCarloModule key={active} />
             ) : active === "semaforo-merval" ? (
               <SemaforoMervalModule key={active} />
             ) : active === "desarbitrajes" ? (
@@ -25192,6 +25195,121 @@ function PaperTradingModule() {
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
         El histórico es retrospectivo (misma regla sobre precios reales de Kraken); desde el arranque en vivo el worker actualiza 1×/día. Nada opera plata real: cuando una variante nos convenza por su comportamiento —especialmente en las rachas malas— conectamos la ejecución con los US$ 1.000.
+      </p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Calculadora — Monte Carlo. Simula miles de secuencias de operaciones con
+// el perfil de la estrategia (win rate, ganancia/pérdida, sizing) y muestra
+// la DISTRIBUCIÓN de resultados: percentiles, drawdown, prob de pérdida y
+// de ruina. El complemento de Kelly: Kelly da el sizing, esto la cola de riesgo.
+// ═══════════════════════════════════════════════════════════════════════
+function MonteCarloModule() {
+  const [win, setWin] = useState(50);
+  const [gain, setGain] = useState(20);
+  const [loss, setLoss] = useState(10);
+  const [trades, setTrades] = useState(100);
+  const [frac, setFrac] = useState(20);
+  const [capital, setCapital] = useState(1000);
+
+  const sim = useMemo(() => {
+    const W = Math.min(1, Math.max(0, win / 100)), g = gain / 100, l = loss / 100, f = Math.max(0, frac / 100);
+    const N = 5000, T = Math.max(1, Math.min(1000, Math.round(trades)));
+    const finals = [], dds = [];
+    for (let s = 0; s < N; s++) {
+      let eq = 1, peak = 1, dd = 0;
+      for (let t = 0; t < T; t++) {
+        eq *= Math.random() < W ? (1 + f * g) : (1 - f * l);
+        if (eq < 0.001) { eq = 0.001; break; }
+        if (eq > peak) peak = eq;
+        const d = eq / peak - 1; if (d < dd) dd = d;
+      }
+      finals.push(eq); dds.push(dd);
+    }
+    finals.sort((a, b) => a - b); dds.sort((a, b) => a - b);
+    const pc = (arr, p) => arr[Math.floor(p / 100 * arr.length)];
+    return {
+      finals,
+      p5: pc(finals, 5), p25: pc(finals, 25), p50: pc(finals, 50), p75: pc(finals, 75), p95: pc(finals, 95),
+      probLoss: finals.filter((x) => x < 1).length / N * 100,
+      probRuin: finals.filter((x) => x < 0.5).length / N * 100,
+      ddMed: pc(dds, 50) * 100, ddBad: pc(dds, 5) * 100,
+    };
+  }, [win, gain, loss, trades, frac]);
+
+  const kellyF = (() => { const W = win / 100, g = gain / 100, l = loss / 100; if (g <= 0 || l <= 0) return null; return (W / l - (1 - W) / g); })();
+  const fUsd = (x) => `US$ ${Math.round(x * capital).toLocaleString("es-AR")}`;
+  const fMul = (x) => `${x.toFixed(2)}×`;
+  const Field = ({ label, value, setValue, suffix, step = 1, hint }) => (
+    <div style={{ flex: "1 1 130px", minWidth: 120 }}>
+      <label style={{ display: "block", fontSize: 11, color: C.dim, marginBottom: 5 }}>{label}</label>
+      <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.border}`, borderRadius: 6 }}>
+        <input type="number" value={value} step={step} onChange={(e) => setValue(e.target.value === "" ? 0 : Number(e.target.value))}
+          style={{ flex: 1, padding: "8px 10px", fontSize: 14, background: "transparent", color: C.text, border: "none", outline: "none", width: "100%", fontVariantNumeric: "tabular-nums" }} />
+        {suffix && <span style={{ padding: "0 10px", fontSize: 12, color: C.dim }}>{suffix}</span>}
+      </div>
+      {hint && <div style={{ fontSize: 9.5, color: C.dim, marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
+  const Res = ({ label, value, color }) => (
+    <div style={{ flex: "1 1 130px", minWidth: 120, border: `1px solid ${C.border}`, borderRadius: 8, padding: "11px 13px" }}>
+      <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 5 }}>{label}</div>
+      <div style={{ fontSize: 17, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+    </div>
+  );
+
+  // histograma: bins del retorno final (× capital), recortado a [0, p95×1.2]
+  const hist = (() => {
+    const top = Math.max(sim.p95 * 1.2, 1.5), BINS = 24;
+    const counts = new Array(BINS).fill(0);
+    for (const v of sim.finals) { const b = Math.min(BINS - 1, Math.floor(v / top * BINS)); if (b >= 0) counts[b]++; }
+    const max = Math.max(...counts, 1);
+    return { counts, max, top, oneBin: Math.round(1 / top * BINS) };
+  })();
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 960, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulación Monte Carlo</h1>
+      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 18px 0", maxWidth: 720 }}>
+        Un backtest da un solo resultado; este simula <strong>5.000 caminos posibles</strong> con el perfil de tu estrategia y te muestra el abanico real: cuánto en un año típico, cuánto en uno malo, y qué probabilidad de perder o fundirte. Cargá los números (del paper o de tu historial).
+      </p>
+
+      <div className="flex" style={{ gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <Field label="Operaciones ganadoras" value={win} setValue={setWin} suffix="%" />
+        <Field label="Ganancia media" value={gain} setValue={setGain} suffix="%" hint="por acierto" />
+        <Field label="Pérdida media" value={loss} setValue={setLoss} suffix="%" hint="por error" />
+        <Field label="Cantidad de operaciones" value={trades} setValue={setTrades} hint="horizonte" />
+        <Field label="% del capital por operación" value={frac} setValue={setFrac} suffix="%" hint={kellyF != null ? `Kelly completo: ${(kellyF * 100).toFixed(0)}%` : ""} />
+        <Field label="Capital" value={capital} setValue={setCapital} suffix="$" step={1000} />
+      </div>
+
+      <div className="flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <Res label="Peor 5% (p5)" value={fUsd(sim.p5)} color={sim.p5 < 1 ? "#f87171" : C.text} />
+        <Res label="Mediana (típico)" value={fUsd(sim.p50)} color={sim.p50 >= 1 ? "#34d399" : "#f87171"} />
+        <Res label="Mejor 5% (p95)" value={fUsd(sim.p95)} color="#34d399" />
+        <Res label="Prob. de perder" value={`${sim.probLoss.toFixed(0)}%`} color={sim.probLoss > 50 ? "#f87171" : "#fbbf24"} />
+        <Res label="Prob. de fundirse (−50%)" value={`${sim.probRuin.toFixed(0)}%`} color={sim.probRuin > 10 ? "#f87171" : "#fbbf24"} />
+        <Res label="Peor caída típica" value={`${sim.ddMed.toFixed(0)}%`} color="#fbbf24" />
+      </div>
+
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 10 }}>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Distribución del capital final (de {fUsd(1)}) · cada barra = cuántos de los 5.000 caminos terminaron ahí</div>
+        <svg viewBox={`0 0 ${hist.counts.length * 16} 120`} preserveAspectRatio="none" style={{ width: "100%", height: 120, display: "block" }}>
+          {hist.counts.map((c, i) => (
+            <rect key={i} x={i * 16 + 1} y={120 - (c / hist.max) * 110} width={14} height={(c / hist.max) * 110}
+              fill={i < hist.oneBin ? "#f87171" : "#34d399"} opacity="0.85" />
+          ))}
+          <line x1={hist.oneBin * 16} x2={hist.oneBin * 16} y1="0" y2="120" stroke={C.dim} strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.dim, marginTop: 4 }}>
+          <span>$0</span><span style={{ color: C.muted }}>← rojo: terminás perdiendo · capital inicial · verde: ganás →</span><span>{fUsd(hist.top)}</span>
+        </div>
+      </div>
+
+      <p style={{ fontSize: 11.5, color: C.dim, margin: "16px 2px 0", lineHeight: 1.6, maxWidth: 760 }}>
+        <strong style={{ color: C.muted }}>Cómo leerlo:</strong> la <strong>mediana</strong> es el año típico (no el del backtest, que suele ser uno bueno). Mirá la <strong>prob. de perder</strong> y la <strong>de fundirte</strong> antes que el mejor caso. Subí el <strong>% del capital por operación</strong> y vas a ver cómo se estira todo: más arriba posible, pero también más prob. de ruina — por eso Kelly recomienda usar una fracción, no todo. Ojo: esto asume que el futuro se parece al perfil que cargaste; no anticipa un cambio de régimen.
       </p>
     </div>
   );
