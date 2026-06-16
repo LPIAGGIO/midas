@@ -9267,9 +9267,11 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
     let pnlInValuation = 0;
     let prevValueInValuation = 0;
     let hasAny = false;
+    const flatTk = netFlatNonFutureTickers(positions);
 
     for (const p of positions) {
       if (p.instrument_type === "future") continue; // futuros: por neto, abajo
+      if (p.ticker && flatTk.has(p.ticker.trim().toUpperCase())) continue; // round-trip plano: solo realizado
       const d = computeDailyPnL(p, bondPrices, futurePrices, stockPrices, futureAdjLookup, fciPrices);
       if (!d || d.pnl == null || !Number.isFinite(d.pnl)) continue;
 
@@ -10854,6 +10856,28 @@ function computeDailyPnL(p, bondPrices, futurePrices, stockPrices, futureAdjLook
   // Otros tipos (caucion, option, etc.): no tienen P&L diario por ahora.
   return null;
 }
+
+/**
+ * Tickers no-futuros que quedaron PLANOS (posición neta = 0): compra y venta
+ * se cancelan. Su P&L del día es SOLO el realizado (que se suma aparte); el
+ * marcado a mercado lote-por-lote NO aplica —no hay posición abierta— y para
+ * un round-trip intradía marca contra un precio que ya no corresponde. Caso
+ * SPCX (16/06): compra y venta el mismo día generaban un MTM fantasma de
+ * -4,2M porque las compras usaban su entrada y las ventas el cierre anterior.
+ */
+function netFlatNonFutureTickers(positions) {
+  const net = new Map();
+  for (const p of positions || []) {
+    if (!p || p.instrument_type === "future" || !p.ticker) continue;
+    const t = p.ticker.trim().toUpperCase();
+    const sign = p.operation_type === "sell" ? -1 : 1;
+    net.set(t, (net.get(t) || 0) + sign * (Number(p.quantity) || 0));
+  }
+  const flat = new Set();
+  for (const [t, q] of net) if (Math.abs(q) < 1e-9) flat.add(t);
+  return flat;
+}
+
 /**
  * Convierte un precio (cada 100 VN para bonos, unitario para acciones) en el
  * VALOR TOTAL de la posición (precio × cantidad, ajustado por convención
@@ -13061,10 +13085,14 @@ function computeDailyPnlByTicker(positions, bondPrices, futurePrices, stockPrice
     const t = (ticker || "—").toString().toUpperCase();
     byTicker.set(t, (byTicker.get(t) || 0) + amt);
   };
-  // No-futuros: lote por lote (bonos/acciones usan previousClose, raro el
-  // round-trip intradía; su realizado de contado se suma más abajo).
+  // No-futuros: lote por lote (bonos/acciones usan previousClose). Los tickers
+  // PLANOS (round-trip intradía, neto 0) se saltean: su P&L del día es solo el
+  // realizado de contado, que se suma más abajo (sin esto, el MTM lote-por-lote
+  // del round-trip da un fantasma —caso SPCX 16/06, −4,2M).
+  const flatTk = netFlatNonFutureTickers(positions);
   for (const p of positions || []) {
     if (p?.instrument_type === "future") continue;
+    if (p.ticker && flatTk.has(p.ticker.trim().toUpperCase())) continue;
     const d = computeDailyPnL(p, bondPrices, futurePrices, stockPrices, futureAdjLookup, fciPrices);
     if (!d || d.pnl == null || !Number.isFinite(d.pnl)) continue;
     const cur = p.currency || p.entry_currency || "ARS";
@@ -20076,7 +20104,9 @@ function PortfolioSummaryWidget({ expanded }) {
     let pnlInValuation = 0;
     let prevValueInValuation = 0;
     let hasAny = false;
+    const flatTk = netFlatNonFutureTickers(positions);
     for (const p of positions) {
+      if (p.instrument_type !== "future" && p.ticker && flatTk.has(p.ticker.trim().toUpperCase())) continue; // round-trip plano: solo realizado
       const d = computeDailyPnL(p, bondPricesState.prices, futurePricesState.prices, stockPricesState.prices, futureAdjLookup, fciPricesState.prices);
       if (!d || d.pnl == null || !Number.isFinite(d.pnl)) continue;
       const cur = p.currency || "ARS";
