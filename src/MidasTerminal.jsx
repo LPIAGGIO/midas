@@ -13315,7 +13315,7 @@ function DataSourcesFooter({
  * El dedup por order_id permite subir el CSV completo varias veces o de a poco
  * sin duplicar: nunca pisa lo existente, solo agrega lo nuevo.
  */
-function parseMatrizFuturesCsv(text, existingOrderIds) {
+function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
   const lines = (text || "").split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return [];
   const header = lines[0].split(",").map((h) => h.trim());
@@ -13395,6 +13395,18 @@ function parseMatrizFuturesCsv(text, existingOrderIds) {
       // chicos → rompía el P&L realizado al vender (ej. T30J6: venta cargada a
       // 1,4328 vs compra 139,09 daba un quebranto falso de −49,5M).
       price = rawPrice;
+      // Aunque comparta el security_id BYMA (bm_/MERV), si el ticker está en la
+      // lista viva de CEDEARs o acciones, es renta variable (precio UNITARIO,
+      // sin /100), no un bono. Sin esto, todo CEDEAR/acción importado caía como
+      // bono (caso SPCX 16/06: P&L 100× chico). El sufijo D/C (MEP/CCL) se respeta.
+      const baseTk = (sfx === "D" || sfx === "C") ? (ticker || "").slice(0, -1) : ticker;
+      if (cedearSet && (cedearSet.has(ticker) || cedearSet.has(baseTk))) {
+        instrumentType = "cedear"; kind = "CEDEAR";
+        entryCurrency = sfx === "D" ? "USD-MEP" : sfx === "C" ? "USD-CCL" : "ARS";
+      } else if (stockSet && (stockSet.has(ticker) || stockSet.has(baseTk))) {
+        instrumentType = "stock"; kind = "Acción";
+        entryCurrency = sfx === "D" ? "USD-MEP" : sfx === "C" ? "USD-CCL" : "ARS";
+      }
       // Soberanos hard-dollar (AL/GD/AE/GE) entran como posición igual que
       // cualquier bono; consolidatePositions los unifica por bono base y matchea
       // las ventas contra la tenencia (vender AL30D teniendo AL30 = canje, no
@@ -13470,7 +13482,18 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
     setResult(null);
     try {
       const text = await f.text();
-      setRows(parseMatrizFuturesCsv(text, existingOrderIds));
+      // Listas vivas para distinguir CEDEAR/acción de bono (todos comparten el
+      // security_id BYMA bm_/MERV). Si el feed falla, cae al comportamiento previo.
+      let cedearSet = null, stockSet = null;
+      try {
+        const [cd, st] = await Promise.all([
+          fetch("/api/data912?type=cedears").then((r) => r.json()),
+          fetch("/api/data912?type=acciones").then((r) => r.json()),
+        ]);
+        cedearSet = new Set((cd || []).map((x) => x.symbol));
+        stockSet = new Set((st || []).map((x) => x.symbol));
+      } catch { /* sin feed: clasifica como antes */ }
+      setRows(parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet));
     } catch (err) {
       setRows([]);
       setResult({ inserted: 0, errs: [`No se pudo leer el archivo: ${err.message}`] });
