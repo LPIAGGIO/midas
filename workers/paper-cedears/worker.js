@@ -1,14 +1,22 @@
 /**
  * Worker: paper-cedears — paper trading de momentum en acciones USA (= CEDEARs,
- * el CCL se cancela en el ranking). Capital simulado USD 1000.
+ * el CCL se cancela en el ranking). Capital simulado USD 1000 por variante.
  *
- * Estrategia (validada en research 14/06): cada ~mes (21 ruedas) rankea la
- * canasta por momentum "12-1" (retorno de 12 meses excluyendo el último mes)
- * y holdea equal-weight los TOP-8 con momentum POSITIVO (los negativos van a
- * cash → protección en bear). Fee 0,2%/lado (spread CEDEAR; comisión 0 en Cocos).
+ * Estrategia (validada en research 14/06): cada N ruedas rankea la canasta por
+ * momentum "12-1" (retorno de 12 meses excluyendo el último mes) y holdea
+ * equal-weight los TOP-8 con momentum POSITIVO (los negativos van a cash →
+ * protección en bear). Fee 0,2%/lado (spread CEDEAR; comisión 0 en Cocos).
  *
- * Modos: --init siembra el histórico (is_live=false); sin flag = run diario
- * (PM2 cron). Tablas paper_cedear_equity/holdings/state/trades.
+ * VARIANTES (cadencia de rotación) corridas en paralelo para comparar forward
+ * cuál aguanta mejor el costo de rotar más seguido:
+ *   w5  → rota cada 5 ruedas  (~semanal)
+ *   w10 → rota cada 10 ruedas (~quincenal)
+ *   m21 → rota cada 21 ruedas (~mensual, la original)
+ *
+ * Auto-seed: cada variante sin estado se siembra con todo el histórico
+ * (is_live=false); las que ya tienen estado avanzan 1 día (is_live=true). Así
+ * m21 conserva su historia en vivo y w5/w10 arrancan solas en la próxima corrida.
+ * Tablas paper_cedear_equity/holdings/state/trades (clave: columna variant).
  * Fuente: Yahoo OHLC diario (sin keys).
  */
 require("dotenv").config();
@@ -21,8 +29,12 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 });
 
 const SYMS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "NFLX", "AVGO", "KO", "MELI", "JPM", "V", "MA", "WMT", "JNJ", "PG", "XOM", "DIS", "COIN", "PLTR", "MSTR", "QCOM", "MU", "INTC", "ORCL", "CRM", "NKE", "BA"];
-const LB = 252, SKIP = 21, REBAL = 21, TOPK = 8, CAPITAL = 1000, FEE = 0.002;
-const INIT = process.argv.includes("--init");
+const LB = 252, SKIP = 21, TOPK = 8, CAPITAL = 1000, FEE = 0.002;
+const VARIANTS = [
+  { id: "w5", rebal: 5 },
+  { id: "w10", rebal: 10 },
+  { id: "m21", rebal: 21 },
+];
 
 const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
 const get = (u) => new Promise((res, rej) => https.get(u, { headers: { "User-Agent": "Mozilla/5.0" } }, (r) => { let b = ""; r.on("data", (d) => b += d); r.on("end", () => { try { res(JSON.parse(b)); } catch (e) { rej(e); } }); }).on("error", rej));
@@ -43,88 +55,93 @@ async function loadSeries() {
   return series;
 }
 
+// Corre una variante: arranca de su estado (o siembra si no existe) y devuelve
+// las filas a persistir. No toca la DB salvo lectura previa hecha por el caller.
+function runVariant(V, ctx) {
+  const { dates, px, idxOf, bhUnits, assets, state, holdingsIn } = ctx;
+  const REBAL = V.rebal;
+  let cash, holdings = {}, startIdx, lastRebalIdx, live;
+  if (!state) {
+    // siembra: backfill completo, histórico teórico
+    cash = CAPITAL; startIdx = LB; lastRebalIdx = LB - REBAL; live = false;
+  } else {
+    cash = Number(state.cash_usd);
+    for (const [t, u] of Object.entries(holdingsIn || {})) holdings[t] = u;
+    const nd = dates.find((d) => d > state.last_date);
+    if (!nd) return null; // sin días nuevos
+    startIdx = idxOf(nd); lastRebalIdx = idxOf(state.last_rebal); live = true;
+  }
+
+  const eqRows = [], trRows = [];
+  for (let i = startIdx; i < dates.length; i++) {
+    if (i - lastRebalIdx >= REBAL) {
+      const ranked = assets.map((a) => { const pa = px(a, i - SKIP), pb = px(a, i - LB); return [a, (pa && pb) ? pa / pb - 1 : -Infinity]; }).sort((x, y) => y[1] - x[1]);
+      const picked = ranked.slice(0, TOPK).filter(([, m]) => m > 0).map(([a]) => a); // dual: solo momentum positivo
+      let portVal = cash; for (const [t, u] of Object.entries(holdings)) { const p = px(t, i); if (p) portVal += u * p; }
+      const targetUsd = portVal / TOPK;
+      for (const [t, u] of Object.entries(holdings)) {
+        const pt = px(t, i);
+        if (!picked.includes(t) && u > 0 && pt) {
+          cash += u * pt * (1 - FEE);
+          trRows.push({ d: dates[i], variant: V.id, ticker: t, side: "sell", price: pt, units: u, reason: "sale del top" });
+          holdings[t] = 0;
+        }
+      }
+      for (const t of picked) {
+        const pi = px(t, i); if (!pi) continue;
+        const diff = targetUsd - (holdings[t] || 0) * pi;
+        if (diff > pi * 0.5) {
+          const spend = Math.min(diff, cash); if (spend <= 0) continue;
+          const u = spend * (1 - FEE) / pi; holdings[t] = (holdings[t] || 0) + u; cash -= spend;
+          trRows.push({ d: dates[i], variant: V.id, ticker: t, side: "buy", price: pi, units: u, reason: "entra/ajusta top" });
+        }
+      }
+      lastRebalIdx = i;
+    }
+    let eq = cash, n = 0; for (const [t, u] of Object.entries(holdings)) { const p = px(t, i); if (u > 0 && p) { eq += u * p; n++; } }
+    let bh = 0; for (const a of assets) { if (bhUnits[a] && px(a, i)) bh += bhUnits[a] * px(a, i); }
+    eqRows.push({ d: dates[i], variant: V.id, equity: eq, bh_equity: bh, n_holdings: n, is_live: live });
+  }
+  return { cash, holdings, lastRebalIdx, eqRows, trRows };
+}
+
 (async () => {
-  log(`paper-cedears ${INIT ? "[INIT]" : "[diario]"} — momentum Top-${TOPK} dual, rotación ${REBAL}d`);
+  log(`paper-cedears — momentum Top-${TOPK} dual, variantes ${VARIANTS.map((v) => v.id).join("/")}`);
   const series = await loadSeries();
   const assets = Object.keys(series);
-  // Calendario = UNIÓN de fechas con forward-fill por acción. Antes se exigía
-  // intersección (todas con el dato el mismo día) → una acción rezagada en
-  // Yahoo frenaba todo el sistema. Ahora px() devuelve el último precio
-  // conocido ≤ esa fecha (null si la acción aún no cotizaba). Robusto a lags,
-  // IPOs y huecos puntuales sin que el paper se atrase.
+  // Calendario = UNIÓN de fechas con forward-fill por acción (robusto a lags de
+  // Yahoo, IPOs y huecos puntuales). px() devuelve el último precio conocido.
   const allD = new Set(); for (const a of assets) for (const d of series[a].keys()) allD.add(d);
   const dates = [...allD].sort();
   const ff = {};
   for (const a of assets) { const arr = []; let last = null; for (const d of dates) { if (series[a].has(d)) last = series[a].get(d); arr.push(last); } ff[a] = arr; }
   const px = (a, i) => ff[a][i];
   const idxOf = (d) => dates.indexOf(d);
-
-  // Estado previo
-  const { data: stArr } = await supabase.from("paper_cedear_state").select("*").eq("id", "momentum");
-  const { data: hArr } = await supabase.from("paper_cedear_holdings").select("*");
-  let cash, holdings = {}, startIdx, lastRebalIdx;
-  if (!stArr || !stArr[0]) {
-    cash = CAPITAL; startIdx = LB; lastRebalIdx = LB - REBAL;
-  } else {
-    cash = Number(stArr[0].cash_usd);
-    for (const h of hArr || []) holdings[h.ticker] = Number(h.units);
-    startIdx = idxOf(dates.find((d) => d > stArr[0].last_date)) ;
-    if (startIdx < 0) { log("sin días nuevos"); return; }
-    lastRebalIdx = idxOf(stArr[0].last_rebal);
-  }
-
-  // benchmark equal-weight (comprado el día LB)
   const bhUnits = {}; for (const a of assets) { const p0 = px(a, LB); if (p0) bhUnits[a] = (CAPITAL / assets.length) * (1 - FEE) / p0; }
 
-  const eqRows = [], trRows = [];
-  for (let i = startIdx; i < dates.length; i++) {
-    // ¿rebalanceo? cada REBAL ruedas desde el último
-    if (i - lastRebalIdx >= REBAL) {
-      const ranked = assets.map((a) => { const pa = px(a, i - SKIP), pb = px(a, i - LB); return [a, (pa && pb) ? pa / pb - 1 : -Infinity]; }).sort((x, y) => y[1] - x[1]);
-      const picked = ranked.slice(0, TOPK).filter(([, m]) => m > 0).map(([a]) => a); // dual: solo momentum positivo (excluye sin dato)
-      // valor actual de la cartera
-      let portVal = cash; for (const [t, u] of Object.entries(holdings)) { const p = px(t, i); if (p) portVal += u * p; }
-      const targetUsd = portVal / TOPK; // equal weight sobre K (si pickea <K, queda cash)
-      // vender los que salen
-      for (const [t, u] of Object.entries(holdings)) {
-        const pt = px(t, i);
-        if (!picked.includes(t) && u > 0 && pt) {
-          cash += u * pt * (1 - FEE);
-          trRows.push({ d: dates[i], ticker: t, side: "sell", price: pt, units: u, reason: "sale del top" });
-          holdings[t] = 0;
-        }
-      }
-      // ajustar/comprar los elegidos a targetUsd
-      for (const t of picked) {
-        const pi = px(t, i); if (!pi) continue;
-        const diff = targetUsd - (holdings[t] || 0) * pi;
-        if (diff > pi * 0.5) { // comprar
-          const spend = Math.min(diff, cash); if (spend <= 0) continue;
-          const u = spend * (1 - FEE) / pi; holdings[t] = (holdings[t] || 0) + u; cash -= spend;
-          trRows.push({ d: dates[i], ticker: t, side: "buy", price: pi, units: u, reason: "entra/ajusta top" });
-        }
-      }
-      lastRebalIdx = i;
+  // estado + holdings actuales, agrupados por variante
+  const { data: stArr } = await supabase.from("paper_cedear_state").select("*");
+  const { data: hArr } = await supabase.from("paper_cedear_holdings").select("*");
+  const stateBy = {}; for (const s of stArr || []) stateBy[s.id] = s;
+  const holdBy = {}; for (const h of hArr || []) { (holdBy[h.variant || "m21"] ||= {})[h.ticker] = Number(h.units); }
+
+  const ctx = { dates, px, idxOf, bhUnits, assets };
+  for (const V of VARIANTS) {
+    const r = runVariant(V, { ...ctx, state: stateBy[V.id], holdingsIn: holdBy[V.id] });
+    if (!r) { log(`${V.id}: sin días nuevos`); continue; }
+
+    for (let k = 0; k < r.eqRows.length; k += 500) {
+      const { error } = await supabase.from("paper_cedear_equity").upsert(r.eqRows.slice(k, k + 500), { onConflict: "d,variant" });
+      if (error) throw new Error(`${V.id} equity: ` + error.message);
     }
-    // equity del día
-    let eq = cash; let n = 0; for (const [t, u] of Object.entries(holdings)) { const p = px(t, i); if (u > 0 && p) { eq += u * p; n++; } }
-    let bh = 0; for (const a of assets) { if (bhUnits[a] && px(a, i)) bh += bhUnits[a] * px(a, i); }
-    eqRows.push({ d: dates[i], equity: eq, bh_equity: bh, n_holdings: n, is_live: !INIT });
-  }
+    if (r.trRows.length) { const { error } = await supabase.from("paper_cedear_trades").insert(r.trRows); if (error) throw new Error(`${V.id} trades: ` + error.message); }
+    await supabase.from("paper_cedear_holdings").delete().eq("variant", V.id);
+    const hold = Object.entries(r.holdings).filter(([, u]) => u > 0).map(([t, u]) => ({ ticker: t, variant: V.id, units: u, weight: null, updated_at: new Date().toISOString() }));
+    if (hold.length) await supabase.from("paper_cedear_holdings").insert(hold);
+    await supabase.from("paper_cedear_state").upsert({ id: V.id, cash_usd: r.cash, last_date: dates[dates.length - 1], last_rebal: dates[r.lastRebalIdx], updated_at: new Date().toISOString() }, { onConflict: "id" });
 
-  // persistir
-  for (let k = 0; k < eqRows.length; k += 500) {
-    const { error } = await supabase.from("paper_cedear_equity").upsert(eqRows.slice(k, k + 500), { onConflict: "d" });
-    if (error) throw new Error("equity: " + error.message);
+    const le = r.eqRows[r.eqRows.length - 1];
+    log(`${V.id}: ${r.eqRows.length} días, ${r.trRows.length} trades, equity ${le.equity.toFixed(0)} vs b&h ${le.bh_equity.toFixed(0)}, ${le.n_holdings} holdings${stateBy[V.id] ? "" : " [seed]"}`);
   }
-  if (trRows.length) { const { error } = await supabase.from("paper_cedear_trades").insert(trRows); if (error) throw new Error("trades: " + error.message); }
-  // holdings actuales (reemplazo completo)
-  await supabase.from("paper_cedear_holdings").delete().neq("ticker", "___");
-  const hold = Object.entries(holdings).filter(([, u]) => u > 0).map(([t, u]) => ({ ticker: t, units: u, weight: null, updated_at: new Date().toISOString() }));
-  if (hold.length) await supabase.from("paper_cedear_holdings").insert(hold);
-  await supabase.from("paper_cedear_state").upsert({ id: "momentum", cash_usd: cash, last_date: dates[dates.length - 1], last_rebal: dates[lastRebalIdx], updated_at: new Date().toISOString() }, { onConflict: "id" });
-
-  const lastEq = eqRows[eqRows.length - 1];
-  log(`OK: ${eqRows.length} días, ${trRows.length} trades, equity ${lastEq.equity.toFixed(0)} vs b&h ${lastEq.bh_equity.toFixed(0)}, ${lastEq.n_holdings} holdings`);
   process.exit(0);
 })().catch((e) => { log("ERROR: " + e.message); process.exit(1); });

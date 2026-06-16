@@ -25500,12 +25500,21 @@ function KellyCalcModule() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Paper CEDEARs (privado) — momentum en acciones USA (= CEDEARs). Lee
-// paper_cedear_equity/holdings/trades (worker paper-cedears). Capital sim 1000.
+// Paper CEDEARs — momentum en acciones USA (= CEDEARs), en 3 cadencias de
+// rotación corridas en paralelo (semanal/quincenal/mensual) para comparar
+// forward cuál aguanta mejor el costo de rotar más seguido. Lee
+// paper_cedear_equity/holdings/trades (worker paper-cedears), clave: variant.
 // ═══════════════════════════════════════════════════════════════════════
+const CEDEAR_VARIANTS = [
+  { id: "w5", label: "Semanal", desc: "rota cada 5 ruedas", color: "#60a5fa" },
+  { id: "w10", label: "Quincenal", desc: "rota cada 10 ruedas", color: "#a78bfa" },
+  { id: "m21", label: "Mensual", desc: "rota cada 21 ruedas", color: "#34d399" },
+];
+
 function PaperCedearsModule() {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
+  const [sel, setSel] = useState("m21");
 
   useEffect(() => {
     let mounted = true;
@@ -25513,13 +25522,13 @@ function PaperCedearsModule() {
       try {
         let eqAll = [], from = 0;
         for (;;) {
-          const { data: d, error } = await supabase.from("paper_cedear_equity").select("d,equity,bh_equity,n_holdings,is_live").order("d", { ascending: true }).range(from, from + 999);
+          const { data: d, error } = await supabase.from("paper_cedear_equity").select("d,variant,equity,bh_equity,n_holdings,is_live").order("d", { ascending: true }).range(from, from + 999);
           if (error || !d || !d.length) break;
           eqAll = eqAll.concat(d); if (d.length < 1000) break; from += 1000;
         }
         const [h, tr] = await Promise.all([
           supabase.from("paper_cedear_holdings").select("*"),
-          supabase.from("paper_cedear_trades").select("*").order("d", { ascending: false }).limit(50),
+          supabase.from("paper_cedear_trades").select("*").order("d", { ascending: false }).limit(300),
         ]);
         if (!mounted) return;
         setData({ eq: eqAll, holdings: h.data || [], tr: tr.data || [] });
@@ -25530,70 +25539,89 @@ function PaperCedearsModule() {
 
   if (!data) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando paper CEDEARs…</div>;
 
-  const curve = data.eq;
-  const last = curve.length ? curve[curve.length - 1] : null;
-  const now = last ? Number(last.equity) : 1000;
-  const bhNow = last ? Number(last.bh_equity) : 1000;
-  const pnlPct = (now / 1000 - 1) * 100, bhPct = (bhNow / 1000 - 1) * 100;
-  let peak = -Infinity, dd = 0;
-  for (const c of curve) { const e = Number(c.equity); if (e > peak) peak = e; if (peak > 0) dd = Math.min(dd, e / peak - 1); }
-  const liveStart = curve.find((c) => c.is_live)?.d || null;
   const fUsd = (n) => (n == null ? "—" : `US$ ${Number(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`);
   const fPct = (n) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(1)}%`;
   const fmtD = (iso) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "");
+
+  // Curva por variante (cadencia de rotación)
+  const perVar = CEDEAR_VARIANTS.map((v) => {
+    const rows = data.eq.filter((r) => (r.variant || "m21") === v.id).sort((a, b) => (a.d < b.d ? -1 : 1));
+    const last = rows.length ? rows[rows.length - 1] : null;
+    const now = last ? Number(last.equity) : 1000;
+    let peak = -Infinity, dd = 0;
+    for (const c of rows) { const e = Number(c.equity); if (e > peak) peak = e; if (peak > 0) dd = Math.min(dd, e / peak - 1); }
+    return { ...v, rows, now, pnlPct: (now / 1000 - 1) * 100, dd: dd * 100, days: rows.length, liveStart: rows.find((c) => c.is_live)?.d || null };
+  });
+  // benchmark (igual para todas) — de m21, o de la que tenga datos
+  const benchRows = (perVar.find((p) => p.id === "m21" && p.rows.length) || perVar.find((p) => p.rows.length) || { rows: [] }).rows;
+  const bhNow = benchRows.length ? Number(benchRows[benchRows.length - 1].bh_equity) : 1000;
+  const bhPct = (bhNow / 1000 - 1) * 100;
+  const live = perVar.filter((p) => p.days);
+  const best = live.length ? live.reduce((a, b) => (a.now >= b.now ? a : b)) : null;
+
   const lines = [
-    { label: "Momentum", color: "#34d399", data: curve.map((c) => ({ fecha: c.d, valor: Number(c.equity) })) },
-    { label: "Comprar y holdear", color: C.dim, data: curve.map((c) => ({ fecha: c.d, valor: Number(c.bh_equity) })) },
+    ...live.map((p) => ({ label: p.label, color: p.color, data: p.rows.map((c) => ({ fecha: c.d, valor: Number(c.equity) })) })),
+    { label: "Comprar y holdear", color: C.dim, data: benchRows.map((c) => ({ fecha: c.d, valor: Number(c.bh_equity) })) },
   ];
-  const Card = ({ label, value, sub, color }) => (
-    <div style={{ flex: "1 1 150px", minWidth: 140, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
-      <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{sub}</div>}
-    </div>
-  );
+
+  const selVar = perVar.find((p) => p.id === sel) || perVar[perVar.length - 1];
+  const selHoldings = data.holdings.filter((h) => (h.variant || "m21") === sel);
+  const selTrades = data.tr.filter((t) => (t.variant || "m21") === sel).slice(0, 25);
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
       <div style={{ border: "1px solid rgba(251,191,36,0.35)", background: "rgba(251,191,36,0.07)", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 11.5, color: "#fbbf24", lineHeight: 1.55 }}>
-        <strong>Simulación (paper trading) — no es recomendación de inversión.</strong> Capital ficticio de US$ 1.000, sin plata real. Es una estrategia en validación, no señales para operar; los resultados pasados no garantizan rendimientos futuros. Decidí tus inversiones por tu cuenta y bajo tu responsabilidad.
+        <strong>Simulación (paper trading) — no es recomendación de inversión.</strong> Capital ficticio de US$ 1.000 por variante, sin plata real. Son estrategias en validación, no señales para operar; los resultados pasados no garantizan rendimientos futuros. Decidí tus inversiones por tu cuenta y bajo tu responsabilidad.
       </div>
       <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Paper CEDEARs · Momentum</h1>
-          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 780 }}>
-            Simulación con US$ 1.000 de momentum en acciones USA (= CEDEARs). Cada mes se queda con las 8 acciones de mejor momentum (las que más fuerte vienen) y rota; las de momentum negativo van a cash. Fee 0,2% (spread; comisión 0 en Cocos). Sin plata real. Verde = estrategia, gris = comprar y holdear.
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 820 }}>
+            Momentum en acciones USA (= CEDEARs): se queda con las 8 de mejor momentum (las que más fuerte vienen) y rota; las de momentum negativo van a cash. US$ 1.000 por variante, fee 0,2% (spread; comisión 0 en Cocos). Corremos <strong>3 cadencias de rotación en paralelo</strong> para ver cuál rinde más neta del costo de rotar: semanal, quincenal y mensual. Gris = comprar y holdear.
           </p>
         </div>
         <button onClick={() => setTick((t) => t + 1)} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>Actualizar</button>
       </div>
 
+      {/* Tarjetas comparativas por variante (click = ver su cartera/movimientos) */}
       <div className="flex" style={{ gap: 10, flexWrap: "wrap" }}>
-        <Card label="Valor hoy (de US$ 1.000)" value={fUsd(now)} sub={`${fPct(pnlPct)} · ${fUsd(now - 1000)}`} color={now >= 1000 ? "#34d399" : "#f87171"} />
-        <Card label="Si hubieras holdeado" value={fUsd(bhNow)} sub={fPct(bhPct)} color={C.muted} />
-        <Card label="Ventaja vs holdear" value={fPct(pnlPct - bhPct)} sub="cuánto le gana la estrategia" color={C.accent} />
-        <Card label="Peor caída (drawdown)" value={`${dd.toFixed(1)}%`} sub="máxima desde un pico" color="#f87171" />
+        {perVar.map((p) => (
+          <div key={p.id} onClick={() => setSel(p.id)} style={{ flex: "1 1 200px", minWidth: 180, cursor: "pointer", border: `1px solid ${p.id === sel ? p.color : (best && p.id === best.id ? p.color : C.border)}`, borderRadius: 8, padding: "12px 14px", background: p.id === sel ? "rgba(255,255,255,0.03)" : "transparent" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: p.color }} />
+              <span style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{p.label}</span>
+              {best && p.id === best.id && <span style={{ marginLeft: "auto", fontSize: 8.5, color: p.color, fontWeight: 700 }}>MEJOR</span>}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: p.days ? (p.pnlPct >= 0 ? "#34d399" : "#f87171") : C.dim, fontVariantNumeric: "tabular-nums" }}>{p.days ? fPct(p.pnlPct) : "—"}</div>
+            <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{p.days ? `${fUsd(p.now)} · DD ${p.dd.toFixed(0)}% · ${p.desc}` : `sin datos aún · ${p.desc}`}</div>
+          </div>
+        ))}
+        <div style={{ flex: "1 1 150px", minWidth: 140, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>Comprar y holdear</div>
+          <div style={{ fontSize: 20, fontWeight: 600, color: C.muted, fontVariantNumeric: "tabular-nums" }}>{fPct(bhPct)}</div>
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fUsd(bhNow)} · referencia</div>
+        </div>
       </div>
 
       <div className="flex items-center" style={{ gap: 8, margin: "14px 2px 0", flexWrap: "wrap", fontSize: 12 }}>
-        <span style={{ color: C.dim }}>Cartera de hoy ({data.holdings.length}):</span>
-        {data.holdings.length === 0 ? <span style={{ color: C.dim }}>en cash</span> : data.holdings.map((h) => (
+        <span style={{ color: C.dim }}>Cartera {selVar.label} ({selHoldings.length}):</span>
+        {selHoldings.length === 0 ? <span style={{ color: C.dim }}>en cash</span> : selHoldings.map((h) => (
           <span key={h.ticker} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: C.text, background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.25)" }}>{h.ticker}</span>
         ))}
-        {liveStart && <span style={{ marginLeft: "auto", fontSize: 10, color: C.dim }}>en vivo desde {fmtD(liveStart)} · histórico simulado antes</span>}
+        {selVar.liveStart && <span style={{ marginLeft: "auto", fontSize: 10, color: C.dim }}>en vivo desde {fmtD(selVar.liveStart)} · histórico simulado antes</span>}
       </div>
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Evolución del capital</h3>
-          <span style={{ fontSize: 10, color: C.dim }}>{curve.length} días</span>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Evolución del capital · las 3 cadencias</h3>
+          <span style={{ fontSize: 10, color: C.dim }}>{Math.max(0, ...perVar.map((p) => p.days))} días</span>
         </div>
         <BcraMultiLine lines={lines} height={240} fmtY={fUsd} />
       </div>
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: "0 0 8px 0" }}>Últimos movimientos de cartera</h3>
-        {data.tr.length === 0 ? <div style={{ color: C.dim, fontSize: 12 }}>Sin movimientos todavía.</div> : (
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: "0 0 8px 0" }}>Últimos movimientos · {selVar.label}</h3>
+        {selTrades.length === 0 ? <div style={{ color: C.dim, fontSize: 12 }}>Sin movimientos todavía.</div> : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left" }}>
@@ -25603,7 +25631,7 @@ function PaperCedearsModule() {
                 <th style={{ padding: "7px 10px", fontWeight: 600, textAlign: "right" }}>Precio</th>
               </tr></thead>
               <tbody>
-                {data.tr.map((t) => (
+                {selTrades.map((t) => (
                   <tr key={t.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                     <td style={{ padding: "6px 10px", color: C.muted }}>{fmtD(t.d)}</td>
                     <td style={{ padding: "6px 10px", color: C.text, fontWeight: 600 }}>{t.ticker}</td>
@@ -25618,7 +25646,7 @@ function PaperCedearsModule() {
       </div>
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
-        Validado en backtest (bate a holdear con Sharpe ~1,7) pero sobre un período alcista — el momentum sufre en mercados sin tendencia, y la versión "dual" pasa a cash cuando los líderes flojean. Histórico retrospectivo; desde el arranque en vivo el worker rota 1×/día si toca. No opera plata real.
+        La hipótesis a validar: rotar más seguido (semanal) capta antes los giros pero paga más fee; rotar más lento (mensual) gasta menos pero reacciona tarde. El paper deja que el dinero teórico decida. Validado en backtest a cadencia mensual (bate a holdear con Sharpe ~1,7) pero sobre un período alcista; el momentum sufre en mercados sin tendencia. Histórico retrospectivo; en vivo el worker rota cuando le toca a cada variante. No opera plata real.
       </p>
     </div>
   );
