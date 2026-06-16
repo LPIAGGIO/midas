@@ -25267,18 +25267,15 @@ function FundamentalsModule() {
     const q = [metric((r) => r.netMrg, 1), metric((r) => r.roe, 1), metric((r) => r.revGrw, 1), metric((r) => r.grossMrg, 1), metric(fcfY, 1), metric((r) => r.de, -1)];
     const v = [metric(fwdAdj, -1), metric((r) => r.ps, -1), metric(evAdj, -1)];
     const avg = (arrs, i) => arrs.reduce((s, a) => s + a[i], 0) / arrs.length;
-    return rows.map((r, i) => ({ ...r, fcfY: fcfY(r), calidad: avg(q, i) * 100, valuacion: avg(v, i) * 100, total: (0.5 * avg(q, i) + 0.5 * avg(v, i)) * 100 }));
+    const ws = rows.map((r, i) => ({ ...r, fcfY: fcfY(r), calidad: avg(q, i) * 100, valuacion: avg(v, i) * 100, total: (0.5 * avg(q, i) + 0.5 * avg(v, i)) * 100 }));
+    const mr = new Map();
+    [...ws].filter((r) => r.mcap != null).sort((a, b) => b.mcap - a.mcap).forEach((r, i) => mr.set(r.ticker, i + 1));
+    return ws.map((r) => ({ ...r, mcapRank: mr.get(r.ticker) ?? null }));
   }, [data]);
 
   const rankByTotal = useMemo(() => {
     const m = new Map();
     [...scored].sort((a, b) => b.total - a.total).forEach((r, i) => m.set(r.ticker, i + 1));
-    return m;
-  }, [scored]);
-
-  const rankByMcap = useMemo(() => {
-    const m = new Map();
-    [...scored].filter((r) => r.mcap != null).sort((a, b) => b.mcap - a.mcap).forEach((r, i) => m.set(r.ticker, i + 1));
     return m;
   }, [scored]);
 
@@ -25294,8 +25291,8 @@ function FundamentalsModule() {
   const fDE = (x) => (x == null || !isFinite(x) ? "—" : x >= 10 ? x.toFixed(0) : x.toFixed(1));
   const scColor = (s) => (s >= 66 ? "#34d399" : s >= 45 ? "#fbbf24" : "#f87171");
 
-  const Th = ({ k, label, right }) => (
-    <th onClick={() => { if (sortKey === k) setSortDir((d) => -d); else { setSortKey(k); setSortDir(-1); } }}
+  const Th = ({ k, label, right, asc }) => (
+    <th onClick={() => { if (sortKey === k) setSortDir((d) => -d); else { setSortKey(k); setSortDir(asc ? 1 : -1); } }}
       style={{ padding: "7px 9px", fontWeight: 600, cursor: "pointer", textAlign: right ? "right" : "left", whiteSpace: "nowrap", color: sortKey === k ? C.text : C.dim, userSelect: "none" }}>
       {label}{sortKey === k ? (sortDir < 0 ? " ↓" : " ↑") : ""}
     </th>
@@ -25345,7 +25342,7 @@ function FundamentalsModule() {
               <Th k="de" label="D/E" right />
               <Th k="fcfY" label="FCF yield" right />
               <Th k="mcap" label="Cap." right />
-              <th style={{ padding: "7px 9px", fontWeight: 600, textAlign: "right" }}>Rank Cap.</th>
+              <Th k="mcapRank" label="Rank Cap." right asc />
             </tr></thead>
             <tbody>
               {sorted.map((r) => {
@@ -25368,7 +25365,7 @@ function FundamentalsModule() {
                     <td style={{ ...td, textAlign: "right", color: r.de != null && r.de >= 200 ? "#f87171" : C.muted }}>{fDE(r.de)}</td>
                     <td style={{ ...td, textAlign: "right", color: r.fcfY != null && r.fcfY < 0 ? "#f87171" : C.muted }}>{fP(r.fcfY, 1)}</td>
                     <td style={{ ...td, textAlign: "right", color: C.muted }}>{fBig(r.mcap)}</td>
-                    <td style={{ ...td, textAlign: "right", color: C.dim }}>{rankByMcap.get(r.ticker) ? `#${rankByMcap.get(r.ticker)}` : "—"}</td>
+                    <td style={{ ...td, textAlign: "right", color: C.dim }}>{r.mcapRank ? `#${r.mcapRank}` : "—"}</td>
                   </tr>
                 );
               })}
