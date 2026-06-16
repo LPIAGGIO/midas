@@ -10,7 +10,7 @@
 //   fcf, rec}], errors:[...] }. Cache 6h (los fundamentals cambian por trimestre).
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
-const MODULES = "summaryDetail,defaultKeyStatistics,financialData";
+const MODULES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile";
 
 async function getAuth() {
   const r = await fetch("https://fc.yahoo.com", { headers: { "User-Agent": UA } });
@@ -34,9 +34,10 @@ async function fetchOne(t, auth) {
   const j = await r.json();
   const res = j?.quoteSummary?.result?.[0];
   if (!res) return null;
-  const sd = res.summaryDetail || {}, ks = res.defaultKeyStatistics || {}, fd = res.financialData || {};
+  const sd = res.summaryDetail || {}, ks = res.defaultKeyStatistics || {}, fd = res.financialData || {}, ap = res.assetProfile || {};
   return {
     ticker: t,
+    sector: ap.sector || null, industry: ap.industry || null,
     price: raw(fd.currentPrice), mcap: raw(sd.marketCap),
     trailPE: raw(sd.trailingPE), fwdPE: raw(sd.forwardPE),
     ps: raw(sd.priceToSalesTrailing12Months), pb: raw(ks.priceToBook),

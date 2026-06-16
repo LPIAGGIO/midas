@@ -25209,6 +25209,21 @@ function PaperTradingModule() {
 // ═══════════════════════════════════════════════════════════════════════
 const FUND_UNIVERSE = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,AMD,NFLX,AVGO,KO,MELI,JPM,V,MA,WMT,JNJ,PG,XOM,DIS,COIN,PLTR,MSTR,QCOM,MU,INTC,ORCL,CRM,NKE,BA,CRWV,IREN,SNDK,SPCX";
 
+// Tema/exposición editorial (qué mueve a cada nombre). Cae al sector de Yahoo
+// para tickers fuera de esta lista.
+const FUND_THEME = {
+  NVDA: "IA · Semis", AMD: "IA · Semis", AVGO: "IA · Semis", QCOM: "Semis", INTC: "Semis",
+  MU: "Semis · Memoria", SNDK: "Semis · Memoria", LITE: "IA · Óptica",
+  MSFT: "Software · IA", GOOGL: "Internet · IA", META: "Internet · IA", PLTR: "Software · IA",
+  CRM: "Software", ORCL: "Software · Cloud", AMZN: "E-commerce · Cloud", AAPL: "Hardware",
+  NFLX: "Streaming", DIS: "Medios", TSLA: "Autos · EV", MELI: "E-commerce LatAm",
+  CRWV: "IA · Cloud GPU", IREN: "IA · Datacenters", CORZ: "IA · Datacenters", APLD: "IA · Datacenters",
+  COIN: "Cripto", MSTR: "Cripto · BTC", CIFR: "Cripto · Minería",
+  KO: "Consumo", PG: "Consumo", WMT: "Retail", NKE: "Consumo",
+  JNJ: "Salud", JPM: "Bancos", V: "Pagos", MA: "Pagos",
+  XOM: "Petróleo · Energía", BE: "Energía · Fuel cells", BA: "Aeroespacial", SPCX: "Aeroespacial · Espacio",
+};
+
 function FundamentalsModule() {
   const [input, setInput] = useState(FUND_UNIVERSE);
   const [tickers, setTickers] = useState(FUND_UNIVERSE);
@@ -25316,6 +25331,7 @@ function FundamentalsModule() {
             <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left", background: "rgba(255,255,255,0.02)" }}>
               <th style={{ padding: "7px 9px", fontWeight: 600 }}>#</th>
               <Th k="ticker" label="Ticker" />
+              <th style={{ padding: "7px 9px", fontWeight: 600 }}>Tema / Sector</th>
               <th style={{ padding: "7px 9px", fontWeight: 600 }}>CEDEAR</th>
               <Th k="total" label="Score" right />
               <Th k="calidad" label="Calidad" right />
@@ -25338,6 +25354,7 @@ function FundamentalsModule() {
                   <tr key={r.ticker} style={{ borderBottom: `1px solid ${C.border}` }}>
                     <td style={{ ...td, color: C.dim }}>{rankByTotal.get(r.ticker)}</td>
                     <td style={{ ...td, color: C.text, fontWeight: 600 }}>{r.ticker}</td>
+                    <td style={{ ...td, color: C.muted, whiteSpace: "nowrap" }}>{FUND_THEME[r.ticker] || r.sector || "—"}</td>
                     <td style={td}>{hasCedear == null ? "" : hasCedear ? <span style={{ color: "#34d399", fontWeight: 700 }}>✓</span> : <span style={{ color: C.dim }}>—</span>}</td>
                     <td style={{ ...td, textAlign: "right", fontWeight: 700, color: scColor(r.total) }}>{r.total.toFixed(0)}</td>
                     <td style={{ ...td, textAlign: "right", color: scColor(r.calidad) }}>{r.calidad.toFixed(0)}</td>
