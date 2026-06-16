@@ -246,8 +246,8 @@ const NAV = [
       { id: "libro-operaciones", label: "Libro de operaciones", icon: BookOpen },
       { id: "pnl-instrumento", label: "P&L por Instrumento", icon: BarChart3 },
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
-      { id: "paper-cripto", label: "Paper Cripto (privado)", icon: TrendingUp, ownerOnly: true, badge: "BETA" },
-      { id: "paper-cedears", label: "Paper CEDEARs (privado)", icon: LineChart, ownerOnly: true, badge: "BETA" },
+      { id: "paper-cripto", label: "Paper Cripto", icon: TrendingUp, badge: "BETA" },
+      { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
     ],
   },
 ];
@@ -25026,14 +25026,11 @@ const PAPER_STRATS = [
 ];
 
 function PaperTradingModule() {
-  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
   const [sel, setSel] = useState("trend");
-  const isOwner = user?.id === PAPER_OWNER_ID;
 
   useEffect(() => {
-    if (!isOwner) return;
     let mounted = true;
     (async () => {
       try {
@@ -25059,9 +25056,8 @@ function PaperTradingModule() {
       } catch { if (mounted) setData({ eq: [], st: [], tr: [] }); }
     })();
     return () => { mounted = false; };
-  }, [isOwner, tick]);
+  }, [tick]);
 
-  if (!isOwner) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Pantalla privada.</div>;
   if (!data) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando paper trading…</div>;
 
   const fUsd = (n) => (n == null ? "—" : `US$ ${Number(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`);
@@ -25505,13 +25501,10 @@ function KellyCalcModule() {
 // paper_cedear_equity/holdings/trades (worker paper-cedears). Capital sim 1000.
 // ═══════════════════════════════════════════════════════════════════════
 function PaperCedearsModule() {
-  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
-  const isOwner = user?.id === PAPER_OWNER_ID;
 
   useEffect(() => {
-    if (!isOwner) return;
     let mounted = true;
     (async () => {
       try {
@@ -25530,9 +25523,8 @@ function PaperCedearsModule() {
       } catch { if (mounted) setData({ eq: [], holdings: [], tr: [] }); }
     })();
     return () => { mounted = false; };
-  }, [isOwner, tick]);
+  }, [tick]);
 
-  if (!isOwner) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Pantalla privada.</div>;
   if (!data) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando paper CEDEARs…</div>;
 
   const curve = data.eq;
