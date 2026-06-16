@@ -9209,6 +9209,19 @@ function computeRealizedTodayContado(positions, bondPrices, stockPrices, futureP
   if (!fx || !positions || !isTradingDayAndMarketOpened()) return 0;
   const all = consolidatePositions(positions, bondPrices, futurePrices, fciPrices, stockPrices);
   const closedToday = filterClosedToToday(all.filter((g) => g.isClosed), futurePrices);
+  const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  // Tickers cuya actividad fue TODA hoy (round-trip intradía: comprado Y vendido
+  // hoy). Para ellos el P&L del día es el realizado completo (venta − compra),
+  // NO (venta − cierre de ayer): ayer no tenías la posición. Sin esto, un CEDEAR
+  // comprado y vendido el mismo día se medía contra su cierre previo y daba un
+  // fantasma gigante (SPCX 16/06: +17,5M en lugar de −1,07M).
+  const allTodayByTicker = new Map();
+  for (const p of positions || []) {
+    if (!p || p.instrument_type === "future" || !p.ticker) continue;
+    const t = p.ticker.toUpperCase();
+    const prevFlag = allTodayByTicker.has(t) ? allTodayByTicker.get(t) : true;
+    allTodayByTicker.set(t, prevFlag && p.entry_date === todayAR);
+  }
   let sum = 0;
   for (const g of closedToday) {
     if (g.instrument_type === "future") continue;
@@ -9221,7 +9234,9 @@ function computeRealizedTodayContado(positions, bondPrices, stockPrices, futureP
       if (den > 0) prev = Number(m.price) / den;
     }
     let dayValue;
-    if (prev != null && prev > 0) {
+    if (allTodayByTicker.get(tk)) {
+      dayValue = g.realizedPnl ?? 0; // intradía puro: realizado completo (venta − compra)
+    } else if (prev != null && prev > 0) {
       let dayRaw = 0;
       for (const pair of (g.operations || [])) {
         const qty = Number(pair.quantity) || 0;
