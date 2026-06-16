@@ -213,6 +213,7 @@ const NAV = [
     type: "group",
     children: [
       { id: "compara-dolar", label: "Cotizaciones Dólar", icon: DollarSign },
+      { id: "fundamentals-cedears", label: "Fundamentals CEDEARs", icon: Building2 },
       { id: "semaforo-merval", label: "Semáforo del Merval", icon: Gauge },
       { id: "carry-trade", label: "Carry Trade", icon: ArrowRightLeft },
       { id: "futuros-caucion", label: "Futuros vs Caución", icon: Scale },
@@ -1024,6 +1025,8 @@ function MidasApp() {
               <MonteCarloModule key={active} />
             ) : active === "semaforo-merval" ? (
               <SemaforoMervalModule key={active} />
+            ) : active === "fundamentals-cedears" ? (
+              <FundamentalsModule key={active} />
             ) : active === "desarbitrajes" ? (
               <DesarbitrajesModule key={active} />
             ) : active === "flujo-posiciones" ? (
@@ -25194,6 +25197,163 @@ function PaperTradingModule() {
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
         El histórico es retrospectivo (misma regla sobre precios reales de Kraken); desde el arranque en vivo el worker actualiza 1×/día. Nada opera plata real: cuando una variante nos convenza por su comportamiento —especialmente en las rachas malas— conectamos la ejecución con los US$ 1.000.
+      </p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Fundamentals CEDEARs — ratios de balance/resultados de los subyacentes USA
+// (vía /api/fundamentals → Yahoo). Calcula un ÍNDICE compuesto calidad+valuación
+// y rankea de mejor a peor. Marca cuáles tienen CEDEAR operable (feed data912).
+// ═══════════════════════════════════════════════════════════════════════
+const FUND_UNIVERSE = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,AMD,NFLX,AVGO,KO,MELI,JPM,V,MA,WMT,JNJ,PG,XOM,DIS,COIN,PLTR,MSTR,QCOM,MU,INTC,ORCL,CRM,NKE,BA,CRWV,IREN,SNDK,SPCX";
+
+function FundamentalsModule() {
+  const [input, setInput] = useState(FUND_UNIVERSE);
+  const [tickers, setTickers] = useState(FUND_UNIVERSE);
+  const [data, setData] = useState(null);
+  const [cedearSet, setCedearSet] = useState(null);
+  const [sortKey, setSortKey] = useState("total");
+  const [sortDir, setSortDir] = useState(-1);
+
+  useEffect(() => {
+    let alive = true; setData(null);
+    fetch(`/api/fundamentals?tickers=${encodeURIComponent(tickers)}`)
+      .then((r) => r.json()).then((j) => { if (alive) setData(j.data || []); })
+      .catch(() => { if (alive) setData([]); });
+    return () => { alive = false; };
+  }, [tickers]);
+
+  useEffect(() => {
+    fetch(`/api/data912?type=cedears`).then((r) => r.json())
+      .then((arr) => setCedearSet(new Set((arr || []).map((x) => x.symbol))))
+      .catch(() => setCedearSet(new Set()));
+  }, []);
+
+  // Índice compuesto: percentil de cada métrica dentro del universo (0..1),
+  // dirección según convenga (margen ↑ bueno, P/E ↓ bueno), promediado en dos
+  // ejes (Calidad y Valuación) y combinado 50/50. Lossmaking en P/E o EV/EBITDA
+  // se castiga (sentinel alto). Heurística, NO señal de compra.
+  const scored = useMemo(() => {
+    if (!data || !data.length) return [];
+    const rows = data, N = rows.length;
+    const metric = (getter, dir) => {
+      const vals = rows.map(getter);
+      const valid = vals.map((v, i) => ({ v, i })).filter((o) => o.v != null && isFinite(o.v));
+      const sorted = [...valid].sort((a, b) => a.v - b.v);
+      const pr = new Array(N).fill(0.5);
+      sorted.forEach((o, rank) => { pr[o.i] = valid.length > 1 ? rank / (valid.length - 1) : 0.5; });
+      return pr.map((p) => (dir > 0 ? p : 1 - p));
+    };
+    const fwdAdj = (r) => (r.fwdPE != null && r.fwdPE > 0 ? r.fwdPE : 9999);
+    const evAdj = (r) => (r.evEbitda != null && r.evEbitda > 0 ? r.evEbitda : 9999);
+    const fcfY = (r) => (r.fcf != null && r.mcap ? r.fcf / r.mcap : null);
+    const q = [metric((r) => r.netMrg, 1), metric((r) => r.roe, 1), metric((r) => r.revGrw, 1), metric((r) => r.grossMrg, 1), metric(fcfY, 1), metric((r) => r.de, -1)];
+    const v = [metric(fwdAdj, -1), metric((r) => r.ps, -1), metric(evAdj, -1)];
+    const avg = (arrs, i) => arrs.reduce((s, a) => s + a[i], 0) / arrs.length;
+    return rows.map((r, i) => ({ ...r, fcfY: fcfY(r), calidad: avg(q, i) * 100, valuacion: avg(v, i) * 100, total: (0.5 * avg(q, i) + 0.5 * avg(v, i)) * 100 }));
+  }, [data]);
+
+  const rankByTotal = useMemo(() => {
+    const m = new Map();
+    [...scored].sort((a, b) => b.total - a.total).forEach((r, i) => m.set(r.ticker, i + 1));
+    return m;
+  }, [scored]);
+
+  const sorted = useMemo(() => {
+    const arr = [...scored];
+    arr.sort((a, b) => { const av = a[sortKey], bv = b[sortKey]; if (av == null || !isFinite(av)) return 1; if (bv == null || !isFinite(bv)) return -1; return (av - bv) * sortDir; });
+    return arr;
+  }, [scored, sortKey, sortDir]);
+
+  const fP = (x, d = 0) => (x == null || !isFinite(x) ? "—" : `${(x * 100).toFixed(d)}%`);
+  const fR = (x, d = 1) => (x == null || !isFinite(x) ? "—" : x.toFixed(d));
+  const fBig = (x) => (x == null ? "—" : Math.abs(x) >= 1e12 ? `${(x / 1e12).toFixed(2)}T` : Math.abs(x) >= 1e9 ? `${(x / 1e9).toFixed(1)}B` : `${(x / 1e6).toFixed(0)}M`);
+  const fDE = (x) => (x == null || !isFinite(x) ? "—" : x >= 10 ? x.toFixed(0) : x.toFixed(1));
+  const scColor = (s) => (s >= 66 ? "#34d399" : s >= 45 ? "#fbbf24" : "#f87171");
+
+  const Th = ({ k, label, right }) => (
+    <th onClick={() => { if (sortKey === k) setSortDir((d) => -d); else { setSortKey(k); setSortDir(-1); } }}
+      style={{ padding: "7px 9px", fontWeight: 600, cursor: "pointer", textAlign: right ? "right" : "left", whiteSpace: "nowrap", color: sortKey === k ? C.text : C.dim, userSelect: "none" }}>
+      {label}{sortKey === k ? (sortDir < 0 ? " ↓" : " ↑") : ""}
+    </th>
+  );
+  const td = { padding: "6px 9px", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1340, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Fundamentals CEDEARs</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 860 }}>
+            Ratios de balance y resultados de los subyacentes en USA (fuente Yahoo). El <strong>Score</strong> es un índice compuesto que ordena de mejor a peor combinando <strong>Calidad</strong> (margen, ROE, crecimiento, FCF, deuda) y <strong>Valuación</strong> (P/E, P/S, EV/EBITDA: más barato puntúa más alto), 50/50. Es una heurística de ranking relativo dentro de esta lista — <strong>no es una señal de compra</strong>. La columna CEDEAR marca cuáles podés operar localmente.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center" style={{ gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <input value={input} onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") setTickers(input); }}
+          style={{ flex: "1 1 480px", minWidth: 280, padding: "8px 11px", fontSize: 12, background: "transparent", color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, outline: "none", fontVariantNumeric: "tabular-nums" }} />
+        <button onClick={() => setTickers(input)} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.accent}`, background: "transparent", color: C.accent, borderRadius: 6 }}>Consultar</button>
+        <button onClick={() => { setInput(FUND_UNIVERSE); setTickers(FUND_UNIVERSE); }} style={{ padding: "8px 12px", fontSize: 11, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6 }}>Reset</button>
+      </div>
+
+      {!data ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando fundamentals…</div>
+      ) : !sorted.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin datos. Revisá los tickers (deben ser símbolos de acciones USA).</div>
+      ) : (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left", background: "rgba(255,255,255,0.02)" }}>
+              <th style={{ padding: "7px 9px", fontWeight: 600 }}>#</th>
+              <Th k="ticker" label="Ticker" />
+              <th style={{ padding: "7px 9px", fontWeight: 600 }}>CEDEAR</th>
+              <Th k="total" label="Score" right />
+              <Th k="calidad" label="Calidad" right />
+              <Th k="valuacion" label="Valuación" right />
+              <Th k="fwdPE" label="P/E fwd" right />
+              <Th k="ps" label="P/S" right />
+              <Th k="evEbitda" label="EV/EBITDA" right />
+              <Th k="netMrg" label="Mrg neto" right />
+              <Th k="revGrw" label="Crec." right />
+              <Th k="roe" label="ROE" right />
+              <Th k="de" label="D/E" right />
+              <Th k="fcfY" label="FCF yield" right />
+              <Th k="mcap" label="Cap." right />
+            </tr></thead>
+            <tbody>
+              {sorted.map((r) => {
+                const hasCedear = cedearSet ? cedearSet.has(r.ticker) : null;
+                return (
+                  <tr key={r.ticker} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ ...td, color: C.dim }}>{rankByTotal.get(r.ticker)}</td>
+                    <td style={{ ...td, color: C.text, fontWeight: 600 }}>{r.ticker}</td>
+                    <td style={td}>{hasCedear == null ? "" : hasCedear ? <span style={{ color: "#34d399", fontWeight: 700 }}>✓</span> : <span style={{ color: C.dim }}>—</span>}</td>
+                    <td style={{ ...td, textAlign: "right", fontWeight: 700, color: scColor(r.total) }}>{r.total.toFixed(0)}</td>
+                    <td style={{ ...td, textAlign: "right", color: scColor(r.calidad) }}>{r.calidad.toFixed(0)}</td>
+                    <td style={{ ...td, textAlign: "right", color: scColor(r.valuacion) }}>{r.valuacion.toFixed(0)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.fwdPE != null && r.fwdPE < 0 ? "#f87171" : C.muted }}>{r.fwdPE != null && r.fwdPE < 0 ? "neg" : fR(r.fwdPE)}</td>
+                    <td style={{ ...td, textAlign: "right", color: C.muted }}>{fR(r.ps)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.evEbitda != null && r.evEbitda < 0 ? "#f87171" : C.muted }}>{r.evEbitda != null && r.evEbitda < 0 ? "neg" : fR(r.evEbitda)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.netMrg != null && r.netMrg < 0 ? "#f87171" : C.muted }}>{fP(r.netMrg)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.revGrw != null && r.revGrw < 0 ? "#f87171" : "#34d399" }}>{fP(r.revGrw)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.roe != null && r.roe < 0 ? "#f87171" : C.muted }}>{fP(r.roe)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.de != null && r.de >= 200 ? "#f87171" : C.muted }}>{fDE(r.de)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.fcfY != null && r.fcfY < 0 ? "#f87171" : C.muted }}>{fP(r.fcfY, 1)}</td>
+                    <td style={{ ...td, textAlign: "right", color: C.muted }}>{fBig(r.mcap)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.55, maxWidth: 900 }}>
+        Clic en cualquier columna para reordenar. El Score rankea <strong>relativo a esta lista</strong>: un 90 no significa "barato en absoluto", significa "de los mejores de este grupo en calidad+precio". P/E y EV/EBITDA negativos (empresa en pérdida) se castigan en el índice. Datos del subyacente en USD; los CEDEARs replican esto con un ratio de conversión. No es recomendación de inversión.
       </p>
     </div>
   );
