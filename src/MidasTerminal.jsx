@@ -25261,6 +25261,12 @@ function FundamentalsModule() {
     return m;
   }, [scored]);
 
+  const rankByMcap = useMemo(() => {
+    const m = new Map();
+    [...scored].filter((r) => r.mcap != null).sort((a, b) => b.mcap - a.mcap).forEach((r, i) => m.set(r.ticker, i + 1));
+    return m;
+  }, [scored]);
+
   const sorted = useMemo(() => {
     const arr = [...scored];
     arr.sort((a, b) => { const av = a[sortKey], bv = b[sortKey]; if (av == null || !isFinite(av)) return 1; if (bv == null || !isFinite(bv)) return -1; return (av - bv) * sortDir; });
@@ -25323,6 +25329,7 @@ function FundamentalsModule() {
               <Th k="de" label="D/E" right />
               <Th k="fcfY" label="FCF yield" right />
               <Th k="mcap" label="Cap." right />
+              <th style={{ padding: "7px 9px", fontWeight: 600, textAlign: "right" }}>Rank Cap.</th>
             </tr></thead>
             <tbody>
               {sorted.map((r) => {
@@ -25344,6 +25351,7 @@ function FundamentalsModule() {
                     <td style={{ ...td, textAlign: "right", color: r.de != null && r.de >= 200 ? "#f87171" : C.muted }}>{fDE(r.de)}</td>
                     <td style={{ ...td, textAlign: "right", color: r.fcfY != null && r.fcfY < 0 ? "#f87171" : C.muted }}>{fP(r.fcfY, 1)}</td>
                     <td style={{ ...td, textAlign: "right", color: C.muted }}>{fBig(r.mcap)}</td>
+                    <td style={{ ...td, textAlign: "right", color: C.dim }}>{rankByMcap.get(r.ticker) ? `#${rankByMcap.get(r.ticker)}` : "—"}</td>
                   </tr>
                 );
               })}
