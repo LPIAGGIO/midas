@@ -1485,6 +1485,25 @@ function isTradingDayAndMarketOpened() {
   return mins >= opensAt && mins < closesAt;
 }
 
+// Ventana de visibilidad del "P&L de hoy". Distinta del horario de mercado:
+// arranca con la apertura (10:30 ART, día hábil) pero se MANTIENE tras el
+// cierre hasta las 23:30 ART, para revisar el resultado del día a la noche.
+// A las 23:30 resetea a 0 y arranca limpio el día siguiente. NO usar
+// isTradingDayAndMarketOpened para esto: esa marca el mercado realmente
+// abierto (10:30-17:30) y la usan los indicadores de estado.
+function isPnlHoyWindow() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date());
+  const wd = parts.find((p) => p.type === "weekday")?.value;
+  if (["Sat", "Sun"].includes(wd)) return false;
+  const hh = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+  const mm = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+  const mins = hh * 60 + mm;
+  return mins >= 10 * 60 + 30 && mins < 23 * 60 + 30; // 10:30 → 23:30 ART
+}
+
 // Formatters
 const fmtARS = (n) =>
   n == null
@@ -9214,7 +9233,7 @@ function ValuationToggle({ value, onChange }) {
  *    segura, mejor que 0).
  */
 function computeRealizedTodayContado(positions, bondPrices, stockPrices, futurePrices, fciPrices, valuationCurrency, fx) {
-  if (!fx || !positions || !isTradingDayAndMarketOpened()) return 0;
+  if (!fx || !positions || !isPnlHoyWindow()) return 0;
   const all = consolidatePositions(positions, bondPrices, futurePrices, fciPrices, stockPrices);
   const closedToday = filterClosedToToday(all.filter((g) => g.isClosed), futurePrices);
   const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -9284,7 +9303,7 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
   // empieza limpio contra el cierre de ayer.
   const dailyTotals = useMemo(() => {
     if (!fx || !positions) return { pnl: null, base: 0, hasAny: false };
-    if (!isTradingDayAndMarketOpened()) {
+    if (!isPnlHoyWindow()) {
       return { pnl: 0, base: 0, hasAny: true, marketClosed: true };
     }
     let pnlInValuation = 0;
@@ -10683,7 +10702,7 @@ function computeDailyPnL(p, bondPrices, futurePrices, stockPrices, futureAdjLook
   // El P&L HOY se mantiene visible post-cierre hasta medianoche para que
   // el usuario vea cuánto ganó en el día, y resetea a 0 a las 00:00 del
   // próximo día hábil sin esperar a que el mercado vuelva a abrir.
-  if (!isTradingDayAndMarketOpened()) {
+  if (!isPnlHoyWindow()) {
     return { pnl: 0, pct: 0, marketClosed: true };
   }
 
@@ -15760,7 +15779,7 @@ function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPric
   // diario sin esperar a la apertura, evitando que de madrugada se vea
   // el P&L del día anterior como si fuera "de hoy".
   const { dailyPnl, dailyPct, marketClosed } = useMemo(() => {
-    if (!isTradingDayAndMarketOpened()) {
+    if (!isPnlHoyWindow()) {
       return { dailyPnl: 0, dailyPct: 0, marketClosed: true };
     }
     if (!group.operations || group.operations.length === 0) {
@@ -20154,7 +20173,7 @@ function PortfolioSummaryWidget({ expanded }) {
   // P&L del día (replica la lógica de TotalCard exactamente)
   const dailyTotals = useMemo(() => {
     if (!fx || !positions) return { pnl: null };
-    if (!isTradingDayAndMarketOpened()) {
+    if (!isPnlHoyWindow()) {
       return { pnl: 0, base: 0, hasAny: true, marketClosed: true };
     }
     let pnlInValuation = 0;
