@@ -24850,6 +24850,8 @@ function DolarDivisasModule() {
   );
 
   const resLast = last(d.res), mayLast = last(d.may), minLast = last(d.min);
+  const comprasLast = last(d.compras);
+  const last30 = [...d.compras].slice(-30).reverse();
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
@@ -24877,6 +24879,7 @@ function DolarDivisasModule() {
         <>
           <div className="flex" style={{ gap: 10, flexWrap: "wrap" }}>
             <Card label="Reservas internacionales" value={fMM(resLast?.valor)} sub={resLast ? `al ${resLast.fecha}` : ""} color="#60a5fa" />
+            <Card label="Última jornada" value={fSign(comprasLast?.valor)} sub={comprasLast ? `${comprasLast.fecha} · ${comprasLast.valor > 0 ? "compró" : comprasLast.valor < 0 ? "vendió" : "sin op."}` : ""} color={comprasLast == null ? C.text : comprasLast.valor > 0 ? "#34d399" : comprasLast.valor < 0 ? "#f87171" : C.muted} />
             <Card label="Compras netas — mes" value={fSign(comprasMes)} sub={`${ym} · BCRA en el MULC`} color={comprasMes >= 0 ? "#34d399" : "#f87171"} />
             <Card label="Compras netas — año" value={fSign(comprasAnio)} sub={`acumulado ${yr}`} color={comprasAnio >= 0 ? "#34d399" : "#f87171"} />
             <Card label="Dólar mayorista" value={fAr(mayLast?.valor)} sub={mayLast ? `al ${mayLast.fecha} · A3500` : ""} />
@@ -24893,6 +24896,34 @@ function DolarDivisasModule() {
 
           <Section title="Tipo de cambio oficial" hint="mayorista A3500 · $ por USD">
             <BcraChart series={d.may} kind="line" color="#a78bfa" height={150} fmtY={fAr} />
+          </Section>
+
+          <Section title="Últimas 30 jornadas — qué hizo el Central día a día" hint="verde compró / rojo vendió · USD millones">
+            {last30.length === 0 ? (
+              <div style={{ color: C.dim, fontSize: 12 }}>Sin datos.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left" }}>
+                    <th style={{ padding: "6px 10px", fontWeight: 600 }}>Fecha</th>
+                    <th style={{ padding: "6px 10px", fontWeight: 600 }}>Operación</th>
+                    <th style={{ padding: "6px 10px", fontWeight: 600, textAlign: "right" }}>Monto (USD M)</th>
+                  </tr></thead>
+                  <tbody>
+                    {last30.map((x) => {
+                      const col = x.valor > 0 ? "#34d399" : x.valor < 0 ? "#f87171" : C.muted;
+                      return (
+                        <tr key={x.fecha} style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <td style={{ padding: "5px 10px", color: C.muted }}>{x.fecha}</td>
+                          <td style={{ padding: "5px 10px", fontWeight: 600, color: col }}>{x.valor > 0 ? "COMPRA" : x.valor < 0 ? "VENTA" : "—"}</td>
+                          <td style={{ padding: "5px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: col }}>{fSign(x.valor)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Section>
 
           <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
