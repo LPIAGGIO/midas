@@ -30,10 +30,15 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 
 const SYMS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "NFLX", "AVGO", "KO", "MELI", "JPM", "V", "MA", "WMT", "JNJ", "PG", "XOM", "DIS", "COIN", "PLTR", "MSTR", "QCOM", "MU", "INTC", "ORCL", "CRM", "NKE", "BA"];
 const LB = 252, SKIP = 21, TOPK = 8, CAPITAL = 1000, FEE = 0.002;
+// fee = costo por lado. 0,002 = spread CEDEAR en Cocos (comisión 0). La variante
+// iol21 modela el costo real de IOL Gold (comisión 0,5%/lado + IVA 21% ≈ 0,605%
+// + spread 0,2%) ≈ 0,8%/lado, misma cadencia mensual, para aislar cuánto le come
+// la comisión del broker al mismo momentum.
 const VARIANTS = [
-  { id: "w5", rebal: 5 },
-  { id: "w10", rebal: 10 },
-  { id: "m21", rebal: 21 },
+  { id: "w5", rebal: 5, fee: 0.002 },
+  { id: "w10", rebal: 10, fee: 0.002 },
+  { id: "m21", rebal: 21, fee: 0.002 },
+  { id: "iol21", rebal: 21, fee: 0.008 },
 ];
 
 const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
@@ -59,7 +64,7 @@ async function loadSeries() {
 // las filas a persistir. No toca la DB salvo lectura previa hecha por el caller.
 function runVariant(V, ctx) {
   const { dates, px, idxOf, bhUnits, assets, state, holdingsIn } = ctx;
-  const REBAL = V.rebal;
+  const REBAL = V.rebal, FEE = V.fee;
   let cash, holdings = {}, startIdx, lastRebalIdx, live;
   if (!state) {
     // siembra: backfill completo, histórico teórico

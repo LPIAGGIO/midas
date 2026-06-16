@@ -25506,9 +25506,10 @@ function KellyCalcModule() {
 // paper_cedear_equity/holdings/trades (worker paper-cedears), clave: variant.
 // ═══════════════════════════════════════════════════════════════════════
 const CEDEAR_VARIANTS = [
-  { id: "w5", label: "Semanal", desc: "rota cada 5 ruedas", color: "#60a5fa" },
-  { id: "w10", label: "Quincenal", desc: "rota cada 10 ruedas", color: "#a78bfa" },
-  { id: "m21", label: "Mensual", desc: "rota cada 21 ruedas", color: "#34d399" },
+  { id: "w5", label: "Semanal", desc: "rota cada 5 ruedas, costo Cocos", color: "#60a5fa" },
+  { id: "w10", label: "Quincenal", desc: "rota cada 10 ruedas, costo Cocos", color: "#a78bfa" },
+  { id: "m21", label: "Mensual", desc: "rota cada 21 ruedas, costo Cocos", color: "#34d399" },
+  { id: "iol21", label: "Mensual vía IOL", desc: "rota cada 21 ruedas, comisión IOL Gold ~0,8%/lado", color: "#f59e0b" },
 ];
 
 function PaperCedearsModule() {
@@ -25577,7 +25578,7 @@ function PaperCedearsModule() {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Paper CEDEARs · Momentum</h1>
           <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 820 }}>
-            Momentum en acciones USA (= CEDEARs): se queda con las 8 de mejor momentum (las que más fuerte vienen) y rota; las de momentum negativo van a cash. US$ 1.000 por variante, fee 0,2% (spread; comisión 0 en Cocos). Corremos <strong>3 cadencias de rotación en paralelo</strong> para ver cuál rinde más neta del costo de rotar: semanal, quincenal y mensual. Gris = comprar y holdear.
+            Momentum en acciones USA (= CEDEARs): se queda con las 8 de mejor momentum (las que más fuerte vienen) y rota; las de momentum negativo van a cash. US$ 1.000 por variante. Corremos <strong>3 cadencias de rotación</strong> con costo Cocos (spread 0,2%, comisión 0) — semanal, quincenal y mensual — más una <strong>variante mensual con la comisión real de IOL Gold</strong> (~0,8%/lado) para ver cuánto le come operar por IOL al mismo momentum. Gris = comprar y holdear.
           </p>
         </div>
         <button onClick={() => setTick((t) => t + 1)} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>Actualizar</button>
