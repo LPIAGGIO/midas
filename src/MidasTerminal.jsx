@@ -7311,6 +7311,12 @@ function useFuturePrices(tickers) {
   const [error, setError] = useState(null);
   const [lastFetch, setLastFetch] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Distinguir refresh MANUAL (botón "Actualizar") del auto-poll (cada 10s).
+  // Sin esto, el auto-poll ponía loading=true cada 10s y el botón "Actualizar"
+  // quedaba "Actualizando" girando para siempre en horario de mercado (anyLoading
+  // incluye este loading). El auto-poll ahora refresca en silencio.
+  const manualRefreshRef = useRef(false);
+  const loadedOnceRef = useRef(false);
 
   // Stringify la lista de tickers para usarla como dependencia estable en
   // los useEffect (el array como tal cambia identidad cada render).
@@ -7329,7 +7335,9 @@ function useFuturePrices(tickers) {
 
     let cancelled = false;
     async function fetchPrices() {
-      setLoading(true);
+      const wasManual = manualRefreshRef.current;
+      manualRefreshRef.current = false;
+      if (wasManual || !loadedOnceRef.current) setLoading(true);
       try {
         const url = `/api/mtr-md?symbols=${encodeURIComponent(tickersKey)}`;
         const resp = await fetch(url);
@@ -7349,7 +7357,7 @@ function useFuturePrices(tickers) {
       } catch (e) {
         if (!cancelled) setError(e.message);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { loadedOnceRef.current = true; setLoading(false); }
       }
     }
 
@@ -7395,7 +7403,7 @@ function useFuturePrices(tickers) {
     return () => clearInterval(id);
   }, [tickersKey, tick]);
 
-  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const refresh = useCallback(() => { manualRefreshRef.current = true; setRefreshKey((k) => k + 1); }, []);
 
   return { prices, loading, error, lastFetch, refresh };
 }
@@ -10706,25 +10714,28 @@ function computeDailyPnL(p, bondPrices, futurePrices, stockPrices, futureAdjLook
     if (lastRaw != null && !fp?.error) {
       const last = Number(lastRaw);
       const lookupEntry = futureAdjLookup ? futureAdjLookup.get(p.id) : null;
-
-      let settle = lookupEntry?.lastSettle != null
-        ? Number(lookupEntry.lastSettle)
-        : null;
-
-      if (settle == null) {
-        // Fecha de hoy en ART, no UTC. Con `new Date().toISOString` entre
-        // 21:00 y 23:59 ART el slice(0,10) avanza al día UTC siguiente —
-        // eso rompía la comparación contra entry_date (que se guarda como
-        // YYYY-MM-DD en ART) y caía mal al else, mostrando un P&L HOY
-        // distinto al que generaba el worker per-lote a la 1 AM.
-        const todayAR = new Date().toLocaleDateString("en-CA", {
-          timeZone: "America/Argentina/Buenos_Aires",
-        });
-        if (p.entry_date === todayAR && Number(p.entry_price) > 0) {
-          settle = Number(p.entry_price);
-        } else if (fp.settlement != null) {
-          settle = Number(fp.settlement);
-        }
+      // Fecha de hoy en ART, no UTC. Con `new Date().toISOString` entre
+      // 21:00 y 23:59 ART el slice(0,10) avanza al día UTC siguiente —
+      // eso rompía la comparación contra entry_date (que se guarda como
+      // YYYY-MM-DD en ART).
+      const todayAR = new Date().toLocaleDateString("en-CA", {
+        timeZone: "America/Argentina/Buenos_Aires",
+      });
+      // Base del P&L del día:
+      //   1) lote abierto HOY → su precio de entrada (scalp intradía).
+      //   2) lote arrastrado → settle de AYER = fp.reference (feed matba). NO
+      //      rola tras el cierre (a diferencia de fp.settlement, que pasa a ser
+      //      el de HOY) → espeja a Matriz: (último − settle_ayer) × qty × mult.
+      //   3) fallbacks: ajuste confirmado (lastSettle), settlement del feed.
+      let settle;
+      if (p.entry_date === todayAR && Number(p.entry_price) > 0) {
+        settle = Number(p.entry_price);
+      } else if (fp?.reference != null && Number(fp.reference) > 0) {
+        settle = Number(fp.reference);
+      } else if (lookupEntry?.lastSettle != null) {
+        settle = Number(lookupEntry.lastSettle);
+      } else if (fp?.settlement != null) {
+        settle = Number(fp.settlement);
       }
 
       if (Number.isFinite(last) && settle != null && Number.isFinite(settle) && settle > 0) {
@@ -13071,10 +13082,17 @@ function computeFuturesDailyByTicker(positions, futurePrices, futureAdjLookup) {
     // Settle de ayer ÚNICO para el ticker: el lastSettle del ajuste de cualquier
     // lote que lo tenga (= settle de ayer mientras no corra el cron de hoy);
     // si ninguno tiene ajuste, fp.settlement.
-    let prevSettle = null;
-    for (const p of lotes) {
-      const le = futureAdjLookup ? futureAdjLookup.get(p.id) : null;
-      if (le?.lastSettle != null) { prevSettle = Number(le.lastSettle); break; }
+    // Base = settle de AYER. Preferimos `fp.reference` del feed matba: es el
+    // settle del día anterior y NO rola tras el cierre (a diferencia de
+    // `fp.settlement`, que pasa a ser el de HOY). Espeja el P&L del día de
+    // Matriz: (último − settle_ayer) × neto × mult. Si falta reference, caemos
+    // al ajuste confirmado y, último recurso, al settlement del feed.
+    let prevSettle = (fp?.reference != null && Number(fp.reference) > 0) ? Number(fp.reference) : null;
+    if (prevSettle == null) {
+      for (const p of lotes) {
+        const le = futureAdjLookup ? futureAdjLookup.get(p.id) : null;
+        if (le?.lastSettle != null) { prevSettle = Number(le.lastSettle); break; }
+      }
     }
     if (prevSettle == null && fp?.settlement != null) prevSettle = Number(fp.settlement);
     let sum = 0;

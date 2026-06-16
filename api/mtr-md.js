@@ -54,6 +54,10 @@ function rowToPriceEntry(row, nowMs) {
   const bid = row.bid != null ? Number(row.bid) : null;
   const offer = row.ask != null ? Number(row.ask) : null; // tabla usa "ask", front espera "offer"
   const settlement = row.settlement != null ? Number(row.settlement) : null;
+  // `reference` = settle del día ANTERIOR. A diferencia de `settlement` (que tras
+  // el cierre rola al settle de HOY), reference NO rola → es la base correcta del
+  // P&L del día de futuros, igual que lo calcula Matriz: (último − reference).
+  const reference = row.reference != null ? Number(row.reference) : null;
   const midpoint = bid != null && offer != null ? (bid + offer) / 2 : null;
   const lastDate = row.last_ts ? new Date(row.last_ts).getTime() : null;
   const lastAge = lastDate != null ? nowMs - lastDate : Infinity;
@@ -85,7 +89,7 @@ function rowToPriceEntry(row, nowMs) {
     freshness = "stale";
   }
 
-  return { last, bid, offer, settlement, midpoint, price, priceSource, lastDate, freshness, bidSize, askSize, volume };
+  return { last, bid, offer, settlement, reference, midpoint, price, priceSource, lastDate, freshness, bidSize, askSize, volume };
 }
 
 /** app ticker "DLRMAY26" -> security_id "rx_DDF_DLR_MAY26". null si no es DLR. */
