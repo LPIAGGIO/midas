@@ -25217,12 +25217,18 @@ function PaperTradingModule() {
     const now = curve.length ? curve[curve.length - 1].eq : 1000;
     let peak = -Infinity, mdd = 0;
     for (const c of curve) { if (c.eq > peak) peak = c.eq; if (peak > 0) mdd = Math.min(mdd, c.eq / peak - 1); }
-    return { ...su, curve, now, pnlPct: (now / 1000 - 1) * 100, mdd: mdd * 100, liveStart: curve.find((c) => c.live)?.d || null };
+    // CAGR (anualizado): (final/inicial)^(365/días) − 1. Solo si el período es
+    // > 30 días (anualizar tramos cortos da números absurdos).
+    const spanDays = curve.length > 1 ? (new Date(curve[curve.length - 1].d) - new Date(curve[0].d)) / 86400000 : 0;
+    const annPct = spanDays > 30 ? (Math.pow(now / 1000, 365 / spanDays) - 1) * 100 : null;
+    return { ...su, curve, now, pnlPct: (now / 1000 - 1) * 100, annPct, mdd: mdd * 100, liveStart: curve.find((c) => c.live)?.d || null };
   });
   const bhByDate = {};
   for (const r of data.eq) { if (r.strategy !== "trend") continue; bhByDate[r.d] = (bhByDate[r.d] || 0) + (Number(r.bh_equity) || 0); }
   const bhCurve = Object.entries(bhByDate).map(([d, v]) => ({ fecha: d, valor: v })).sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
   const bhNow = bhCurve.length ? bhCurve[bhCurve.length - 1].valor : 1000;
+  const bhSpan = bhCurve.length > 1 ? (new Date(bhCurve[bhCurve.length - 1].fecha) - new Date(bhCurve[0].fecha)) / 86400000 : 0;
+  const bhAnnPct = bhSpan > 30 ? (Math.pow(bhNow / 1000, 365 / bhSpan) - 1) * 100 : null;
   const best = perStrat.reduce((a, b) => (b.now > a.now ? b : a), perStrat[0]);
   const days = perStrat[0]?.curve.length || 0;
   const liveStart = perStrat[0]?.liveStart;
@@ -25261,13 +25267,13 @@ function PaperTradingModule() {
               {s.id === best.id && <span style={{ marginLeft: "auto", fontSize: 8.5, color: s.color, fontWeight: 700 }}>MEJOR</span>}
             </div>
             <div style={{ fontSize: 20, fontWeight: 600, color: s.pnlPct >= 0 ? "#34d399" : "#f87171", fontVariantNumeric: "tabular-nums" }}>{fUsd(s.now)}</div>
-            <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct(s.pnlPct)} · peor caída {s.mdd.toFixed(0)}% · {s.desc}</div>
+            <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct(s.pnlPct)} total{s.annPct != null ? ` · ~${fPct(s.annPct)}/año` : ""} · peor caída {s.mdd.toFixed(0)}% · {s.desc}</div>
           </div>
         ))}
         <div style={{ flex: "1 1 160px", minWidth: 150, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
           <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>Comprar y holdear</div>
           <div style={{ fontSize: 20, fontWeight: 600, color: C.muted, fontVariantNumeric: "tabular-nums" }}>{fUsd(bhNow)}</div>
-          <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct((bhNow / 1000 - 1) * 100)} · referencia</div>
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct((bhNow / 1000 - 1) * 100)} total{bhAnnPct != null ? ` · ~${fPct(bhAnnPct)}/año` : ""} · referencia</div>
         </div>
       </div>
 
