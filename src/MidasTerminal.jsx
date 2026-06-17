@@ -7183,21 +7183,32 @@ function useFciPrices(positions) {
           }
 
           // VCP PROYECTADO al día de hoy (devengado estimado). fci_quotes
-          // trae el último VCP OFICIAL (típicamente T-1); Cocos muestra el
-          // devengado de HOY → quedaba un gap de ~1 día de tasa (~0,09%/día
-          // en money market ≈ $90k en la cartera de LP, detectado 12/06 en
-          // la conciliación al peso). Proyectamos vcp × (1+tasa_diaria)^días
-          // SOLO si: hay par consecutivo para derivar la tasa, el dato tiene
-          // ≤5 días, y el fondo es estable (|tasa| < 0,5%/día — un FCI de
-          // equity no se proyecta: sería inventar precio).
+          // trae el último VCP del feed público (CAFCI), que viene atrasado
+          // varios días respecto del VCP interno que muestra Cocos. Proyectamos
+          // vcp × (1+tasa)^días para acercarnos a lo que muestra Cocos.
+          //
+          // TASA SUAVIZADA (fix 17/06/2026): antes la tasa salía del ÚLTIMO par
+          // de días (vcp_anterior) y un solo día atípico la disparaba — Cocos
+          // Pesos Plus saltó +0,20% el 12/06 (vs ~0,073%/día promedio = TNA 27%);
+          // proyectado 5 días daba +1% y sobre-valuaba la posición de LP en +509k.
+          // Ahora la tasa se deriva de una VENTANA (vcp_window ≈ 6 ruedas atrás
+          // que devuelve el RPC), así un día fuera de promedio no la mueve. Y el
+          // horizonte se capa a 3 días: el feed lagea y Cocos muestra el último
+          // VCP publicado (no el devengado de hoy), extrapolar 5+ días era de más.
+          // Fondos de equity (|tasa| ≥ 0,5%/día) NO se proyectan: sería inventar.
           let finalPrice = price;
           let estimated = false;
-          if (previousClose != null && previousClose > 0) {
-            const gapDias = Math.max(1, Math.round(diasEntre(row.fecha_actual, row.fecha_anterior)));
-            const dailyG = Math.pow(price / previousClose, 1 / gapDias) - 1;
+          const winVcp = Number(row.vcp_window);
+          const useWin = Number.isFinite(winVcp) && winVcp > 0 && row.fecha_window;
+          const baseVcp = useWin ? winVcp : previousClose;
+          const baseFecha = useWin ? row.fecha_window : row.fecha_anterior;
+          if (baseVcp != null && baseVcp > 0 && baseFecha) {
+            const gapBase = Math.max(1, Math.round(diasEntre(row.fecha_actual, baseFecha)));
+            const dailyG = Math.pow(price / baseVcp, 1 / gapBase) - 1;
             const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-            const ahead = Math.round(diasEntre(todayAR, row.fecha_actual));
-            if (ahead >= 1 && ahead <= 5 && Number.isFinite(dailyG) && Math.abs(dailyG) < 0.005) {
+            const aheadRaw = Math.round(diasEntre(todayAR, row.fecha_actual));
+            const ahead = Math.min(aheadRaw, 3); // no extrapolar más de 3 ruedas
+            if (aheadRaw >= 1 && aheadRaw <= 10 && Number.isFinite(dailyG) && Math.abs(dailyG) < 0.005) {
               finalPrice = price * Math.pow(1 + dailyG, ahead);
               estimated = true;
             }
