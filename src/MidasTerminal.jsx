@@ -25153,6 +25153,14 @@ function EjecucionInteligenteModule() {
 // de la estrategia trend-following (SMA 20/100) en BTC/ETH, capital simulado
 // USD 1000. Lee paper_equity/paper_state/paper_trades (worker paper-trader).
 // ═══════════════════════════════════════════════════════════════════════
+// Etiqueta legible de un período en días: "~2,0 años" / "~8 meses" / "45 días".
+function fmtPeriodLabel(days) {
+  if (!days || days <= 0) return "";
+  if (days >= 400) return `~${(days / 365).toFixed(1)} años`;
+  if (days >= 60) return `~${Math.round(days / 30)} meses`;
+  return `${Math.round(days)} días`;
+}
+
 const PAPER_STRATS = [
   { id: "trend", label: "Tendencia 20/100", color: "#34d399", desc: "BTC+ETH" },
   { id: "trend_filt", label: "+ Filtro anti-whipsaw", color: "#60a5fa", desc: "BTC+ETH, no entra si la tendencia no viene subiendo" },
@@ -25221,7 +25229,8 @@ function PaperTradingModule() {
     // > 30 días (anualizar tramos cortos da números absurdos).
     const spanDays = curve.length > 1 ? (new Date(curve[curve.length - 1].d) - new Date(curve[0].d)) / 86400000 : 0;
     const annPct = spanDays > 30 ? (Math.pow(now / 1000, 365 / spanDays) - 1) * 100 : null;
-    return { ...su, curve, now, pnlPct: (now / 1000 - 1) * 100, annPct, mdd: mdd * 100, liveStart: curve.find((c) => c.live)?.d || null };
+    const monPct = annPct != null ? (Math.pow(1 + annPct / 100, 1 / 12) - 1) * 100 : null;
+    return { ...su, curve, now, pnlPct: (now / 1000 - 1) * 100, annPct, monPct, spanDays, mdd: mdd * 100, liveStart: curve.find((c) => c.live)?.d || null };
   });
   const bhByDate = {};
   for (const r of data.eq) { if (r.strategy !== "trend") continue; bhByDate[r.d] = (bhByDate[r.d] || 0) + (Number(r.bh_equity) || 0); }
@@ -25229,6 +25238,7 @@ function PaperTradingModule() {
   const bhNow = bhCurve.length ? bhCurve[bhCurve.length - 1].valor : 1000;
   const bhSpan = bhCurve.length > 1 ? (new Date(bhCurve[bhCurve.length - 1].fecha) - new Date(bhCurve[0].fecha)) / 86400000 : 0;
   const bhAnnPct = bhSpan > 30 ? (Math.pow(bhNow / 1000, 365 / bhSpan) - 1) * 100 : null;
+  const bhMonPct = bhAnnPct != null ? (Math.pow(1 + bhAnnPct / 100, 1 / 12) - 1) * 100 : null;
   const best = perStrat.reduce((a, b) => (b.now > a.now ? b : a), perStrat[0]);
   const days = perStrat[0]?.curve.length || 0;
   const liveStart = perStrat[0]?.liveStart;
@@ -25267,13 +25277,17 @@ function PaperTradingModule() {
               {s.id === best.id && <span style={{ marginLeft: "auto", fontSize: 8.5, color: s.color, fontWeight: 700 }}>MEJOR</span>}
             </div>
             <div style={{ fontSize: 20, fontWeight: 600, color: s.pnlPct >= 0 ? "#34d399" : "#f87171", fontVariantNumeric: "tabular-nums" }}>{fUsd(s.now)}</div>
-            <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct(s.pnlPct)} total{s.annPct != null ? ` · ~${fPct(s.annPct)}/año` : ""} · peor caída {s.mdd.toFixed(0)}% · {s.desc}</div>
+            <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct(s.pnlPct)} en {fmtPeriodLabel(s.spanDays)}</div>
+            {s.annPct != null && <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>≈ {fPct(s.annPct)}/año · {fPct(s.monPct)}/mes</div>}
+            <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>peor caída {s.mdd.toFixed(0)}% · {s.desc}</div>
           </div>
         ))}
         <div style={{ flex: "1 1 160px", minWidth: 150, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
           <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>Comprar y holdear</div>
           <div style={{ fontSize: 20, fontWeight: 600, color: C.muted, fontVariantNumeric: "tabular-nums" }}>{fUsd(bhNow)}</div>
-          <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct((bhNow / 1000 - 1) * 100)} total{bhAnnPct != null ? ` · ~${fPct(bhAnnPct)}/año` : ""} · referencia</div>
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fPct((bhNow / 1000 - 1) * 100)} en {fmtPeriodLabel(bhSpan)}</div>
+          {bhAnnPct != null && <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>≈ {fPct(bhAnnPct)}/año · {fPct(bhMonPct)}/mes</div>}
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>referencia</div>
         </div>
       </div>
 
@@ -25875,12 +25889,18 @@ function PaperCedearsModule() {
     const now = last ? Number(last.equity) : 1000;
     let peak = -Infinity, dd = 0;
     for (const c of rows) { const e = Number(c.equity); if (e > peak) peak = e; if (peak > 0) dd = Math.min(dd, e / peak - 1); }
-    return { ...v, rows, now, pnlPct: (now / 1000 - 1) * 100, dd: dd * 100, days: rows.length, liveStart: rows.find((c) => c.is_live)?.d || null };
+    const spanDays = rows.length > 1 ? (new Date(rows[rows.length - 1].d) - new Date(rows[0].d)) / 86400000 : 0;
+    const annPct = spanDays > 30 ? (Math.pow(now / 1000, 365 / spanDays) - 1) * 100 : null;
+    const monPct = annPct != null ? (Math.pow(1 + annPct / 100, 1 / 12) - 1) * 100 : null;
+    return { ...v, rows, now, pnlPct: (now / 1000 - 1) * 100, annPct, monPct, spanDays, dd: dd * 100, days: rows.length, liveStart: rows.find((c) => c.is_live)?.d || null };
   });
   // benchmark (igual para todas) — de m21, o de la que tenga datos
   const benchRows = (perVar.find((p) => p.id === "m21" && p.rows.length) || perVar.find((p) => p.rows.length) || { rows: [] }).rows;
   const bhNow = benchRows.length ? Number(benchRows[benchRows.length - 1].bh_equity) : 1000;
   const bhPct = (bhNow / 1000 - 1) * 100;
+  const bhSpan = benchRows.length > 1 ? (new Date(benchRows[benchRows.length - 1].d) - new Date(benchRows[0].d)) / 86400000 : 0;
+  const bhAnnPct = bhSpan > 30 ? (Math.pow(bhNow / 1000, 365 / bhSpan) - 1) * 100 : null;
+  const bhMonPct = bhAnnPct != null ? (Math.pow(1 + bhAnnPct / 100, 1 / 12) - 1) * 100 : null;
   const live = perVar.filter((p) => p.days);
   const best = live.length ? live.reduce((a, b) => (a.now >= b.now ? a : b)) : null;
 
@@ -25918,13 +25938,22 @@ function PaperCedearsModule() {
               {best && p.id === best.id && <span style={{ marginLeft: "auto", fontSize: 8.5, color: p.color, fontWeight: 700 }}>MEJOR</span>}
             </div>
             <div style={{ fontSize: 20, fontWeight: 600, color: p.days ? (p.pnlPct >= 0 ? "#34d399" : "#f87171") : C.dim, fontVariantNumeric: "tabular-nums" }}>{p.days ? fPct(p.pnlPct) : "—"}</div>
-            <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{p.days ? `${fUsd(p.now)} · DD ${p.dd.toFixed(0)}% · ${p.desc}` : `sin datos aún · ${p.desc}`}</div>
+            {p.days ? (
+              <>
+                <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fUsd(p.now)} en {fmtPeriodLabel(p.spanDays)}</div>
+                {p.annPct != null && <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>≈ {fPct(p.annPct)}/año · {fPct(p.monPct)}/mes</div>}
+                <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>peor caída {p.dd.toFixed(0)}% · {p.desc}</div>
+              </>
+            ) : (
+              <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>sin datos aún · {p.desc}</div>
+            )}
           </div>
         ))}
         <div style={{ flex: "1 1 150px", minWidth: 140, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
           <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>Comprar y holdear</div>
           <div style={{ fontSize: 20, fontWeight: 600, color: C.muted, fontVariantNumeric: "tabular-nums" }}>{fPct(bhPct)}</div>
-          <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{fUsd(bhNow)} · referencia</div>
+          {bhAnnPct != null && <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>≈ {fPct(bhAnnPct)}/año · {fPct(bhMonPct)}/mes</div>}
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>{fUsd(bhNow)} · referencia</div>
         </div>
       </div>
 
