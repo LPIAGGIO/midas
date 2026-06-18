@@ -7182,37 +7182,17 @@ function useFciPrices(positions) {
                 : ((price - prevVcp) / prevVcp) * 100;
           }
 
-          // VCP PROYECTADO al día de hoy (devengado estimado). fci_quotes
-          // trae el último VCP del feed público (CAFCI), que viene atrasado
-          // varios días respecto del VCP interno que muestra Cocos. Proyectamos
-          // vcp × (1+tasa)^días para acercarnos a lo que muestra Cocos.
-          //
-          // TASA SUAVIZADA (fix 17/06/2026): antes la tasa salía del ÚLTIMO par
-          // de días (vcp_anterior) y un solo día atípico la disparaba — Cocos
-          // Pesos Plus saltó +0,20% el 12/06 (vs ~0,073%/día promedio = TNA 27%);
-          // proyectado 5 días daba +1% y sobre-valuaba la posición de LP en +509k.
-          // Ahora la tasa se deriva de una VENTANA (vcp_window ≈ 6 ruedas atrás
-          // que devuelve el RPC), así un día fuera de promedio no la mueve. Y el
-          // horizonte se capa a 3 días: el feed lagea y Cocos muestra el último
-          // VCP publicado (no el devengado de hoy), extrapolar 5+ días era de más.
-          // Fondos de equity (|tasa| ≥ 0,5%/día) NO se proyectan: sería inventar.
-          let finalPrice = price;
-          let estimated = false;
-          const winVcp = Number(row.vcp_window);
-          const useWin = Number.isFinite(winVcp) && winVcp > 0 && row.fecha_window;
-          const baseVcp = useWin ? winVcp : previousClose;
-          const baseFecha = useWin ? row.fecha_window : row.fecha_anterior;
-          if (baseVcp != null && baseVcp > 0 && baseFecha) {
-            const gapBase = Math.max(1, Math.round(diasEntre(row.fecha_actual, baseFecha)));
-            const dailyG = Math.pow(price / baseVcp, 1 / gapBase) - 1;
-            const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-            const aheadRaw = Math.round(diasEntre(todayAR, row.fecha_actual));
-            const ahead = Math.min(aheadRaw, 3); // no extrapolar más de 3 ruedas
-            if (aheadRaw >= 1 && aheadRaw <= 10 && Number.isFinite(dailyG) && Math.abs(dailyG) < 0.005) {
-              finalPrice = price * Math.pow(1 + dailyG, ahead);
-              estimated = true;
-            }
-          }
+          // SIN proyección: Cocos muestra el ÚLTIMO VCP PUBLICADO (no el devengado
+          // de hoy). Verificado 18/06: fci_quotes 16/06 = 1.386,666 = EXACTO el VCP
+          // que mostraba Cocos. Proyectar hacia "hoy" dejaba a Midas por ENCIMA de
+          // lo que muestra Cocos (overshoot, ~+2 pesos). Mostramos el VCP crudo más
+          // reciente del feed = misma metodología que Cocos → matchea al peso. Si el
+          // feed público (CAFCI/fci_quotes) viene 1-2 días atrás del feed interno de
+          // Cocos, Midas queda apenas atrás (nunca por encima) y se acomoda solo
+          // cuando el worker actualiza de noche. previousClose/changePct (arriba) se
+          // mantienen solo para la variación % del día.
+          const finalPrice = price;
+          const estimated = false;
 
           // Indexamos por ticker NORMALIZADO (trim + UPPER). Los
           // consumidores (resolvePositionPrice, computeDailyPnL,
