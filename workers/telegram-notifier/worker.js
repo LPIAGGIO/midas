@@ -472,14 +472,21 @@ async function buildEodSummary(userId, rawBy, fut) {
   if (tenencias.length) {
     const d912 = await loadData912();
     const netByTicker = {};
-    for (const p of tenencias) netByTicker[p.ticker] = (netByTicker[p.ticker] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+    const typeByTicker = {};
+    for (const p of tenencias) {
+      netByTicker[p.ticker] = (netByTicker[p.ticker] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+      typeByTicker[p.ticker] = p.instrument_type;
+    }
     let subtotal = 0; const bl = [];
     for (const [ticker, net] of Object.entries(netByTicker)) {
       if (Math.abs(net) < 1e-6) continue;
       const d = d912[ticker];
       if (!d || d.c == null || d.pct == null) { bl.push(`• ${ticker}: s/precio`); continue; }
       const prev = d.c / (1 + d.pct / 100);
-      const pnl = ((d.c - prev) * net) / 100; // bonos cotizan c/100 VN
+      // Bonos/ON cotizan c/100 VN → dividir por 100. Acciones y CEDEARs van por
+      // unidad → NO dividir (antes se dividía a todo y los CEDEARs salían 100x chicos).
+      const per100 = ["bond_ars", "bond_usd", "on"].includes(typeByTicker[ticker]);
+      const pnl = ((d.c - prev) * net) / (per100 ? 100 : 1);
       subtotal += pnl;
       bl.push(`• ${ticker}: ${money(pnl)} (${d.pct >= 0 ? "+" : ""}${d.pct.toFixed(2)}%)`);
     }
