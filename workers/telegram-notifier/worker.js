@@ -749,4 +749,4 @@ if (require.main === module) {
   setInterval(alertLoop, ALERT_INTERVAL_MS);
 }
 
-module.exports = { buildEodSummary, loadPositions, loadPositionsRaw, loadFutures, loadData912, supabase };
+module.exports = { buildEodSummary, buildFuturesSummary, futuresSettledToday, loadPositions, loadPositionsRaw, loadFutures, loadData912, supabase };
