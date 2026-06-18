@@ -438,6 +438,58 @@ async function evalVencimientos(users, positionsBy) {
 
 /* ─────────────── Resumen de cierre (EOD) ─────────────── */
 
+// ¿Ya publico el mercado el ajuste (settle) de HOY? El feed marca settlement_ts
+// con la fecha del settle; si coincide con hoy, el cierre de futuros ya esta.
+async function futuresSettledToday(dateStr) {
+  const { data } = await supabase.from("mtr_market_data")
+    .select("settlement_ts").like("symbol", "DLR/%").not("settlement_ts", "is", null)
+    .order("settlement_ts", { ascending: false }).limit(1);
+  if (!data || !data.length || !data[0].settlement_ts) return false;
+  return String(data[0].settlement_ts).slice(0, 10) === dateStr;
+}
+
+// Bloque de futuros (P&L del dia settle-based por ticker). Reutilizado por el
+// resumen EOD (18hs) y el aviso de cierre de futuros (15hs). null si no hay nada.
+async function futuresDayBlock(raw, fut, dateStr, money) {
+  const futLotes = raw.filter((p) => p.instrument_type === "future");
+  if (!futLotes.length) return null;
+  const yest = await loadYestSettles(dateStr);
+  const byTicker = {};
+  for (const p of futLotes) (byTicker[p.ticker] = byTicker[p.ticker] || []).push(p);
+  let subtotal = 0, realizedSum = 0; const fl = [];
+  for (const [ticker, lotes] of Object.entries(byTicker)) {
+    const net = lotes.reduce((s, p) => s + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0), 0);
+    const tradedToday = lotes.some((p) => p.entry_date === dateStr);
+    // Saltear futuros vencidos/cerrados (neto 0) sin actividad hoy (ABR26/MAY26).
+    if (Math.abs(net) < 1e-6 && !tradedToday) continue;
+    const sToday = fut.settle[ticker], sYest = yest[ticker];
+    if (sToday == null || sYest == null) {
+      if (Math.abs(net) < 1e-6) continue;
+      fl.push(`• ${ticker} (${net > 0 ? "+" : ""}${net}): s/settle`); continue;
+    }
+    const { dayPnl, realizedToday } = futuresTickerDay(lotes, sToday, sYest, dateStr);
+    subtotal += dayPnl; realizedSum += realizedToday;
+    const realTxt = Math.abs(realizedToday) > 1 ? ` · realiz. aprox ${money(realizedToday)}` : "";
+    const ctx = tradedToday ? `  (incl. intradía)` : `  (${sYest}→${sToday})`;
+    fl.push(`• ${ticker} (neto ${net > 0 ? "+" : ""}${net}): ${money(dayPnl)}${ctx}${realTxt}`);
+  }
+  if (!fl.length) return null;
+  const realLine = Math.abs(realizedSum) > 1 ? `\n  ↳ de eso, realizado hoy (cerrado, aprox): <b>${money(realizedSum)}</b>` : "";
+  const block = `<b>Futuros DLR — P&L del dia</b>\n${fl.join("\n")}\nSubtotal: <b>${money(subtotal)}</b>${realLine}`;
+  return { block, subtotal, realizedSum };
+}
+
+// Aviso de CIERRE DE FUTUROS (15hs): solo el bloque de futuros. null si el user
+// no tiene futuros con algo para mostrar.
+async function buildFuturesSummary(userId, rawBy, fut) {
+  const { dateStr } = artParts();
+  const raw = rawBy[userId] || [];
+  const money = (n) => `${n >= 0 ? "+" : "−"}$${Math.round(Math.abs(n)).toLocaleString("es-AR")}`;
+  const futRes = await futuresDayBlock(raw, fut, dateStr, money);
+  if (!futRes) return null;
+  return `📊 <b>Cierre de futuros ${dateStr}</b>\n\n${futRes.block}\n<i>Ajuste de cierre de hoy vs ayer (como Matriz). El "realizado" es aprox (costo prom).</i>`;
+}
+
 async function buildEodSummary(userId, rawBy, fut) {
   const { dateStr } = artParts();
   const raw = rawBy[userId] || [];
@@ -446,38 +498,10 @@ async function buildEodSummary(userId, rawBy, fut) {
   const lines = [`📊 <b>Cierre ${dateStr}</b>`];
   let grand = 0;
 
-  // ── Futuros: P&L del dia COMPLETO por ticker (MTM neto + realizado de hoy),
-  //    settle-based (como Cocos). Mas el realizado de lo cerrado hoy, aparte.
-  const futLotes = raw.filter((p) => p.instrument_type === "future");
-  if (futLotes.length) {
-    const yest = await loadYestSettles(dateStr);
-    const byTicker = {};
-    for (const p of futLotes) (byTicker[p.ticker] = byTicker[p.ticker] || []).push(p);
-    let subtotal = 0, realizedSum = 0; const fl = [];
-    for (const [ticker, lotes] of Object.entries(byTicker)) {
-      const net = lotes.reduce((s, p) => s + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0), 0);
-      const tradedToday = lotes.some((p) => p.entry_date === dateStr);
-      // Saltear futuros vencidos/cerrados (neto 0) sin actividad hoy: ABR26/MAY26
-      // se colaban con +$0. Un round-trip cerrado HOY (neto 0 pero tradedToday) sí
-      // se muestra, para ver su realizado.
-      if (Math.abs(net) < 1e-6 && !tradedToday) continue;
-      const sToday = fut.settle[ticker], sYest = yest[ticker];
-      if (sToday == null || sYest == null) {
-        if (Math.abs(net) < 1e-6) continue; // flat y sin settle: no aporta nada
-        fl.push(`• ${ticker} (${net > 0 ? "+" : ""}${net}): s/settle`); continue;
-      }
-      const { dayPnl, realizedToday } = futuresTickerDay(lotes, sToday, sYest, dateStr);
-      subtotal += dayPnl; realizedSum += realizedToday;
-      const realTxt = Math.abs(realizedToday) > 1 ? ` · realiz. aprox ${money(realizedToday)}` : "";
-      // El settle ayer→hoy es la base del P&L para lotes ARRASTRADOS. Si hubo trades
-      // hoy, la base real es el entry del lote del día → mostrar el settle confunde;
-      // en ese caso marcamos "incl. intradía".
-      const ctx = tradedToday ? `  (incl. intradía)` : `  (${sYest}→${sToday})`;
-      fl.push(`• ${ticker} (neto ${net > 0 ? "+" : ""}${net}): ${money(dayPnl)}${ctx}${realTxt}`);
-    }
-    grand += subtotal;
-    lines.push(`\n<b>Futuros DLR — P&L del dia</b>\n${fl.join("\n")}\nSubtotal: <b>${money(subtotal)}</b>${Math.abs(realizedSum) > 1 ? `\n  ↳ de eso, realizado hoy (cerrado, aprox): <b>${money(realizedSum)}</b>` : ""}`);
-  }
+  // ── Futuros: P&L del dia (settle-based). Ver futuresDayBlock (reutilizado por
+  //    el aviso de cierre de futuros de las 15hs).
+  const futRes = await futuresDayBlock(raw, fut, dateStr, money);
+  if (futRes) { grand += futRes.subtotal; lines.push(`\n${futRes.block}`); }
 
   // ── Tenencias (bonos/acciones): P&L del dia EN PESOS (variacion data912).
   const tenencias = raw.filter((p) => ["bond_ars", "bond_usd", "on", "stock", "cedear"].includes(p.instrument_type));
@@ -529,6 +553,28 @@ async function evalEodScheduled(users) {
   }
 }
 
+// Aviso de CIERRE DE FUTUROS a las 15hs (cuando el mercado publica el ajuste).
+// Ventana 15-17hs: dispara el primer loop donde el settle de HOY ya esta
+// publicado (sino el P&L saldria 0/stale), una sola vez por dia (dedup).
+async function evalFuturesCloseScheduled(users) {
+  const p = artParts();
+  if (!isBizDay(p.dow)) return;
+  if (p.hour < 15 || p.hour > 17) return;
+  const subs = users.filter((u) => prefOn(u.prefs, "futures_close", true));
+  if (!subs.length) return;
+  if (!(await futuresSettledToday(p.dateStr))) return; // el cierre todavia no se publico
+  const positionsBy = await loadPositionsRaw(subs.map((u) => u.userId));
+  const fut = await loadFutures();
+  for (const u of subs) {
+    if (await recentlySent(u.userId, "fut_close", p.dateStr, 23 * 60 * 60 * 1000)) continue;
+    const txt = await buildFuturesSummary(u.userId, positionsBy, fut);
+    if (!txt) continue; // sin futuros
+    await sendMessage(u.chatId, txt);
+    await logSent(u.userId, "fut_close", p.dateStr, "cierre futuros", "resumen futuros");
+    console.log(`[fut_close] ${u.userId} ${p.dateStr}`);
+  }
+}
+
 /* ─────────────── Loop principal de alertas ─────────────── */
 
 async function alertLoop() {
@@ -546,6 +592,7 @@ async function alertLoop() {
       await evalVencimientos(users, positionsBy);
     }
     await evalEodScheduled(users);
+    await evalFuturesCloseScheduled(users);
   } catch (e) {
     console.error("[alertLoop]", e.message);
   }
