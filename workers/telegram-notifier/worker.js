@@ -455,13 +455,25 @@ async function buildEodSummary(userId, rawBy, fut) {
     for (const p of futLotes) (byTicker[p.ticker] = byTicker[p.ticker] || []).push(p);
     let subtotal = 0, realizedSum = 0; const fl = [];
     for (const [ticker, lotes] of Object.entries(byTicker)) {
-      const sToday = fut.settle[ticker], sYest = yest[ticker];
       const net = lotes.reduce((s, p) => s + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0), 0);
-      if (sToday == null || sYest == null) { fl.push(`• ${ticker} (${net > 0 ? "+" : ""}${net}): s/settle`); continue; }
+      const tradedToday = lotes.some((p) => p.entry_date === dateStr);
+      // Saltear futuros vencidos/cerrados (neto 0) sin actividad hoy: ABR26/MAY26
+      // se colaban con +$0. Un round-trip cerrado HOY (neto 0 pero tradedToday) sí
+      // se muestra, para ver su realizado.
+      if (Math.abs(net) < 1e-6 && !tradedToday) continue;
+      const sToday = fut.settle[ticker], sYest = yest[ticker];
+      if (sToday == null || sYest == null) {
+        if (Math.abs(net) < 1e-6) continue; // flat y sin settle: no aporta nada
+        fl.push(`• ${ticker} (${net > 0 ? "+" : ""}${net}): s/settle`); continue;
+      }
       const { dayPnl, realizedToday } = futuresTickerDay(lotes, sToday, sYest, dateStr);
       subtotal += dayPnl; realizedSum += realizedToday;
       const realTxt = Math.abs(realizedToday) > 1 ? ` · realiz. aprox ${money(realizedToday)}` : "";
-      fl.push(`• ${ticker} (neto ${net > 0 ? "+" : ""}${net}): ${money(dayPnl)}  (${sYest}→${sToday})${realTxt}`);
+      // El settle ayer→hoy es la base del P&L para lotes ARRASTRADOS. Si hubo trades
+      // hoy, la base real es el entry del lote del día → mostrar el settle confunde;
+      // en ese caso marcamos "incl. intradía".
+      const ctx = tradedToday ? `  (incl. intradía)` : `  (${sYest}→${sToday})`;
+      fl.push(`• ${ticker} (neto ${net > 0 ? "+" : ""}${net}): ${money(dayPnl)}${ctx}${realTxt}`);
     }
     grand += subtotal;
     lines.push(`\n<b>Futuros DLR — P&L del dia</b>\n${fl.join("\n")}\nSubtotal: <b>${money(subtotal)}</b>${Math.abs(realizedSum) > 1 ? `\n  ↳ de eso, realizado hoy (cerrado, aprox): <b>${money(realizedSum)}</b>` : ""}`);
