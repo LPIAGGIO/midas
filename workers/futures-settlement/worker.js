@@ -239,12 +239,17 @@ async function generateAdjustments(positions, endSettleDate) {
     groups[key].netQty += sign * (Number(p.quantity) || 0);
     groups[key].ops.push(p);
   }
-  const openGroups = Object.values(groups).filter((g) => g.netQty !== 0);
-  // Grupos CERRADOS (round-trips: la cantidad neta volvio a 0). No tienen
-  // ajuste MTM diario abierto, pero su P&L realizado igual debe acreditarse.
-  const closedGroups = Object.values(groups).filter(
-    (g) => g.netQty === 0 && g.ops.length > 0
-  );
+  // FIX 19/06/2026: incluimos TODOS los grupos (net != 0 y net == 0) en este
+  // loop. Antes los net==0 iban por un path aparte ("round-trips cerrados") que
+  // acreditaba el realizado de TODA LA VIDA del contrato en el dia del cierre
+  // (caso LP 18/06 DLRJUN26: -18,5M de 4.464 contratos) en vez del P&L del DIA.
+  // El loop de abajo calcula el ajuste correcto por lote (base = settle previo
+  // para arrastrados / entry para lo operado HOY), y el guard de "flat-skip"
+  // (totalSignedQty==0 && |estimado|<1) saltea los round-trips ya cerrados en
+  // dias anteriores, dejando pasar solo el realizado del dia del cierre.
+  const openGroups = Object.values(groups).filter((g) => g.ops.length > 0);
+  // Path viejo de cerrados DESHABILITADO (lo cubre el loop consolidado).
+  const closedGroups = [];
   if (openGroups.length === 0 && closedGroups.length === 0) {
     info("No hay grupos de futuros. Sin ajustes.");
     return 0;
