@@ -1833,6 +1833,18 @@ const BROKER_CATALOG = {
   manual: { id: "manual", label: "Otro / Manual",        short: "MAN",  type: "manual", color: "#94A3B8" },
 };
 
+// Opciones de broker para los selectores de carga MANUAL (Agregar posición /
+// movimiento de efectivo): solo los brokers que el usuario REALMENTE usa (tiene
+// positions cargadas) + siempre "Otro / Manual". Evita ofrecer brokers que no
+// opera (ej. ECO Valores si nunca cargó nada ahí). Si todavía no hay positions
+// (usuario nuevo), mostramos todos para no romper la primera carga.
+function brokerOptionsForPositions(positions) {
+  if (!positions || !positions.length) return Object.values(BROKER_CATALOG);
+  const ids = new Set(positions.map((p) => p && p.broker).filter(Boolean));
+  ids.add("manual");
+  return Object.values(BROKER_CATALOG).filter((b) => ids.has(b.id));
+}
+
 function useLinkedBrokers(userId) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3881,6 +3893,7 @@ function LibroOperacionesView() {
       {/* Modal de edición de cash movement (reusado del dashboard) */}
       {editingCashMovement && (
         <CashMovementModal
+          positions={positions}
           type={editingCashMovement.movement_type}
           editingMovement={editingCashMovement}
           onCancel={() => setEditingCashMovement(null)}
@@ -14192,6 +14205,7 @@ function PortfolioDashboard({ onNavigate }) {
       {drawerOpen && (
         <AddPositionDrawer
           editingPosition={editingPosition}
+          positions={positions}
           onClose={closeDrawer}
           onSubmit={handleSubmit}
         />
@@ -14218,6 +14232,7 @@ function PortfolioDashboard({ onNavigate }) {
       {/* Modal de movimiento manual de cash (Ingresar / Retirar / Editar) */}
       {(cashModalType || editingCashMovement) && (
         <CashMovementModal
+          positions={positions}
           type={cashModalType || editingCashMovement.movement_type}
           editingMovement={editingCashMovement}
           onCancel={() => {
@@ -17221,7 +17236,7 @@ function EditablePriceCell({ position, resolved, onSave }) {
  *   - onSubmit({movement_type, currency, amount, movement_date, notes}):
  *       el padre se encarga de llamar al hook useCashMovements.addManualMovement
  */
-function CashMovementModal({ type, editingMovement, onCancel, onSubmit }) {
+function CashMovementModal({ type, editingMovement, onCancel, onSubmit, positions }) {
   const isEditing = Boolean(editingMovement);
 
   // Si estamos editando, el tipo lo determina el movement existente.
@@ -17413,7 +17428,7 @@ function CashMovementModal({ type, editingMovement, onCancel, onSubmit }) {
             otros brokers o para registrar un saldo inicial. */}
         <FormSection label="Broker">
           <div className="flex flex-wrap" style={{ gap: 6 }}>
-            {Object.values(BROKER_CATALOG).map((b) => {
+            {brokerOptionsForPositions(positions).map((b) => {
               const isActive = form.broker === b.id;
               return (
                 <button
@@ -17825,7 +17840,7 @@ function DeleteCashMovementModal({ movement, onCancel, onConfirm }) {
  * El form arma un "payload" que matchea el schema de la tabla positions
  * y lo pasa a onSubmit. La persistencia se hace en el componente padre.
  */
-function AddPositionDrawer({ editingPosition, onClose, onSubmit }) {
+function AddPositionDrawer({ editingPosition, onClose, onSubmit, positions }) {
   const isEditing = Boolean(editingPosition);
 
   // Catálogo dinámico de tickers (acciones, CEDEARs, ONs, bonos USD).
@@ -18734,7 +18749,7 @@ function AddPositionDrawer({ editingPosition, onClose, onSubmit }) {
               cargás a mano (Cocos, ECO, manual/otro). */}
           <FormSection label="Broker">
             <div className="flex flex-wrap" style={{ gap: 6 }}>
-              {Object.values(BROKER_CATALOG).map((b) => {
+              {brokerOptionsForPositions(positions).map((b) => {
                 const isActive = form.broker === b.id;
                 return (
                   <button
