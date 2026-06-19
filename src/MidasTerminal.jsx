@@ -14480,13 +14480,21 @@ function FutureAdjustmentsBanner({ count, totalEstimated, onClick }) {
  *   onClose: cerrar el modal.
  */
 function getAdjustmentDisplayValues(adj, futurePrices) {
-  const livePrice = futurePrices?.[adj.ticker]?.price;
-  const useLive = adj.is_estimated && Number.isFinite(Number(livePrice));
-  const currSettle = useLive ? Number(livePrice) : Number(adj.curr_settle);
   const prevSettle = Number(adj.prev_settle);
   const netQty = Number(adj.net_qty);
   const multiplier = Number(adj.multiplier);
-  const estimatedAmount = (currSettle - prevSettle) * netQty * multiplier;
+  const livePrice = futurePrices?.[adj.ticker]?.price;
+  // Recalc en vivo SOLO para posiciones ABIERTAS (netQty != 0) con el settle
+  // todavía estimado: ahí (live − prev) × net tiene sentido. Para una posición
+  // CERRADA (netQty 0, round-trip cerrado HOY) el monto del día es el REALIZADO
+  // que el worker dejó en estimated_amount — recalcular daría (live − prev) × 0 = 0
+  // y se perdería ese realizado (bug: los cerrados se acreditaban en $0).
+  const useLive = adj.is_estimated && netQty !== 0 && Number.isFinite(Number(livePrice));
+  const currSettle = useLive ? Number(livePrice) : Number(adj.curr_settle);
+  const stored = Number(adj.estimated_amount);
+  const estimatedAmount = useLive
+    ? (currSettle - prevSettle) * netQty * multiplier
+    : (Number.isFinite(stored) ? stored : (currSettle - prevSettle) * netQty * multiplier);
   return { currSettle, prevSettle, estimatedAmount, isLive: useLive };
 }
 
