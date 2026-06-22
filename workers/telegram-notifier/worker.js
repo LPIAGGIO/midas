@@ -49,6 +49,7 @@ const FUTURE_MULT = 1000; // DLR: 1000 USD por contrato
 const CAL_BAND = [25, 31];      // spread calendario entre meses consecutivos del frente
 const Z_THRESHOLD = 2;          // reversion z-score sobre cada contrato del frente (mes actual + 2)
 const Z_MIN_MOVE_PCT = 0.3;     // ...además el desvío debe ser >= este % del precio (sino es ruido de centésimas)
+const OUTLIER_PCT = 0.25;       // contrato vs mediana Var% de la curva: PUSH solo si se aparta >= esto (~4 pesos)
 const Z_BUF_MAX = 40, Z_BUF_MIN = 20;
 const DESARB_SPREAD_PCT = 1.5;  // umbral spread del canje (alto: el cross-bond real es ~0, el resto es ruido de precios stale)
 const VENC_DAYS = 7;            // avisar si vence en <= N dias
@@ -358,8 +359,24 @@ function frontDlr(fut, n = 3) {
     .sort((a, b) => a.ord - b.ord)
     .slice(0, n);
 }
-const zbufs = {};   // ticker -> buffer de precios para el z-score (uno por contrato)
-const calState = {}; // par(far.ticker) -> "low"|"mid"|"high" (hysteresis del spread)
+// Var% diaria (último vs settlement previo, = la Var de Matriz) de cada contrato
+// DLR de la curva + la mediana de la curva. La curva entera da el "consenso" del día;
+// el contrato que más se aparta de esa mediana es el desalineado (caro/barato).
+function curveVar(fut) {
+  const all = Object.keys(fut.price).map(parseDlr).filter(Boolean)
+    .map((c) => { const p = fut.price[c.ticker], s = fut.settle[c.ticker]; return (p != null && s != null && s > 0) ? { ...c, p, s, varPct: ((p - s) / s) * 100 } : null; })
+    .filter(Boolean).sort((a, b) => a.ord - b.ord);
+  let median = null;
+  if (all.length) {
+    const v = all.map((c) => c.varPct).sort((a, b) => a - b);
+    median = v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
+  }
+  return { all, median };
+}
+
+const zbufs = {};      // ticker -> buffer de precios para el z-score (uno por contrato)
+const calState = {};   // par(far.ticker) -> "low"|"mid"|"high" (hysteresis del spread)
+const outlierState = {}; // ticker -> "caro"|"align"|"barato" (hysteresis del outlier de curva)
 function buildScalpingSignals(fut) {
   const sigs = [];
   const fronts = frontDlr(fut, 3);
@@ -407,6 +424,31 @@ function buildScalpingSignals(fut) {
     const movePct = (Math.abs(px - mean) / px) * 100;
     if (Math.abs(z) >= Z_THRESHOLD && movePct >= Z_MIN_MOVE_PCT)
       sigs.push({ key: `z_${c.ticker}_${z > 0 ? "high" : "low"}`, text: `🔄 <b>Dólar futuro de ${c.nombre}: movimiento brusco</b>\nEl dólar futuro de ${c.nombre} (${px}) se ${z > 0 ? "despegó hacia arriba" : "despegó hacia abajo"} de su promedio reciente (${mean.toFixed(1)}) — un ${movePct.toFixed(2)}%. Se movió más rápido de lo normal y suele tender a volver hacia ese promedio.` });
+  }
+
+  // (3) Contrato DESALINEADO de la curva: cada mes del frente contra la mediana de
+  //     Var% de TODA la curva DLR. El que más se aparta es el caro/barato. PUSH solo
+  //     en la transición a desalineado con umbral OUTLIER_PCT (sino el ruido de ~1 peso
+  //     —dentro de la punta— spamea); los desvíos chicos se ven on-demand con /dlr.
+  const cv = curveVar(fut);
+  if (cv.median != null && cv.all.length >= 3) {
+    const frontSet = new Set(fronts.map((c) => c.ticker));
+    for (const c of cv.all) {
+      if (!frontSet.has(c.ticker)) continue;
+      const dev = c.varPct - cv.median;
+      const prev = outlierState[c.ticker] || "align";
+      let cur = prev;
+      if (dev > OUTLIER_PCT) cur = "caro";
+      else if (dev < -OUTLIER_PCT) cur = "barato";
+      else if (Math.abs(dev) < OUTLIER_PCT - 0.05) cur = "align";
+      outlierState[c.ticker] = cur;
+      if (cur === prev || cur === "align") continue; // solo en la transición a desalineado
+      const pesos = ((Math.abs(dev) / 100) * c.p).toFixed(1);
+      if (cur === "caro")
+        sigs.push({ key: `out_${c.ticker}_caro`, text: `📊 <b>Dólar futuro de ${c.nombre}: caro vs la curva</b>\nHoy se movió por encima del resto de la curva (${c.varPct.toFixed(2)}% vs ${cv.median.toFixed(2)}% de mediana): quedó relativamente caro. Para alinearse tendría que ceder ~${pesos} pesos.` });
+      else
+        sigs.push({ key: `out_${c.ticker}_barato`, text: `📊 <b>Dólar futuro de ${c.nombre}: barato vs la curva</b>\nHoy se movió por debajo del resto de la curva (${c.varPct.toFixed(2)}% vs ${cv.median.toFixed(2)}% de mediana): quedó relativamente barato. Para alinearse tendría que subir ~${pesos} pesos.` });
+    }
   }
   return sigs;
 }
@@ -667,13 +709,33 @@ async function cmdDlr(chatId) {
   const fronts = frontDlr(fut, 3);
   if (!fronts.length) { await sendMessage(chatId, "💵 <b>Dólar futuro</b>\nSin precios por ahora."); return; }
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-  const lines = fronts.map((c) => `${cap(c.nombre)}: <b>${fut.price[c.ticker]}</b>`);
+  const cv = curveVar(fut);
+  const vmap = {}; for (const c of cv.all) vmap[c.ticker] = c.varPct;
+  const lines = fronts.map((c) => {
+    const v = vmap[c.ticker];
+    const vtxt = v == null ? "" : ` (${v >= 0 ? "+" : ""}${v.toFixed(2)}%)`;
+    return `${cap(c.nombre)}: <b>${fut.price[c.ticker]}</b>${vtxt}`;
+  });
   const spreads = [];
   for (let i = 0; i + 1 < fronts.length; i++) {
     const pn = fut.price[fronts[i].ticker], pf = fut.price[fronts[i + 1].ticker];
     if (pn != null && pf != null) spreads.push(`${cap(fronts[i].nombre)} → ${cap(fronts[i + 1].nombre)}: <b>+${(pf - pn).toFixed(1)} pesos</b>`);
   }
-  const body = `💵 <b>Dólar futuro</b>\n${lines.join("\n")}${spreads.length ? `\n\nDiferencia entre meses:\n${spreads.join("\n")}` : ""}${inRueda() ? "" : "\n\n<i>(mercado cerrado — valores de settlement)</i>"}`;
+  // El más desalineado de la curva (entre los del frente), aunque sea por poco.
+  let outTxt = "";
+  if (cv.median != null) {
+    let best = null;
+    for (const c of cv.all) {
+      if (!fronts.some((f) => f.ticker === c.ticker)) continue;
+      const dev = c.varPct - cv.median;
+      if (!best || Math.abs(dev) > Math.abs(best.dev)) best = { c, dev };
+    }
+    if (best && Math.abs(best.dev) >= 0.03) {
+      const pesos = ((Math.abs(best.dev) / 100) * best.c.p).toFixed(1);
+      outTxt = `\n\n<i>Más desalineado: ${cap(best.c.nombre)} — ${best.dev > 0 ? "caro" : "barato"} ~${pesos} pesos vs la curva (su Var ${best.c.varPct.toFixed(2)}% vs ${cv.median.toFixed(2)}% de mediana).</i>`;
+    }
+  }
+  const body = `💵 <b>Dólar futuro</b>\n${lines.join("\n")}${spreads.length ? `\n\nDiferencia entre meses:\n${spreads.join("\n")}` : ""}${outTxt}${inRueda() ? "" : "\n\n<i>(mercado cerrado — valores de settlement)</i>"}`;
   await sendMessage(chatId, body);
 }
 
@@ -806,4 +868,4 @@ if (require.main === module) {
   setInterval(alertLoop, ALERT_INTERVAL_MS);
 }
 
-module.exports = { buildEodSummary, buildFuturesSummary, futuresSettledToday, loadPositions, loadPositionsRaw, loadFutures, loadData912, buildScalpingSignals, frontDlr, supabase };
+module.exports = { buildEodSummary, buildFuturesSummary, futuresSettledToday, loadPositions, loadPositionsRaw, loadFutures, loadData912, buildScalpingSignals, frontDlr, curveVar, supabase };
