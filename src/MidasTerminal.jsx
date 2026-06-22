@@ -24984,21 +24984,11 @@ function DolarDivisasModule() {
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
-      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Dólar y Divisas</h1>
-          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 720 }}>
-            Reservas, compras y ventas diarias de divisas del BCRA (intervención cambiaria) y tipo de cambio oficial. Fuente: API Estadísticas Monetarias del BCRA.
-          </p>
-        </div>
-        <div className="flex items-center" style={{ gap: 6 }}>
-          {["90d", "1a", "max"].map((r) => (
-            <button key={r} onClick={() => setRange(r)}
-              style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${range === r ? C.accent : C.border}`, background: range === r ? "rgba(124,156,255,0.12)" : "transparent", color: range === r ? C.accent : C.muted, borderRadius: 4 }}>
-              {r === "90d" ? "90 días" : r === "1a" ? "1 año" : "5 años"}
-            </button>
-          ))}
-        </div>
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Dólar y Divisas</h1>
+        <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 720 }}>
+          Reservas, compras y ventas diarias de divisas del BCRA (intervención cambiaria) y tipo de cambio oficial. Fuente: API Estadísticas Monetarias del BCRA.
+        </p>
       </div>
 
       {err && <div style={{ padding: 12, border: `1px solid ${C.border}`, borderRadius: 6, color: "#f87171", fontSize: 12, marginBottom: 12 }}>{err}</div>}
@@ -25016,6 +25006,18 @@ function DolarDivisasModule() {
           </div>
 
           <ComprasDivisas2026 compras={d.compras} />
+
+          <div className="flex items-center justify-between" style={{ marginTop: 18, marginBottom: 2, gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: C.dim }}>Rango de las series de abajo (reservas y tipo de cambio)</span>
+            <div className="flex items-center" style={{ gap: 6 }}>
+              {["90d", "1a", "max"].map((r) => (
+                <button key={r} onClick={() => setRange(r)}
+                  style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${range === r ? C.accent : C.border}`, background: range === r ? "rgba(124,156,255,0.12)" : "transparent", color: range === r ? C.accent : C.muted, borderRadius: 4 }}>
+                  {r === "90d" ? "90 días" : r === "1a" ? "1 año" : "5 años"}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <Section title="Evolución de reservas internacionales" hint="USD millones · diaria">
             <BcraChart series={d.res} kind="line" color="#60a5fa" height={170} fmtY={fMM} />
