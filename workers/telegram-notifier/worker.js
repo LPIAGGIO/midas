@@ -343,8 +343,8 @@ function buildScalpingSignals(fut) {
   const sigs = [];
   if (jun != null && jul != null) {
     const cal = jul - jun;
-    if (cal < CAL_BAND[0]) sigs.push({ key: "cal_low", text: `📐 Spread calendario JUL-JUN comprimido: <b>${cal.toFixed(1)}</b> (banda ${CAL_BAND[0]}-${CAL_BAND[1]}).` });
-    else if (cal > CAL_BAND[1]) sigs.push({ key: "cal_high", text: `📐 Spread calendario JUL-JUN ancho: <b>${cal.toFixed(1)}</b> (banda ${CAL_BAND[0]}-${CAL_BAND[1]}).` });
+    if (cal < CAL_BAND[0]) sigs.push({ key: "cal_low", text: `📐 <b>Dólar futuro: diferencia chica entre meses</b>\nEl dólar a fin de julio (${jul}) está solo <b>${cal.toFixed(1)} pesos</b> más caro que el de fin de junio (${jun}). Normalmente esa diferencia es de ${CAL_BAND[0]} a ${CAL_BAND[1]} pesos, así que hoy está comprimida: el mercado espera una suba del dólar más lenta de junio a julio.` });
+    else if (cal > CAL_BAND[1]) sigs.push({ key: "cal_high", text: `📐 <b>Dólar futuro: diferencia grande entre meses</b>\nEl dólar a fin de julio (${jul}) está <b>${cal.toFixed(1)} pesos</b> más caro que el de fin de junio (${jun}). Normalmente esa diferencia es de ${CAL_BAND[0]} a ${CAL_BAND[1]} pesos, así que hoy está estirada: el mercado espera una suba del dólar más fuerte de junio a julio.` });
   }
   if (jun != null) {
     zbuf.push(jun);
@@ -355,7 +355,7 @@ function buildScalpingSignals(fut) {
       if (sd > 0) {
         const z = (jun - mean) / sd;
         if (Math.abs(z) >= Z_THRESHOLD)
-          sigs.push({ key: z > 0 ? "z_high" : "z_low", text: `🔄 Reversion JUN26: z=<b>${z.toFixed(2)}</b> (precio ${jun} vs media ${mean.toFixed(1)}). ${z > 0 ? "Estirado arriba" : "Estirado abajo"}.` });
+          sigs.push({ key: z > 0 ? "z_high" : "z_low", text: `🔄 <b>Dólar futuro de junio: movimiento brusco</b>\nEl dólar futuro de junio (${jun}) se ${z > 0 ? "despegó hacia arriba" : "despegó hacia abajo"} de su promedio reciente (${mean.toFixed(1)}). Se movió bastante más rápido de lo normal y suele tender a volver hacia ese promedio.` });
       }
     }
   }
@@ -369,7 +369,7 @@ async function evalScalping(users, fut) {
   for (const u of subs) {
     for (const s of sigs) {
       if (await recentlySent(u.userId, "scalping", s.key, CD.scalping)) continue;
-      await sendMessage(u.chatId, `${s.text}\n<i>Senal estructural EN VALIDACION — candidata, no es orden.</i>`);
+      await sendMessage(u.chatId, `${s.text}\n\n<i>Es solo un aviso de algo que Midas detectó y está midiendo. No es una recomendación de compra ni venta.</i>`);
       await logSent(u.userId, "scalping", s.key, "scalping", s.text.replace(/<[^>]+>/g, ""));
       console.log(`[scalping] ${u.userId} ${s.key}`);
     }
