@@ -46,8 +46,8 @@ const POLL_TIMEOUT_S = 30;
 const FUTURE_MULT = 1000; // DLR: 1000 USD por contrato
 
 // Parametros de senales (defaults; el front usa los mismos).
-const CAL_BAND = [25, 31];      // spread calendario JUL-JUN
-const Z_THRESHOLD = 2;          // reversion z-score sobre JUN26
+const CAL_BAND = [25, 31];      // spread calendario entre meses consecutivos del frente
+const Z_THRESHOLD = 2;          // reversion z-score sobre cada contrato del frente (mes actual + 2)
 const Z_BUF_MAX = 40, Z_BUF_MIN = 20;
 const DESARB_SPREAD_PCT = 1.5;  // umbral spread del canje (alto: el cross-bond real es ~0, el resto es ruido de precios stale)
 const VENC_DAYS = 7;            // avisar si vence en <= N dias
@@ -337,27 +337,58 @@ async function evalPriceAlerts(users, fut) {
 }
 
 // Senales de scalping DLR (market-wide; solo en rueda con precios vivos).
-const zbuf = [];
+// Cubre el mes en curso + los 2 siguientes (los 3 contratos DLR del frente).
+const MES_COD = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+const MES_NOM = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+function parseDlr(t) {
+  const m = /^DLR([A-Z]{3})(\d{2})$/.exec(t);
+  if (!m) return null;
+  const mi = MES_COD.indexOf(m[1]);
+  if (mi < 0) return null;
+  return { ticker: t, mi, ord: Number(m[2]) * 12 + mi, nombre: MES_NOM[mi] };
+}
+// Los N contratos DLR del frente (mes actual + siguientes) que tengan precio vivo.
+function frontDlr(fut, n = 3) {
+  const now = new Date();
+  const curOrd = (now.getFullYear() % 100) * 12 + now.getMonth();
+  return Object.keys(fut.price)
+    .map(parseDlr).filter(Boolean)
+    .filter((c) => c.ord >= curOrd && fut.price[c.ticker] != null)
+    .sort((a, b) => a.ord - b.ord)
+    .slice(0, n);
+}
+const zbufs = {}; // ticker -> buffer de precios para el z-score (uno por contrato)
 function buildScalpingSignals(fut) {
-  const jun = fut.price["DLRJUN26"], jul = fut.price["DLRJUL26"];
   const sigs = [];
-  if (jun != null && jul != null) {
-    const cal = jul - jun;
-    if (cal < CAL_BAND[0]) sigs.push({ key: "cal_low", text: `📐 <b>Dólar futuro: diferencia chica entre meses</b>\nEl dólar a fin de julio (${jul}) está solo <b>${cal.toFixed(1)} pesos</b> más caro que el de fin de junio (${jun}). Normalmente esa diferencia es de ${CAL_BAND[0]} a ${CAL_BAND[1]} pesos, así que hoy está comprimida: el mercado espera una suba del dólar más lenta de junio a julio.` });
-    else if (cal > CAL_BAND[1]) sigs.push({ key: "cal_high", text: `📐 <b>Dólar futuro: diferencia grande entre meses</b>\nEl dólar a fin de julio (${jul}) está <b>${cal.toFixed(1)} pesos</b> más caro que el de fin de junio (${jun}). Normalmente esa diferencia es de ${CAL_BAND[0]} a ${CAL_BAND[1]} pesos, así que hoy está estirada: el mercado espera una suba del dólar más fuerte de junio a julio.` });
+  const fronts = frontDlr(fut, 3);
+
+  // (1) Spread calendario entre meses CONSECUTIVOS (jul-jun, ago-jul): cuántos
+  //     pesos más caro está cada mes respecto del anterior. Banda = lo normal.
+  for (let i = 0; i + 1 < fronts.length; i++) {
+    const near = fronts[i], far = fronts[i + 1];
+    const pn = fut.price[near.ticker], pf = fut.price[far.ticker];
+    if (pn == null || pf == null) continue;
+    const cal = pf - pn;
+    if (cal < CAL_BAND[0])
+      sigs.push({ key: `cal_low_${far.ticker}`, text: `📐 <b>Dólar futuro: diferencia chica entre ${near.nombre} y ${far.nombre}</b>\nEl dólar a fin de ${far.nombre} (${pf}) está solo <b>${cal.toFixed(1)} pesos</b> más caro que el de fin de ${near.nombre} (${pn}). Normalmente esa diferencia es de ${CAL_BAND[0]} a ${CAL_BAND[1]} pesos, así que hoy está comprimida: el mercado espera una suba del dólar más lenta de ${near.nombre} a ${far.nombre}.` });
+    else if (cal > CAL_BAND[1])
+      sigs.push({ key: `cal_high_${far.ticker}`, text: `📐 <b>Dólar futuro: diferencia grande entre ${near.nombre} y ${far.nombre}</b>\nEl dólar a fin de ${far.nombre} (${pf}) está <b>${cal.toFixed(1)} pesos</b> más caro que el de fin de ${near.nombre} (${pn}). Normalmente esa diferencia es de ${CAL_BAND[0]} a ${CAL_BAND[1]} pesos, así que hoy está estirada: el mercado espera una suba del dólar más fuerte de ${near.nombre} a ${far.nombre}.` });
   }
-  if (jun != null) {
-    zbuf.push(jun);
-    while (zbuf.length > Z_BUF_MAX) zbuf.shift();
-    if (zbuf.length >= Z_BUF_MIN) {
-      const mean = zbuf.reduce((a, b) => a + b, 0) / zbuf.length;
-      const sd = Math.sqrt(zbuf.reduce((a, b) => a + (b - mean) ** 2, 0) / zbuf.length);
-      if (sd > 0) {
-        const z = (jun - mean) / sd;
-        if (Math.abs(z) >= Z_THRESHOLD)
-          sigs.push({ key: z > 0 ? "z_high" : "z_low", text: `🔄 <b>Dólar futuro de junio: movimiento brusco</b>\nEl dólar futuro de junio (${jun}) se ${z > 0 ? "despegó hacia arriba" : "despegó hacia abajo"} de su promedio reciente (${mean.toFixed(1)}). Se movió bastante más rápido de lo normal y suele tender a volver hacia ese promedio.` });
-      }
-    }
+
+  // (2) Reversión: cada contrato del frente contra su propio promedio reciente.
+  for (const c of fronts) {
+    const px = fut.price[c.ticker];
+    if (px == null) continue;
+    const buf = (zbufs[c.ticker] || (zbufs[c.ticker] = []));
+    buf.push(px);
+    while (buf.length > Z_BUF_MAX) buf.shift();
+    if (buf.length < Z_BUF_MIN) continue;
+    const mean = buf.reduce((a, b) => a + b, 0) / buf.length;
+    const sd = Math.sqrt(buf.reduce((a, b) => a + (b - mean) ** 2, 0) / buf.length);
+    if (sd <= 0) continue;
+    const z = (px - mean) / sd;
+    if (Math.abs(z) >= Z_THRESHOLD)
+      sigs.push({ key: `z_${c.ticker}_${z > 0 ? "high" : "low"}`, text: `🔄 <b>Dólar futuro de ${c.nombre}: movimiento brusco</b>\nEl dólar futuro de ${c.nombre} (${px}) se ${z > 0 ? "despegó hacia arriba" : "despegó hacia abajo"} de su promedio reciente (${mean.toFixed(1)}). Se movió bastante más rápido de lo normal y suele tender a volver hacia ese promedio.` });
   }
   return sigs;
 }
@@ -615,9 +646,17 @@ async function cmdPnl(chatId) {
 
 async function cmdDlr(chatId) {
   const fut = await loadFutures();
-  const jun = fut.price["DLRJUN26"], jul = fut.price["DLRJUL26"];
-  const cal = jun != null && jul != null ? (jul - jun).toFixed(1) : "s/d";
-  await sendMessage(chatId, `💵 <b>DLR</b>\nJUN26: ${jun ?? "s/d"}\nJUL26: ${jul ?? "s/d"}\nSpread calendario JUL-JUN: <b>${cal}</b>${inRueda() ? "" : "\n<i>(mercado cerrado — settlement)</i>"}`);
+  const fronts = frontDlr(fut, 3);
+  if (!fronts.length) { await sendMessage(chatId, "💵 <b>Dólar futuro</b>\nSin precios por ahora."); return; }
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const lines = fronts.map((c) => `${cap(c.nombre)}: <b>${fut.price[c.ticker]}</b>`);
+  const spreads = [];
+  for (let i = 0; i + 1 < fronts.length; i++) {
+    const pn = fut.price[fronts[i].ticker], pf = fut.price[fronts[i + 1].ticker];
+    if (pn != null && pf != null) spreads.push(`${cap(fronts[i].nombre)} → ${cap(fronts[i + 1].nombre)}: <b>+${(pf - pn).toFixed(1)} pesos</b>`);
+  }
+  const body = `💵 <b>Dólar futuro</b>\n${lines.join("\n")}${spreads.length ? `\n\nDiferencia entre meses:\n${spreads.join("\n")}` : ""}${inRueda() ? "" : "\n\n<i>(mercado cerrado — valores de settlement)</i>"}`;
+  await sendMessage(chatId, body);
 }
 
 async function cmdCanje(chatId) {
@@ -749,4 +788,4 @@ if (require.main === module) {
   setInterval(alertLoop, ALERT_INTERVAL_MS);
 }
 
-module.exports = { buildEodSummary, buildFuturesSummary, futuresSettledToday, loadPositions, loadPositionsRaw, loadFutures, loadData912, supabase };
+module.exports = { buildEodSummary, buildFuturesSummary, futuresSettledToday, loadPositions, loadPositionsRaw, loadFutures, loadData912, buildScalpingSignals, frontDlr, supabase };
