@@ -24794,6 +24794,122 @@ function BcraChart({ series, kind = "line", color = "#60a5fa", fmtY, height = 15
   );
 }
 
+// "Compras de divisas · 2026" — viz dedicada de la intervención COMPRADORA del
+// BCRA (var 78): barras de compra diaria + línea de acumulado del período + KPIs
+// + tooltip. Replica el diseño que pidió LP (más entendible que el bar simple).
+// El volumen MULC (contado) NO se incluye: es dato de prensa sin API (se cargaría
+// a mano si se quiere el ratio BCRA/volumen).
+function ComprasDivisas2026({ compras }) {
+  const [period, setPeriod] = useState("mes");
+  const [hover, setHover] = useState(null);
+  const now = new Date();
+  const ym = now.toISOString().slice(0, 7);
+  const yr = now.toISOString().slice(0, 4);
+  const monthName = (() => { try { return now.toLocaleDateString("es-AR", { month: "long" }); } catch { return "mes"; } })();
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const ddmm = (f) => (f || "").slice(5).split("-").reverse().join("/");
+
+  const data = useMemo(() => {
+    let rows;
+    if (period === "mes") rows = compras.filter((x) => x.fecha.startsWith(ym));
+    else if (period === "r30") rows = compras.slice(-30);
+    else rows = compras.filter((x) => x.fecha.startsWith(yr));
+    let acc = 0;
+    return rows.map((x) => { acc += x.valor; return { ...x, acc }; });
+  }, [compras, period, ym, yr]);
+
+  const n = data.length;
+  const last = n ? data[n - 1] : null;
+  const compradoras = data.filter((x) => x.valor > 0).length;
+  const nf = (v) => Math.round(v).toLocaleString("es-AR");
+  const fSign = (v) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}${nf(Math.abs(v))}`);
+
+  // ── Chart SVG (barras compra diaria + línea acumulado en eje derecho) ──
+  const W = 920, H = 300, padL = 34, padR = 52, padT = 16, padB = 26;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const step = n ? iw / n : iw;
+  const bw = Math.max(2, Math.min(30, step * 0.55));
+  const maxBar = Math.max(1, ...data.map((x) => Math.abs(x.valor)));
+  const maxAcc = Math.max(1, ...data.map((x) => x.acc));
+  const baseY = padT + ih;
+  const xAt = (i) => padL + step * (i + 0.5);
+  const yAcc = (v) => baseY - (v / maxAcc) * ih;
+
+  const KpiMini = ({ label, value, color }) => (
+    <div style={{ flex: "1 1 150px", minWidth: 138, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px" }}>
+      <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 5 }}>{label}</div>
+      <div style={{ fontSize: 19, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginTop: 14 }}>
+      <div className="flex items-start justify-between" style={{ gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div>
+          <h3 style={{ fontSize: 16, fontWeight: 600, color: C.text, margin: 0 }}>Compras de divisas · {yr}</h3>
+          <p style={{ fontSize: 11, color: C.muted, margin: "4px 0 0", maxWidth: 620 }}>
+            Saldo comprador diario del BCRA en el mercado de cambios (var 78) + el acumulado del período. Datos oficiales de la API del BCRA.
+          </p>
+        </div>
+        <div className="flex" style={{ gap: 6 }}>
+          {[["mes", cap(monthName)], ["r30", "Últimas 30 ruedas"], ["anio", `Todo ${yr}`]].map(([k, lbl]) => (
+            <button key={k} onClick={() => setPeriod(k)}
+              style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", borderRadius: 999, border: `1px solid ${period === k ? "#f59e0b" : C.border}`, background: period === k ? "rgba(245,158,11,0.15)" : "transparent", color: period === k ? "#f59e0b" : C.muted }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        <KpiMini label="Última rueda" value={last ? ddmm(last.fecha) : "—"} />
+        <KpiMini label="Compra del día (M USD)" value={fSign(last?.valor)} color={last && last.valor >= 0 ? "#34d399" : "#f87171"} />
+        <KpiMini label="Acumulado período (M USD)" value={fSign(last?.acc)} color="#f59e0b" />
+        <KpiMini label="Ruedas compradoras" value={n ? `${compradoras} de ${n}` : "—"} color="#60a5fa" />
+      </div>
+
+      <div style={{ position: "relative" }}>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} onMouseLeave={() => setHover(null)}>
+          <line x1={padL} y1={baseY} x2={padL + iw} y2={baseY} stroke={C.border} strokeWidth="1" />
+          <text x={padL - 4} y={padT + 9} fontSize="9" fill={C.dim} textAnchor="end">{nf(maxBar)}</text>
+          <text x={padL + iw + 5} y={padT + 9} fontSize="9" fill="#f59e0b" textAnchor="start">{nf(maxAcc)}</text>
+          {data.map((x, i) => {
+            const h = (Math.abs(x.valor) / maxBar) * ih;
+            const up = x.valor >= 0;
+            return <rect key={"b" + x.fecha} x={xAt(i) - bw / 2} y={up ? baseY - h : baseY} width={bw} height={h} rx="1.5"
+              fill={hover === i ? "#93c5fd" : up ? "#60a5fa" : "#f87171"} />;
+          })}
+          <polyline points={data.map((x, i) => `${xAt(i)},${yAcc(x.acc)}`).join(" ")} fill="none" stroke="#f59e0b" strokeWidth="2" />
+          {data.map((x, i) => <circle key={"c" + x.fecha} cx={xAt(i)} cy={yAcc(x.acc)} r={hover === i ? 3.5 : 1.8} fill="#f59e0b" />)}
+          {data.map((x, i) => {
+            const everyN = Math.max(1, Math.ceil(n / 12));
+            if (i % everyN !== 0 && i !== n - 1) return null;
+            return <text key={"t" + x.fecha} x={xAt(i)} y={H - 8} fontSize="9" fill={C.dim} textAnchor="middle">{ddmm(x.fecha)}</text>;
+          })}
+          {data.map((x, i) => (
+            <rect key={"h" + x.fecha} x={padL + step * i} y={padT} width={step} height={ih} fill="transparent" onMouseEnter={() => setHover(i)} />
+          ))}
+        </svg>
+        {hover != null && data[hover] && (
+          <div style={{ position: "absolute", top: 6, left: `${(xAt(hover) / W) * 100}%`, transform: "translateX(-50%)", background: "rgba(15,23,42,0.97)", border: `1px solid ${C.border}`, borderRadius: 6, padding: "8px 10px", fontSize: 11, pointerEvents: "none", whiteSpace: "nowrap", zIndex: 2 }}>
+            <div style={{ color: C.text, fontWeight: 600, marginBottom: 4 }}>{data[hover].fecha}</div>
+            <div style={{ color: "#60a5fa" }}>Compra diaria: {fSign(data[hover].valor)} M</div>
+            <div style={{ color: "#f59e0b" }}>Acumulado: {fSign(data[hover].acc)} M</div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center" style={{ gap: 16, marginTop: 8, fontSize: 10.5, color: C.dim }}>
+        <span><span style={{ display: "inline-block", width: 9, height: 9, background: "#60a5fa", borderRadius: 2, marginRight: 5, verticalAlign: "middle" }} />Compra diaria</span>
+        <span><span style={{ display: "inline-block", width: 14, height: 2, background: "#f59e0b", marginRight: 5, verticalAlign: "middle" }} />Acumulado del período</span>
+      </div>
+      <p style={{ fontSize: 10.5, color: C.dim, margin: "8px 2px 0", lineHeight: 1.5 }}>
+        El BCRA viene comprando todas las ruedas (sin días vendedores). El volumen operado del MULC (segmento contado) es dato de prensa sin API — se puede agregar a mano si se quiere el ratio BCRA/volumen.
+      </p>
+    </div>
+  );
+}
+
 function DolarDivisasModule() {
   const [range, setRange] = useState("1a");
   const [d, setD] = useState({ res: [], compras: [], may: [], min: [] });
@@ -24840,7 +24956,6 @@ function DolarDivisasModule() {
   const sum = (arr) => arr.reduce((s, x) => s + x.valor, 0);
   const comprasMes = sum(d.compras.filter((x) => x.fecha.startsWith(ym)));
   const comprasAnio = sum(d.compras.filter((x) => x.fecha.startsWith(yr)));
-  const comprasRange = range === "90d" ? d.compras.filter((x) => x.fecha >= new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)) : d.compras;
   const last = (arr) => (arr.length ? arr[arr.length - 1] : null);
   const fMM = (n) => (n == null ? "—" : `US$ ${Math.round(n).toLocaleString("es-AR")} M`);
   const fSign = (n) => (n == null ? "—" : `${n >= 0 ? "+" : "−"}US$ ${Math.abs(Math.round(n)).toLocaleString("es-AR")} M`);
@@ -24900,12 +25015,10 @@ function DolarDivisasModule() {
             <Card label="Dólar minorista" value={fAr(minLast?.valor)} sub={minLast ? `prom. vendedor` : ""} />
           </div>
 
+          <ComprasDivisas2026 compras={d.compras} />
+
           <Section title="Evolución de reservas internacionales" hint="USD millones · diaria">
             <BcraChart series={d.res} kind="line" color="#60a5fa" height={170} fmtY={fMM} />
-          </Section>
-
-          <Section title="Compras y ventas diarias de divisas (intervención)" hint="USD millones · verde compra / rojo venta">
-            <BcraChart series={comprasRange} kind="bar" height={150} fmtY={fSign} />
           </Section>
 
           <Section title="Tipo de cambio oficial" hint="mayorista A3500 · $ por USD">

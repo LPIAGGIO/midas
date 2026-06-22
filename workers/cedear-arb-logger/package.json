@@ -1,0 +1,15 @@
+{
+  "name": "cedear-arb-logger",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mide y loguea el mispricing CEDEAR vs subyacente USA (fase research del detector de arbitraje)",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "ws": "^8.20.1"
+  }
+}
