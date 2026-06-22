@@ -357,22 +357,34 @@ function frontDlr(fut, n = 3) {
     .sort((a, b) => a.ord - b.ord)
     .slice(0, n);
 }
-const zbufs = {}; // ticker -> buffer de precios para el z-score (uno por contrato)
+const zbufs = {};   // ticker -> buffer de precios para el z-score (uno por contrato)
+const calState = {}; // par(far.ticker) -> "low"|"mid"|"high" (hysteresis del spread)
 function buildScalpingSignals(fut) {
   const sigs = [];
   const fronts = frontDlr(fut, 3);
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
-  // (1) Spread calendario entre meses CONSECUTIVOS (jul-jun, ago-jul): cuántos
-  //     pesos más caro está cada mes respecto del anterior. Banda = lo normal.
+  // (1) Spread calendario entre meses CONSECUTIVOS (jul-jun, ago-jul). SOLO avisa
+  //     cuando CRUZA fuera de la banda con margen (hysteresis) — un movimiento real,
+  //     no por quedar medio peso del borde ni por estar parado siempre en un nivel.
+  //     El texto da la lectura accionable: qué mes quedó caro y cuánto debería ceder.
+  const [lo, hi] = CAL_BAND, MARGIN = 1;
   for (let i = 0; i + 1 < fronts.length; i++) {
     const near = fronts[i], far = fronts[i + 1];
     const pn = fut.price[near.ticker], pf = fut.price[far.ticker];
     if (pn == null || pf == null) continue;
     const cal = pf - pn;
-    if (cal < CAL_BAND[0])
-      sigs.push({ key: `cal_low_${far.ticker}`, text: `📐 <b>Dólar futuro: diferencia chica entre ${near.nombre} y ${far.nombre}</b>\nEl dólar a fin de ${far.nombre} (${pf}) está solo <b>${cal.toFixed(1)} pesos</b> más caro que el de fin de ${near.nombre} (${pn}). Normalmente esa diferencia es de ${CAL_BAND[0]} a ${CAL_BAND[1]} pesos, así que hoy está comprimida: el mercado espera una suba del dólar más lenta de ${near.nombre} a ${far.nombre}.` });
-    else if (cal > CAL_BAND[1])
-      sigs.push({ key: `cal_high_${far.ticker}`, text: `📐 <b>Dólar futuro: diferencia grande entre ${near.nombre} y ${far.nombre}</b>\nEl dólar a fin de ${far.nombre} (${pf}) está <b>${cal.toFixed(1)} pesos</b> más caro que el de fin de ${near.nombre} (${pn}). Normalmente esa diferencia es de ${CAL_BAND[0]} a ${CAL_BAND[1]} pesos, así que hoy está estirada: el mercado espera una suba del dólar más fuerte de ${near.nombre} a ${far.nombre}.` });
+    const key = far.ticker, prev = calState[key] || "mid";
+    let cur = prev;
+    if (cal < lo - MARGIN) cur = "low";
+    else if (cal > hi + MARGIN) cur = "high";
+    else if (cal > lo + 0.5 && cal < hi - 0.5) cur = "mid";
+    calState[key] = cur;
+    if (cur === prev || cur === "mid") continue; // solo en la TRANSICION a fuera de banda
+    if (cur === "low")
+      sigs.push({ key: `cal_low_${key}`, text: `📐 <b>Dólar futuro: ${cap(near.nombre)} y ${cap(far.nombre)} se juntaron</b>\nEl de ${far.nombre} (${pf}) quedó solo <b>${cal.toFixed(1)} pesos</b> por encima del de ${near.nombre} (${pn}); lo normal es ${lo} a ${hi}.\nLectura: el de ${near.nombre} quedó caro frente al de ${far.nombre} — para volver al rango tendría que ceder ~${(lo - cal).toFixed(1)} pesos (o el de ${far.nombre} subir otro tanto).` });
+    else
+      sigs.push({ key: `cal_high_${key}`, text: `📐 <b>Dólar futuro: ${cap(near.nombre)} y ${cap(far.nombre)} se separaron</b>\nEl de ${far.nombre} (${pf}) quedó <b>${cal.toFixed(1)} pesos</b> por encima del de ${near.nombre} (${pn}); lo normal es ${lo} a ${hi}.\nLectura: el de ${far.nombre} quedó caro frente al de ${near.nombre} — para volver al rango tendría que ceder ~${(cal - hi).toFixed(1)} pesos (o el de ${near.nombre} subir otro tanto).` });
   }
 
   // (2) Reversión: cada contrato del frente contra su propio promedio reciente.
