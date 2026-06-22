@@ -48,6 +48,7 @@ const FUTURE_MULT = 1000; // DLR: 1000 USD por contrato
 // Parametros de senales (defaults; el front usa los mismos).
 const CAL_BAND = [25, 31];      // spread calendario entre meses consecutivos del frente
 const Z_THRESHOLD = 2;          // reversion z-score sobre cada contrato del frente (mes actual + 2)
+const Z_MIN_MOVE_PCT = 0.3;     // ...además el desvío debe ser >= este % del precio (sino es ruido de centésimas)
 const Z_BUF_MAX = 40, Z_BUF_MIN = 20;
 const DESARB_SPREAD_PCT = 1.5;  // umbral spread del canje (alto: el cross-bond real es ~0, el resto es ruido de precios stale)
 const VENC_DAYS = 7;            // avisar si vence en <= N dias
@@ -388,6 +389,10 @@ function buildScalpingSignals(fut) {
   }
 
   // (2) Reversión: cada contrato del frente contra su propio promedio reciente.
+  //     Pide |z|>=Z_THRESHOLD Y que el desvío sea ECONOMICAMENTE relevante
+  //     (>= Z_MIN_MOVE_PCT del precio). Sin ese piso, con futuros casi planos la SD
+  //     intradía es ínfima y un z alto era 1 peso de ruido (0,06%) — el caso que
+  //     mostró LP: "junio se despegó de 1466,1 a 1467". El % filtra esas centésimas.
   for (const c of fronts) {
     const px = fut.price[c.ticker];
     if (px == null) continue;
@@ -399,8 +404,9 @@ function buildScalpingSignals(fut) {
     const sd = Math.sqrt(buf.reduce((a, b) => a + (b - mean) ** 2, 0) / buf.length);
     if (sd <= 0) continue;
     const z = (px - mean) / sd;
-    if (Math.abs(z) >= Z_THRESHOLD)
-      sigs.push({ key: `z_${c.ticker}_${z > 0 ? "high" : "low"}`, text: `🔄 <b>Dólar futuro de ${c.nombre}: movimiento brusco</b>\nEl dólar futuro de ${c.nombre} (${px}) se ${z > 0 ? "despegó hacia arriba" : "despegó hacia abajo"} de su promedio reciente (${mean.toFixed(1)}). Se movió bastante más rápido de lo normal y suele tender a volver hacia ese promedio.` });
+    const movePct = (Math.abs(px - mean) / px) * 100;
+    if (Math.abs(z) >= Z_THRESHOLD && movePct >= Z_MIN_MOVE_PCT)
+      sigs.push({ key: `z_${c.ticker}_${z > 0 ? "high" : "low"}`, text: `🔄 <b>Dólar futuro de ${c.nombre}: movimiento brusco</b>\nEl dólar futuro de ${c.nombre} (${px}) se ${z > 0 ? "despegó hacia arriba" : "despegó hacia abajo"} de su promedio reciente (${mean.toFixed(1)}) — un ${movePct.toFixed(2)}%. Se movió más rápido de lo normal y suele tender a volver hacia ese promedio.` });
   }
   return sigs;
 }
