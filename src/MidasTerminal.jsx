@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "./auth/AuthContext.jsx";
 import { supabase } from "./lib/supabase.js";
 import { resolveBond, daysToMaturity, shouldIgnoreTicker, BOND_REGISTRY } from "./bondMaturities.js";
@@ -25525,6 +25526,7 @@ function CedearValuacionModule({ compact = false } = {}) {
   const [cedear, setCedear] = useState("");
   const [yhCache, setYhCache] = useState({});   // sym -> precio subyacente de Yahoo (fallback)
   const [usaSrc, setUsaSrc] = useState(null);    // "data912" | "yahoo" | null
+  const [pipWin, setPipWin] = useState(null);    // ventana Picture-in-Picture (siempre arriba)
 
   const num = (x) => { const n = Number(x); return Number.isFinite(n) && n > 0 ? n : null; };
   const mid = (a, b) => (a && b ? (a + b) / 2 : (a || b || null));
@@ -25649,6 +25651,24 @@ function CedearValuacionModule({ compact = false } = {}) {
     window.open(u, "midas-cedear-fv", "width=480,height=660,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
   };
 
+  // Ventana flotante SIEMPRE VISIBLE vía Document Picture-in-Picture (Chrome/Edge).
+  // El SO la mantiene arriba de todo → se usa en paralelo con Matriz. Fallback a
+  // window.open (no es always-on-top) si el navegador no soporta la API.
+  const openPip = async () => {
+    if (pipWin && !pipWin.closed) { try { pipWin.focus(); } catch {} return; }
+    if (!("documentPictureInPicture" in window)) { openPopup(); return; }
+    try {
+      const w = await window.documentPictureInPicture.requestWindow({ width: 470, height: 640 });
+      for (const node of document.querySelectorAll('style, link[rel="stylesheet"]')) {
+        try { w.document.head.appendChild(node.cloneNode(true)); } catch {}
+      }
+      w.document.body.style.margin = "0";
+      w.document.body.style.background = "#0F1B2B";
+      w.addEventListener("pagehide", () => setPipWin(null));
+      setPipWin(w);
+    } catch { openPopup(); }
+  };
+
   return (
     <div style={{ padding: compact ? "12px 14px" : "24px 32px", maxWidth: compact ? "none" : 1100, margin: compact ? 0 : "0 auto" }}>
       {compact ? (
@@ -25664,9 +25684,9 @@ function CedearValuacionModule({ compact = false } = {}) {
           Precio teórico de un CEDEAR vs su precio real de mercado, para ver si está caro o barato y definir entradas/salidas. Teórico = (acción USD × CCL) ÷ ratio.
         </p>
         </div>
-        <button onClick={openPopup} title="Abrir en ventana chica para tener en paralelo con Matriz"
-          style={{ flexShrink: 0, padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
-          ⤢ Abrir en ventana
+        <button onClick={openPip} title="Ventana flotante siempre visible, en paralelo con Matriz (Chrome/Edge)"
+          style={{ flexShrink: 0, padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${pipWin ? "#f59e0b" : C.border}`, background: pipWin ? "rgba(245,158,11,0.12)" : "transparent", color: pipWin ? "#f59e0b" : C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
+          📌 {pipWin ? "Ventana fijada" : "Ventana flotante"}
         </button>
       </div>
       )}
@@ -25758,6 +25778,13 @@ function CedearValuacionModule({ compact = false } = {}) {
         </p>
         )}
       </div>
+
+      {/* La calculadora compacta vive dentro de la ventana flotante (PiP). El
+          instance compact no renderiza el botón → no hay recursión. */}
+      {!compact && pipWin && createPortal(
+        <div style={{ minHeight: "100vh", background: "#0F1B2B" }}><CedearValuacionModule compact /></div>,
+        pipWin.document.body
+      )}
     </div>
   );
 }
