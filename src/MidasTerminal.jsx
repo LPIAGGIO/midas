@@ -25553,6 +25553,8 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
   const [sym, setSym] = useState("AAPL");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);              // índice resaltado del autocomplete
+  const listRef = useRef(null);
   const [ccl, setCcl] = useState("");
   const [cclTouched, setCclTouched] = useState(false);
   const [accion, setAccion] = useState("");
@@ -25666,6 +25668,29 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
     return list.sort((x, y) => x.sym.localeCompare(y.sym));
   }, [q]);
 
+  // Scrollea el item resaltado para que quede visible al navegar con flechas.
+  useEffect(() => {
+    if (open && listRef.current && listRef.current.children[hi]) {
+      listRef.current.children[hi].scrollIntoView({ block: "nearest" });
+    }
+  }, [hi, open]);
+
+  // Navegación del autocomplete con teclado (↑/↓ mueve, Enter elige, Esc cierra).
+  const onCedearKey = (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!open) { setOpen(true); setHi(0); return; }
+      setHi((h) => Math.min(h + 1, options.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (open) setHi((h) => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      if (open && options[hi]) { e.preventDefault(); setSym(options[hi].sym); setOpen(false); setQ(""); }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    }
+  };
+
   const a = pn(accion), ce = pn(cedear), cc = pn(ccl);
   const teorico = (a && cc && ratio) ? (a * cc) / ratio : null;
   const premium = (teorico && ce) ? (ce / teorico - 1) * 100 : null;
@@ -25735,18 +25760,20 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
             <label style={labelStyle}>CEDEAR</label>
             <input
               value={open ? q : `${sym} — ${name}`}
-              onFocus={() => { setOpen(true); setQ(""); }}
+              onFocus={() => { setOpen(true); setQ(""); setHi(0); }}
               onBlur={() => setTimeout(() => setOpen(false), 150)}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => { setQ(e.target.value); setHi(0); }}
+              onKeyDown={onCedearKey}
               placeholder="Buscá ticker o nombre…"
               style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }}
             />
             {open && options.length > 0 && (
-              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, zIndex: 10, maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
-                {options.map((o) => (
+              <div ref={listRef} style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, zIndex: 10, maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+                {options.map((o, i) => (
                   <div key={o.sym} onMouseDown={() => { setSym(o.sym); setOpen(false); setQ(""); }}
+                    onMouseEnter={() => setHi(i)}
                     className="flex items-center justify-between"
-                    style={{ padding: "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`, gap: 10 }}>
+                    style={{ padding: "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`, gap: 10, background: i === hi ? "rgba(245,158,11,0.14)" : "transparent" }}>
                     <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#f59e0b", fontSize: 12, minWidth: 56 }}>{o.sym}</span>
                     <span style={{ fontSize: 12, color: C.text, flex: 1 }}>{o.name}</span>
                     <span style={{ fontSize: 11, color: C.dim, fontFamily: "'JetBrains Mono', monospace" }}>{o.ratio}:1</span>
