@@ -333,11 +333,11 @@ function MidasApp() {
   // siempre montado) y NO en el módulo, así sobrevive aunque cambies de pantalla.
   const [cedearPip, setCedearPip] = useState(null);
   const openCedearPip = useCallback(async () => {
-    const fallback = () => window.open(window.location.origin + window.location.pathname + "?view=cedear-fv", "midas-cedear-fv", "width=480,height=660,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+    const fallback = () => window.open(window.location.origin + window.location.pathname + "?view=cedear-fv", "midas-cedear-fv", "width=515,height=705,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
     if (cedearPip && cedearPip.win && !cedearPip.win.closed) { try { cedearPip.win.focus(); } catch {} return; }
     if (!("documentPictureInPicture" in window)) { fallback(); return; }
     try {
-      const w = await window.documentPictureInPicture.requestWindow({ width: 470, height: 640 });
+      const w = await window.documentPictureInPicture.requestWindow({ width: 515, height: 705 });
       // Copiar los estilos: cssRules inline para los same-origin (incluye Tailwind);
       // los cross-origin (que tiran SecurityError) se enganchan como <link>.
       for (const ss of Array.from(document.styleSheets)) {
