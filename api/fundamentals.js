@@ -51,6 +51,25 @@ async function fetchOne(t, auth) {
 }
 
 export default async function handler(req, res) {
+  // Modo PRECIO liviano: ?price=SPY,QQQ,AEM → { prices: { SYM: number } }.
+  // Usa el endpoint chart (no exige crumb) para traer regularMarketPrice. Sirve
+  // de fallback del subyacente USD cuando data912 USA no lo tiene (ETFs, ADRs).
+  const priceQ = String(req.query?.price || "")
+    .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean).slice(0, 30);
+  if (priceQ.length) {
+    const prices = {};
+    await Promise.all(priceQ.map(async (s) => {
+      try {
+        const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1d&range=1d`, { headers: { "User-Agent": UA } });
+        const j = await r.json();
+        const p = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
+        if (Number.isFinite(p)) prices[s] = p;
+      } catch { /* salteo el que falle */ }
+    }));
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
+    return res.status(200).json({ prices });
+  }
+
   const tickers = String(req.query?.tickers || "")
     .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean).slice(0, 60);
   if (!tickers.length) return res.status(400).json({ error: "Falta ?tickers=AAPL,MSFT,..." });

@@ -25500,6 +25500,10 @@ function PaperTradingModule() {
 // y definir entradas/salidas. Datos data912 (CEDEAR ARS + acción USD), ratios y
 // nombres del catálogo CEDEAR_CAT (~425 CEDEARs, tabla pública BYMA/Comafi). El
 // CCL default = la referencia (mediana de los líquidos, igual que Ejecución).
+// Símbolo del subyacente cuando el código BYMA difiere del ticker USA. data912
+// USA usa punto (BRK.B); Yahoo usa guion (BRK-B). El resto matchea directo.
+const CEDEAR_US_MAP = { DISN: "DIS", BRKB: "BRK.B", WBO: "WBD" };  // para data912 usa_stocks
+const CEDEAR_YH_MAP = { DISN: "DIS", BRKB: "BRK-B", WBO: "WBD" };  // para Yahoo (fallback)
 // ═══════════════════════════════════════════════════════════════════════
 function CedearValuacionModule() {
   const [ced, setCed] = useState({});
@@ -25514,6 +25518,8 @@ function CedearValuacionModule() {
   const [cclTouched, setCclTouched] = useState(false);
   const [accion, setAccion] = useState("");
   const [cedear, setCedear] = useState("");
+  const [yhCache, setYhCache] = useState({});   // sym -> precio subyacente de Yahoo (fallback)
+  const [usaSrc, setUsaSrc] = useState(null);    // "data912" | "yahoo" | null
 
   const num = (x) => { const n = Number(x); return Number.isFinite(n) && n > 0 ? n : null; };
   const mid = (a, b) => (a && b ? (a + b) / 2 : (a || b || null));
@@ -25557,16 +25563,35 @@ function CedearValuacionModule() {
     if (!cclTouched && cclRef) setCcl(String(Math.round(cclRef)));
   }, [cclRef, cclTouched]);
 
+  // ↻ limpia el cache de Yahoo para que el refresco también actualice el fallback.
+  useEffect(() => { setYhCache({}); }, [tick]);
+
   // Al cambiar de símbolo o al refrescar, traer los precios REALES (independientes)
-  // del feed → así el premium refleja el desvío real. (La edición manual asume
-  // paridad y completa el otro campo, para escenarios "qué pasa si".)
+  // del feed → así el premium refleja el desvío real. El subyacente USD sale de
+  // data912 (con mapeo de símbolo); si data912 no lo tiene (ETFs, ADRs), cae a
+  // Yahoo. (La edición manual asume paridad y completa el otro campo.)
   useEffect(() => {
-    const c = ced[sym], u = usa[sym];
+    let active = true;
+    const c = ced[sym];
     const cPx = c ? (mid(num(c.px_bid), num(c.px_ask)) || num(c.c)) : null;
-    const uPx = u ? (mid(num(u.px_bid), num(u.px_ask)) || num(u.c)) : null;
     setCedear(cPx ? cPx.toFixed(2) : "");
-    setAccion(uPx ? uPx.toFixed(2) : "");
-  }, [sym, ced, usa]);
+
+    const u = usa[CEDEAR_US_MAP[sym] || sym];
+    const uPx = u ? (mid(num(u.px_bid), num(u.px_ask)) || num(u.c)) : null;
+    if (uPx) { setAccion(uPx.toFixed(2)); setUsaSrc("data912"); return; }
+    if (yhCache[sym] != null) { setAccion(yhCache[sym].toFixed(2)); setUsaSrc("yahoo"); return; }
+    setAccion(""); setUsaSrc(null);
+    const ys = CEDEAR_YH_MAP[sym] || sym;
+    fetch(`/api/fundamentals?price=${encodeURIComponent(ys)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!active) return;
+        const p = j?.prices?.[ys];
+        if (Number.isFinite(p) && p > 0) { setYhCache((prev) => ({ ...prev, [sym]: p })); setAccion(p.toFixed(2)); setUsaSrc("yahoo"); }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [sym, ced, usa]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ratio = CEDEAR_CAT[sym]?.r ?? null;
   const name = CEDEAR_CAT[sym]?.n || sym;
@@ -25680,6 +25705,14 @@ function CedearValuacionModule() {
             <input value={cedear} onChange={(e) => onCedear(e.target.value)} inputMode="decimal" style={inputStyle} />
           </div>
         </div>
+        {!loading && !a && cedear && (
+          <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 10 }}>
+            No encontré el precio del subyacente de <b>{sym}</b> en los feeds (data912 ni Yahoo lo traen). Cargá el precio en USD a mano y el resto se calcula solo.
+          </div>
+        )}
+        {a && usaSrc === "yahoo" && (
+          <div style={{ fontSize: 10.5, color: C.dim, marginTop: 10 }}>Subyacente de {sym} traído de Yahoo (data912 no lo tiene en su feed USA).</div>
+        )}
       </div>
 
       {/* Resultados */}
