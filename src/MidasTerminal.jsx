@@ -25566,6 +25566,15 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
   const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
   const fmtUsdIn = (n) => n.toFixed(2).replace(".", ",");  // acción USD: 299,43
   const fmtArsIn = (n) => String(Math.round(n));           // CEDEAR ARS: entero
+  const fmtNum = (n) => (Math.round(n * 100) / 100).toString().replace(".", ",");
+  // Flechas ↑/↓ del teclado suben/bajan el valor (step por campo).
+  const onArrow = (e, current, step, apply) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const n = pn(current) ?? 0;
+    const next = Math.max(0, Math.round((n + (e.key === "ArrowUp" ? step : -step)) * 100) / 100);
+    apply(fmtNum(next));
+  };
 
   // Fetch data912 (mount + ↻). Diferido, no hace falta poll agresivo.
   useEffect(() => {
@@ -25752,15 +25761,24 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
           </div>
           <div style={fieldWrap}>
             <label style={labelStyle}>CCL — venta (ARS)</label>
-            <input value={ccl} onChange={(e) => { setCclTouched(true); setCcl(e.target.value); }} inputMode="decimal" style={inputStyle} />
+            <input value={ccl}
+              onChange={(e) => { setCclTouched(true); setCcl(e.target.value.replace(/\./g, ",")); }}
+              onKeyDown={(e) => onArrow(e, ccl, 1, (s) => { setCclTouched(true); setCcl(s); })}
+              inputMode="decimal" style={inputStyle} />
           </div>
           <div style={fieldWrap}>
             <label style={labelStyle}>Precio ACCIÓN (USD)</label>
-            <input value={accion} onChange={(e) => onAccion(e.target.value)} inputMode="decimal" style={inputStyle} />
+            <input value={accion}
+              onChange={(e) => onAccion(e.target.value.replace(/\./g, ","))}
+              onKeyDown={(e) => onArrow(e, accion, 0.01, onAccion)}
+              inputMode="decimal" style={inputStyle} />
           </div>
           <div style={fieldWrap}>
             <label style={labelStyle}>Precio CEDEAR (ARS)</label>
-            <input value={cedear} onChange={(e) => onCedear(e.target.value)} inputMode="decimal" style={inputStyle} />
+            <input value={cedear}
+              onChange={(e) => onCedear(e.target.value.replace(/\./g, ","))}
+              onKeyDown={(e) => onArrow(e, cedear, 1, onCedear)}
+              inputMode="decimal" style={inputStyle} />
           </div>
         </div>
         {!loading && !a && cedear && (
