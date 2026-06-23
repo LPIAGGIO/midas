@@ -25523,6 +25523,10 @@ function CedearValuacionModule() {
 
   const num = (x) => { const n = Number(x); return Number.isFinite(n) && n > 0 ? n : null; };
   const mid = (a, b) => (a && b ? (a + b) / 2 : (a || b || null));
+  // Parseo de los inputs en formato AR (coma decimal, punto miles) → número.
+  const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
+  const fmtUsdIn = (n) => n.toFixed(2).replace(".", ",");  // acción USD: 299,43
+  const fmtArsIn = (n) => String(Math.round(n));           // CEDEAR ARS: entero
 
   // Fetch data912 (mount + ↻). Diferido, no hace falta poll agresivo.
   useEffect(() => {
@@ -25574,12 +25578,12 @@ function CedearValuacionModule() {
     let active = true;
     const c = ced[sym];
     const cPx = c ? (mid(num(c.px_bid), num(c.px_ask)) || num(c.c)) : null;
-    setCedear(cPx ? cPx.toFixed(2) : "");
+    setCedear(cPx ? fmtArsIn(cPx) : "");
 
     const u = usa[CEDEAR_US_MAP[sym] || sym];
     const uPx = u ? (mid(num(u.px_bid), num(u.px_ask)) || num(u.c)) : null;
-    if (uPx) { setAccion(uPx.toFixed(2)); setUsaSrc("data912"); return; }
-    if (yhCache[sym] != null) { setAccion(yhCache[sym].toFixed(2)); setUsaSrc("yahoo"); return; }
+    if (uPx) { setAccion(fmtUsdIn(uPx)); setUsaSrc("data912"); return; }
+    if (yhCache[sym] != null) { setAccion(fmtUsdIn(yhCache[sym])); setUsaSrc("yahoo"); return; }
     setAccion(""); setUsaSrc(null);
     const ys = CEDEAR_YH_MAP[sym] || sym;
     fetch(`/api/fundamentals?price=${encodeURIComponent(ys)}`)
@@ -25587,7 +25591,7 @@ function CedearValuacionModule() {
       .then((j) => {
         if (!active) return;
         const p = j?.prices?.[ys];
-        if (Number.isFinite(p) && p > 0) { setYhCache((prev) => ({ ...prev, [sym]: p })); setAccion(p.toFixed(2)); setUsaSrc("yahoo"); }
+        if (Number.isFinite(p) && p > 0) { setYhCache((prev) => ({ ...prev, [sym]: p })); setAccion(fmtUsdIn(p)); setUsaSrc("yahoo"); }
       })
       .catch(() => {});
     return () => { active = false; };
@@ -25598,13 +25602,13 @@ function CedearValuacionModule() {
 
   const onAccion = (v) => {
     setAccion(v);
-    const a = Number(v), cc = Number(ccl);
-    if (ratio && a > 0 && cc > 0) setCedear(((a * cc) / ratio).toFixed(2));
+    const a = pn(v), cc = pn(ccl);
+    if (ratio && a && cc) setCedear(fmtArsIn((a * cc) / ratio));
   };
   const onCedear = (v) => {
     setCedear(v);
-    const ce = Number(v), cc = Number(ccl);
-    if (ratio && ce > 0 && cc > 0) setAccion(((ce * ratio) / cc).toFixed(2));
+    const ce = pn(v), cc = pn(ccl);
+    if (ratio && ce && cc) setAccion(fmtUsdIn((ce * ratio) / cc));
   };
 
   const options = useMemo(() => {
@@ -25614,7 +25618,7 @@ function CedearValuacionModule() {
     return list.sort((x, y) => x.sym.localeCompare(y.sym));
   }, [q]);
 
-  const a = num(accion), ce = num(cedear), cc = num(ccl);
+  const a = pn(accion), ce = pn(cedear), cc = pn(ccl);
   const teorico = (a && cc && ratio) ? (a * cc) / ratio : null;
   const premium = (teorico && ce) ? (ce / teorico - 1) * 100 : null;
   const cclImpl = (ce && a && ratio) ? (ce * ratio) / a : null;
