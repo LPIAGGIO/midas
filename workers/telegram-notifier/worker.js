@@ -547,7 +547,7 @@ async function futuresDayBlock(raw, fut, dateStr, money) {
   const yest = await loadYestSettles(dateStr);
   const byTicker = {};
   for (const p of futLotes) (byTicker[p.ticker] = byTicker[p.ticker] || []).push(p);
-  let subtotal = 0, realizedSum = 0; const fl = [];
+  let subtotal = 0; const fl = [];
   for (const [ticker, lotes] of Object.entries(byTicker)) {
     const net = lotes.reduce((s, p) => s + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0), 0);
     const tradedToday = lotes.some((p) => p.entry_date === dateStr);
@@ -558,16 +558,14 @@ async function futuresDayBlock(raw, fut, dateStr, money) {
       if (Math.abs(net) < 1e-6) continue;
       fl.push(`• ${ticker} (${net > 0 ? "+" : ""}${net}): s/settle`); continue;
     }
-    const { dayPnl, realizedToday } = futuresTickerDay(lotes, sToday, sYest, dateStr);
-    subtotal += dayPnl; realizedSum += realizedToday;
-    const realTxt = Math.abs(realizedToday) > 1 ? ` · realiz. aprox ${money(realizedToday)}` : "";
+    const { dayPnl } = futuresTickerDay(lotes, sToday, sYest, dateStr);
+    subtotal += dayPnl;
     const ctx = tradedToday ? `  (incl. intradía)` : `  (${sYest}→${sToday})`;
-    fl.push(`• ${ticker} (neto ${net > 0 ? "+" : ""}${net}): ${money(dayPnl)}${ctx}${realTxt}`);
+    fl.push(`• ${ticker} (neto ${net > 0 ? "+" : ""}${net}): ${money(dayPnl)}${ctx}`);
   }
   if (!fl.length) return null;
-  const realLine = Math.abs(realizedSum) > 1 ? `\n  ↳ de eso, realizado hoy (cerrado, aprox): <b>${money(realizedSum)}</b>` : "";
-  const block = `<b>Futuros DLR — P&L del dia</b>\n${fl.join("\n")}\nSubtotal: <b>${money(subtotal)}</b>${realLine}`;
-  return { block, subtotal, realizedSum };
+  const block = `<b>Futuros DLR — P&L del dia</b>\n${fl.join("\n")}\nSubtotal: <b>${money(subtotal)}</b>`;
+  return { block, subtotal };
 }
 
 // Aviso de CIERRE DE FUTUROS (15hs): solo el bloque de futuros. null si el user
@@ -578,7 +576,7 @@ async function buildFuturesSummary(userId, rawBy, fut) {
   const money = (n) => `${n >= 0 ? "+" : "−"}$${Math.round(Math.abs(n)).toLocaleString("es-AR")}`;
   const futRes = await futuresDayBlock(raw, fut, dateStr, money);
   if (!futRes) return null;
-  return `📊 <b>Cierre de futuros ${dateStr}</b>\n\n${futRes.block}\n<i>Ajuste de cierre de hoy vs ayer (como Matriz). El "realizado" es aprox (costo prom).</i>`;
+  return `📊 <b>Cierre de futuros ${dateStr}</b>\n\n${futRes.block}\n<i>Ajuste de cierre de hoy vs ayer (como Matriz).</i>`;
 }
 
 async function buildEodSummary(userId, rawBy, fut) {
@@ -622,7 +620,7 @@ async function buildEodSummary(userId, rawBy, fut) {
   }
 
   lines.push(`\n<b>TOTAL del dia: ${money(grand)}</b>`);
-  lines.push(`<i>Futuros settle-based (como Cocos); el P&L del dia YA incluye lo cerrado. El "realizado" es aprox (costo prom), puede diferir del detalle FIFO de la app. Tenencias por variacion data912. FCI no incluidos.</i>`);
+  lines.push(`<i>Futuros settle-based (como Cocos); el P&L del dia YA incluye lo cerrado. Tenencias por variacion data912. FCI no incluidos.</i>`);
   return lines.join("\n");
 }
 
