@@ -25611,7 +25611,7 @@ function CedearValuacionModule() {
     const all = Object.keys(CEDEAR_CAT).map((k) => ({ sym: k, name: CEDEAR_CAT[k].n, ratio: CEDEAR_CAT[k].r }));
     const term = q.trim().toUpperCase();
     const list = term ? all.filter((o) => o.sym.includes(term) || o.name.toUpperCase().includes(term)) : all;
-    return list.sort((x, y) => x.sym.localeCompare(y.sym)).slice(0, 10);
+    return list.sort((x, y) => x.sym.localeCompare(y.sym));
   }, [q]);
 
   const a = num(accion), ce = num(cedear), cc = num(ccl);
