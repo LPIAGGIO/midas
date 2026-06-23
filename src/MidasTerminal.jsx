@@ -236,6 +236,7 @@ const NAV = [
       { id: "calc-comisiones", label: "Comisiones", icon: BadgePercent },
       { id: "calc-kelly", label: "Criterio de Kelly", icon: Percent },
       { id: "calc-montecarlo", label: "Monte Carlo", icon: Activity },
+      { id: "calc-cedear-fv", label: "Valuación CEDEAR", icon: Scale },
     ],
   },
   {
@@ -1015,6 +1016,8 @@ function MidasApp() {
               <PnlPorInstrumentoModule key={active} />
             ) : active === "ejecucion-cedear" ? (
               <EjecucionInteligenteModule key={active} />
+            ) : active === "calc-cedear-fv" ? (
+              <CedearValuacionModule key={active} />
             ) : active === "paper-cripto" ? (
               <PaperTradingModule key={active} />
             ) : active === "paper-cedears" ? (
@@ -25485,6 +25488,228 @@ function PaperTradingModule() {
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
         El histórico es retrospectivo (misma regla sobre precios reales de Kraken); desde el arranque en vivo el worker actualiza 1×/día. Nada opera plata real: cuando una variante nos convenza por su comportamiento —especialmente en las rachas malas— conectamos la ejecución con los US$ 1.000.
       </p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Valuación CEDEAR — fair value: teórico = (acción USD × CCL) ÷ ratio.
+// Compara el precio real del CEDEAR contra el teórico (premium = caro/barato) y
+// muestra el CCL implícito. Sirve para cotizar, ver si un papel está caro/barato
+// y definir entradas/salidas. Datos data912 (CEDEAR ARS + acción USD), ratios de
+// EJEC_RATIOS, CCL default = la referencia (mediana de los líquidos).
+// ═══════════════════════════════════════════════════════════════════════
+const CEDEAR_NAMES = {
+  AAPL: "Apple", MSFT: "Microsoft", NVDA: "NVIDIA", AMZN: "Amazon", META: "Meta Platforms",
+  TSLA: "Tesla", AMD: "AMD", KO: "Coca-Cola", MELI: "MercadoLibre", NFLX: "Netflix",
+  BABA: "Alibaba", V: "Visa", MA: "Mastercard", JPM: "JPMorgan", PYPL: "PayPal",
+  INTC: "Intel", QQQ: "Invesco QQQ", SPY: "SPDR S&P 500", WMT: "Walmart", JNJ: "Johnson & Johnson",
+  COIN: "Coinbase", PLTR: "Palantir", MSTR: "MicroStrategy", GLOB: "Globant", CRM: "Salesforce",
+  ORCL: "Oracle", AVGO: "Broadcom", MU: "Micron", GOOGL: "Alphabet", NU: "Nu Holdings",
+  RKLB: "Rocket Lab", TQQQ: "ProShares UltraPro QQQ", ASTS: "AST SpaceMobile", ADBE: "Adobe",
+  VIST: "Vista Energy", CRWV: "CoreWeave", IREN: "IREN", RGTI: "Rigetti", QCOM: "Qualcomm",
+  MCD: "McDonald's", NBIS: "Nebius", IBM: "IBM", OKLO: "Oklo", CEG: "Constellation Energy",
+  UNH: "UnitedHealth", XP: "XP Inc.", NKE: "Nike", UPST: "Upstart", ARM: "Arm Holdings",
+  ASML: "ASML", RIOT: "Riot Platforms", COPX: "Global X Copper Miners", HUT: "Hut 8",
+  PAGS: "PagSeguro", NIO: "NIO", NOW: "ServiceNow", SNDK: "SanDisk",
+};
+
+function CedearValuacionModule() {
+  const [ced, setCed] = useState({});
+  const [usa, setUsa] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [lastFetch, setLastFetch] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [sym, setSym] = useState("AAPL");
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [ccl, setCcl] = useState("");
+  const [cclTouched, setCclTouched] = useState(false);
+  const [accion, setAccion] = useState("");
+  const [cedear, setCedear] = useState("");
+
+  const num = (x) => { const n = Number(x); return Number.isFinite(n) && n > 0 ? n : null; };
+  const mid = (a, b) => (a && b ? (a + b) / 2 : (a || b || null));
+
+  // Fetch data912 (mount + ↻). Diferido, no hace falta poll agresivo.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const [cR, uR] = await Promise.all([
+          fetch(`/api/data912?type=cedears&_=${Date.now()}`),
+          fetch(`/api/data912?type=usa&_=${Date.now()}`),
+        ]);
+        const cArr = cR.ok ? await cR.json() : [];
+        const uArr = uR.ok ? await uR.json() : [];
+        if (!mounted) return;
+        const cm = {}; for (const x of cArr) if (x?.symbol) cm[String(x.symbol).toUpperCase()] = x;
+        const um = {}; for (const x of uArr) if (x?.symbol) um[String(x.symbol).toUpperCase()] = x;
+        setCed(cm); setUsa(um); setLastFetch(new Date()); setLoading(false);
+      } catch { if (mounted) setLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, [tick]);
+
+  // CCL de referencia (mediana de los líquidos), igual que Ejecución Inteligente.
+  const cclRef = useMemo(() => {
+    const pool = [];
+    for (const s of EJEC_CORE) {
+      const c = ced[s], u = usa[s], r = EJEC_RATIOS[s];
+      if (!c || !u || !r) continue;
+      const cMid = mid(num(c.px_bid), num(c.px_ask)) || num(c.c);
+      const uMid = mid(num(u.px_bid), num(u.px_ask)) || num(u.c);
+      if (cMid && uMid) pool.push((r * cMid) / uMid);
+    }
+    return ejecMedian(pool);
+  }, [ced, usa]);
+
+  // CCL default = referencia, hasta que el usuario lo edite.
+  useEffect(() => {
+    if (!cclTouched && cclRef) setCcl(String(Math.round(cclRef)));
+  }, [cclRef, cclTouched]);
+
+  // Al cambiar de símbolo o al refrescar, traer los precios REALES (independientes)
+  // del feed → así el premium refleja el desvío real. (La edición manual asume
+  // paridad y completa el otro campo, para escenarios "qué pasa si".)
+  useEffect(() => {
+    const c = ced[sym], u = usa[sym];
+    const cPx = c ? (mid(num(c.px_bid), num(c.px_ask)) || num(c.c)) : null;
+    const uPx = u ? (mid(num(u.px_bid), num(u.px_ask)) || num(u.c)) : null;
+    setCedear(cPx ? cPx.toFixed(2) : "");
+    setAccion(uPx ? uPx.toFixed(2) : "");
+  }, [sym, ced, usa]);
+
+  const ratio = EJEC_RATIOS[sym] || null;
+  const name = CEDEAR_NAMES[sym] || sym;
+
+  const onAccion = (v) => {
+    setAccion(v);
+    const a = Number(v), cc = Number(ccl);
+    if (ratio && a > 0 && cc > 0) setCedear(((a * cc) / ratio).toFixed(2));
+  };
+  const onCedear = (v) => {
+    setCedear(v);
+    const ce = Number(v), cc = Number(ccl);
+    if (ratio && ce > 0 && cc > 0) setAccion(((ce * ratio) / cc).toFixed(2));
+  };
+
+  const options = useMemo(() => {
+    const all = Object.keys(EJEC_RATIOS).filter((k) => k !== "QCOM_")
+      .map((k) => ({ sym: k, name: CEDEAR_NAMES[k] || k, ratio: EJEC_RATIOS[k] }));
+    const term = q.trim().toUpperCase();
+    const list = term ? all.filter((o) => o.sym.includes(term) || o.name.toUpperCase().includes(term)) : all;
+    return list.sort((x, y) => x.sym.localeCompare(y.sym)).slice(0, 8);
+  }, [q]);
+
+  const a = num(accion), ce = num(cedear), cc = num(ccl);
+  const teorico = (a && cc && ratio) ? (a * cc) / ratio : null;
+  const premium = (teorico && ce) ? (ce / teorico - 1) * 100 : null;
+  const cclImpl = (ce && a && ratio) ? (ce * ratio) / a : null;
+  const premColor = premium == null ? C.text : premium > 0.05 ? "#f87171" : premium < -0.05 ? "#34d399" : C.muted;
+  const premLabel = premium == null ? "" : premium > 0.05 ? "caro" : premium < -0.05 ? "barato" : "en línea";
+
+  const fAr = (n) => (n == null ? "—" : `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+
+  const fieldWrap = { flex: "1 1 150px", minWidth: 140 };
+  const labelStyle = { fontSize: 11, color: C.muted, marginBottom: 6, display: "block" };
+  const inputStyle = { width: "100%", padding: "9px 11px", fontSize: 14, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
+
+  const ResCard = ({ label, value, color, sub, highlight }) => (
+    <div style={{ flex: "1 1 180px", minWidth: 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: 8, padding: "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent" }}>
+      <div style={{ fontSize: 11, color: C.dim, marginBottom: 7 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Valuación CEDEAR</h1>
+        <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
+          Precio teórico de un CEDEAR vs su precio real de mercado, para ver si está caro o barato y definir entradas/salidas. Teórico = (acción USD × CCL) ÷ ratio.
+        </p>
+      </div>
+
+      {/* Datos / inputs */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px" }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Datos</div>
+            <div style={{ fontSize: 11, color: C.dim, marginTop: 2, maxWidth: 620 }}>
+              Datos de data912 (reales, diferidos). Tocá ↻ para traer el precio; escribí la acción (USD) o el CEDEAR (ARS) y el otro se completa solo.
+            </div>
+          </div>
+          <div className="flex items-center" style={{ gap: 8 }}>
+            <span style={{ fontSize: 10, color: lastFetch ? "#34d399" : C.dim, fontWeight: 600 }}>
+              {lastFetch ? "● en vivo · data912" : "○ s/datos"}
+            </span>
+            <button onClick={() => setTick((t) => t + 1)} title="Actualizar precios" disabled={loading}
+              style={{ width: 32, height: 32, borderRadius: 999, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: loading ? "default" : "pointer", fontSize: 14 }}>↻</button>
+          </div>
+        </div>
+
+        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
+          {/* CEDEAR autocomplete */}
+          <div style={{ flex: "1 1 240px", minWidth: 220, position: "relative" }}>
+            <label style={labelStyle}>CEDEAR</label>
+            <input
+              value={open ? q : `${sym} — ${name}`}
+              onFocus={() => { setOpen(true); setQ(""); }}
+              onBlur={() => setTimeout(() => setOpen(false), 150)}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscá ticker o nombre…"
+              style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }}
+            />
+            {open && options.length > 0 && (
+              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, zIndex: 10, maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+                {options.map((o) => (
+                  <div key={o.sym} onMouseDown={() => { setSym(o.sym); setOpen(false); setQ(""); }}
+                    className="flex items-center justify-between"
+                    style={{ padding: "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`, gap: 10 }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#f59e0b", fontSize: 12, minWidth: 56 }}>{o.sym}</span>
+                    <span style={{ fontSize: 12, color: C.text, flex: 1 }}>{o.name}</span>
+                    <span style={{ fontSize: 11, color: C.dim, fontFamily: "'JetBrains Mono', monospace" }}>{o.ratio}:1</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Ratio 🔒</label>
+            <input value={ratio ?? "—"} readOnly style={{ ...inputStyle, color: C.muted, background: "transparent" }} />
+          </div>
+          <div style={fieldWrap}>
+            <label style={labelStyle}>CCL — venta (ARS)</label>
+            <input value={ccl} onChange={(e) => { setCclTouched(true); setCcl(e.target.value); }} inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Precio ACCIÓN (USD)</label>
+            <input value={accion} onChange={(e) => onAccion(e.target.value)} inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Precio CEDEAR (ARS)</label>
+            <input value={cedear} onChange={(e) => onCedear(e.target.value)} inputMode="decimal" style={inputStyle} />
+          </div>
+        </div>
+      </div>
+
+      {/* Resultados */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginTop: 14 }}>
+        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
+          <ResCard label="Precio teórico CEDEAR" value={fAr(teorico)} color="#f59e0b" highlight />
+          <ResCard label="Precio real de mercado" value={fAr(ce)} />
+          <ResCard label="Premium / descuento"
+            value={premium == null ? "—" : `${premium >= 0 ? "+" : ""}${premium.toFixed(2)}%`}
+            color={premColor} sub={premLabel} />
+          <ResCard label="CCL implícito" value={fAr(cclImpl)} color="#60a5fa" />
+        </div>
+        <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
+          Teórico = (acción USD × CCL) ÷ ratio. El premium compara el precio real contra el teórico: positivo = el CEDEAR cotiza <span style={{ color: "#f87171" }}>caro</span> respecto al subyacente; negativo = <span style={{ color: "#34d399" }}>barato</span> (arbitraje potencial). CCL implícito = (CEDEAR ARS × ratio) ÷ acción USD.
+        </p>
+      </div>
     </div>
   );
 }
