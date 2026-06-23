@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, createContext, useCo
 import { useAuth } from "./auth/AuthContext.jsx";
 import { supabase } from "./lib/supabase.js";
 import { resolveBond, daysToMaturity, shouldIgnoreTicker, BOND_REGISTRY } from "./bondMaturities.js";
+import { CEDEAR_CAT } from "./cedearCatalog.js";
 import {
   DLR_REGISTRY,
   DLR_SPOT_SEED,
@@ -25496,24 +25497,10 @@ function PaperTradingModule() {
 // Valuación CEDEAR — fair value: teórico = (acción USD × CCL) ÷ ratio.
 // Compara el precio real del CEDEAR contra el teórico (premium = caro/barato) y
 // muestra el CCL implícito. Sirve para cotizar, ver si un papel está caro/barato
-// y definir entradas/salidas. Datos data912 (CEDEAR ARS + acción USD), ratios de
-// EJEC_RATIOS, CCL default = la referencia (mediana de los líquidos).
+// y definir entradas/salidas. Datos data912 (CEDEAR ARS + acción USD), ratios y
+// nombres del catálogo CEDEAR_CAT (~425 CEDEARs, tabla pública BYMA/Comafi). El
+// CCL default = la referencia (mediana de los líquidos, igual que Ejecución).
 // ═══════════════════════════════════════════════════════════════════════
-const CEDEAR_NAMES = {
-  AAPL: "Apple", MSFT: "Microsoft", NVDA: "NVIDIA", AMZN: "Amazon", META: "Meta Platforms",
-  TSLA: "Tesla", AMD: "AMD", KO: "Coca-Cola", MELI: "MercadoLibre", NFLX: "Netflix",
-  BABA: "Alibaba", V: "Visa", MA: "Mastercard", JPM: "JPMorgan", PYPL: "PayPal",
-  INTC: "Intel", QQQ: "Invesco QQQ", SPY: "SPDR S&P 500", WMT: "Walmart", JNJ: "Johnson & Johnson",
-  COIN: "Coinbase", PLTR: "Palantir", MSTR: "MicroStrategy", GLOB: "Globant", CRM: "Salesforce",
-  ORCL: "Oracle", AVGO: "Broadcom", MU: "Micron", GOOGL: "Alphabet", NU: "Nu Holdings",
-  RKLB: "Rocket Lab", TQQQ: "ProShares UltraPro QQQ", ASTS: "AST SpaceMobile", ADBE: "Adobe",
-  VIST: "Vista Energy", CRWV: "CoreWeave", IREN: "IREN", RGTI: "Rigetti", QCOM: "Qualcomm",
-  MCD: "McDonald's", NBIS: "Nebius", IBM: "IBM", OKLO: "Oklo", CEG: "Constellation Energy",
-  UNH: "UnitedHealth", XP: "XP Inc.", NKE: "Nike", UPST: "Upstart", ARM: "Arm Holdings",
-  ASML: "ASML", RIOT: "Riot Platforms", COPX: "Global X Copper Miners", HUT: "Hut 8",
-  PAGS: "PagSeguro", NIO: "NIO", NOW: "ServiceNow", SNDK: "SanDisk",
-};
-
 function CedearValuacionModule() {
   const [ced, setCed] = useState({});
   const [usa, setUsa] = useState({});
@@ -25581,8 +25568,8 @@ function CedearValuacionModule() {
     setAccion(uPx ? uPx.toFixed(2) : "");
   }, [sym, ced, usa]);
 
-  const ratio = EJEC_RATIOS[sym] || null;
-  const name = CEDEAR_NAMES[sym] || sym;
+  const ratio = CEDEAR_CAT[sym]?.r ?? null;
+  const name = CEDEAR_CAT[sym]?.n || sym;
 
   const onAccion = (v) => {
     setAccion(v);
@@ -25596,11 +25583,10 @@ function CedearValuacionModule() {
   };
 
   const options = useMemo(() => {
-    const all = Object.keys(EJEC_RATIOS).filter((k) => k !== "QCOM_")
-      .map((k) => ({ sym: k, name: CEDEAR_NAMES[k] || k, ratio: EJEC_RATIOS[k] }));
+    const all = Object.keys(CEDEAR_CAT).map((k) => ({ sym: k, name: CEDEAR_CAT[k].n, ratio: CEDEAR_CAT[k].r }));
     const term = q.trim().toUpperCase();
     const list = term ? all.filter((o) => o.sym.includes(term) || o.name.toUpperCase().includes(term)) : all;
-    return list.sort((x, y) => x.sym.localeCompare(y.sym)).slice(0, 8);
+    return list.sort((x, y) => x.sym.localeCompare(y.sym)).slice(0, 10);
   }, [q]);
 
   const a = num(accion), ce = num(cedear), cc = num(ccl);
