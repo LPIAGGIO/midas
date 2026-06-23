@@ -25739,18 +25739,13 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
       {/* Datos / inputs */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px" }}>
         <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Datos</div>
-            <div style={{ fontSize: 11, color: C.dim, marginTop: 2, maxWidth: 620 }}>
-              Datos de data912 (reales, diferidos). Tocá ↻ para traer el precio; escribí la acción (USD) o el CEDEAR (ARS) y el otro se completa solo.
-            </div>
-          </div>
-          <div className="flex items-center" style={{ gap: 8 }}>
-            <span style={{ fontSize: 10, color: lastFetch ? "#34d399" : C.dim, fontWeight: 600 }}>
-              {lastFetch ? "● en vivo · data912" : "○ s/datos"}
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Datos</div>
+          <div className="flex items-center" style={{ gap: 10 }}>
+            <span style={{ fontSize: 11, color: lastFetch ? "#34d399" : C.dim, fontWeight: 600 }}>
+              {lastFetch ? "● en vivo" : "○ sin datos"}
             </span>
             <button onClick={() => setTick((t) => t + 1)} title="Actualizar precios" disabled={loading}
-              style={{ width: 32, height: 32, borderRadius: 999, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: loading ? "default" : "pointer", fontSize: 14 }}>↻</button>
+              style={{ width: 40, height: 40, borderRadius: 999, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: loading ? "default" : "pointer", fontSize: 19 }}>↻</button>
           </div>
         </div>
 
