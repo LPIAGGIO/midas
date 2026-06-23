@@ -329,6 +329,28 @@ function MidasApp() {
   const [now, setNow] = useState(new Date());
   const [open, setOpen] = useState({ bcra: false, mercado: false, analizadores: false, calculadoras: false, reportes: false });
   const [active, setActive] = useState("dashboard");
+  // Ventana flotante (Document PiP) de Valuación CEDEAR. Se maneja ACÁ (shell
+  // siempre montado) y NO en el módulo, así sobrevive aunque cambies de pantalla.
+  const [cedearPip, setCedearPip] = useState(null);
+  const openCedearPip = useCallback(async () => {
+    if (cedearPip && !cedearPip.closed) { try { cedearPip.focus(); } catch {} return; }
+    if (!("documentPictureInPicture" in window)) {
+      window.open(window.location.origin + window.location.pathname + "?view=cedear-fv", "midas-cedear-fv", "width=480,height=660,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+      return;
+    }
+    try {
+      const w = await window.documentPictureInPicture.requestWindow({ width: 470, height: 640 });
+      for (const node of document.querySelectorAll('style, link[rel="stylesheet"]')) {
+        try { w.document.head.appendChild(node.cloneNode(true)); } catch {}
+      }
+      w.document.body.style.margin = "0";
+      w.document.body.style.background = "#0F1B2B";
+      w.addEventListener("pagehide", () => setCedearPip(null));
+      setCedearPip(w);
+    } catch {
+      window.open(window.location.origin + window.location.pathname + "?view=cedear-fv", "midas-cedear-fv", "width=480,height=660,resizable=yes");
+    }
+  }, [cedearPip]);
   const globalAlerts = useGlobalAlerts();
   const [bellOpen, setBellOpen] = useState(false);
   const bellRef = useRef(null);
@@ -1024,7 +1046,7 @@ function MidasApp() {
             ) : active === "ejecucion-cedear" ? (
               <EjecucionInteligenteModule key={active} />
             ) : active === "calc-cedear-fv" ? (
-              <CedearValuacionModule key={active} />
+              <CedearValuacionModule key={active} onPopOut={openCedearPip} pipActive={!!cedearPip} />
             ) : active === "paper-cripto" ? (
               <PaperTradingModule key={active} />
             ) : active === "paper-cedears" ? (
@@ -1099,6 +1121,12 @@ function MidasApp() {
         </main>
       </div>
     </div>
+    {/* Ventana flotante (PiP) de Valuación CEDEAR — montada en el shell, persiste
+        aunque cambies de pantalla. */}
+    {cedearPip && createPortal(
+      <div style={{ minHeight: "100vh", background: "#0F1B2B" }}><CedearValuacionModule compact /></div>,
+      cedearPip.document.body
+    )}
     </PrivacyProvider>
   );
 }
@@ -25511,7 +25539,7 @@ function PaperTradingModule() {
 const CEDEAR_US_MAP = { DISN: "DIS", BRKB: "BRK.B", WBO: "WBD" };  // para data912 usa_stocks
 const CEDEAR_YH_MAP = { DISN: "DIS", BRKB: "BRK-B", WBO: "WBD" };  // para Yahoo (fallback)
 // ═══════════════════════════════════════════════════════════════════════
-function CedearValuacionModule({ compact = false } = {}) {
+function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
   const [ced, setCed] = useState({});
   const [usa, setUsa] = useState({});
   const [loading, setLoading] = useState(true);
@@ -25526,7 +25554,6 @@ function CedearValuacionModule({ compact = false } = {}) {
   const [cedear, setCedear] = useState("");
   const [yhCache, setYhCache] = useState({});   // sym -> precio subyacente de Yahoo (fallback)
   const [usaSrc, setUsaSrc] = useState(null);    // "data912" | "yahoo" | null
-  const [pipWin, setPipWin] = useState(null);    // ventana Picture-in-Picture (siempre arriba)
 
   const num = (x) => { const n = Number(x); return Number.isFinite(n) && n > 0 ? n : null; };
   const mid = (a, b) => (a && b ? (a + b) / 2 : (a || b || null));
@@ -25646,29 +25673,6 @@ function CedearValuacionModule({ compact = false } = {}) {
     </div>
   );
 
-  const openPopup = () => {
-    const u = window.location.origin + window.location.pathname + "?view=cedear-fv";
-    window.open(u, "midas-cedear-fv", "width=480,height=660,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
-  };
-
-  // Ventana flotante SIEMPRE VISIBLE vía Document Picture-in-Picture (Chrome/Edge).
-  // El SO la mantiene arriba de todo → se usa en paralelo con Matriz. Fallback a
-  // window.open (no es always-on-top) si el navegador no soporta la API.
-  const openPip = async () => {
-    if (pipWin && !pipWin.closed) { try { pipWin.focus(); } catch {} return; }
-    if (!("documentPictureInPicture" in window)) { openPopup(); return; }
-    try {
-      const w = await window.documentPictureInPicture.requestWindow({ width: 470, height: 640 });
-      for (const node of document.querySelectorAll('style, link[rel="stylesheet"]')) {
-        try { w.document.head.appendChild(node.cloneNode(true)); } catch {}
-      }
-      w.document.body.style.margin = "0";
-      w.document.body.style.background = "#0F1B2B";
-      w.addEventListener("pagehide", () => setPipWin(null));
-      setPipWin(w);
-    } catch { openPopup(); }
-  };
-
   return (
     <div style={{ padding: compact ? "12px 14px" : "24px 32px", maxWidth: compact ? "none" : 1100, margin: compact ? 0 : "0 auto" }}>
       {compact ? (
@@ -25684,10 +25688,12 @@ function CedearValuacionModule({ compact = false } = {}) {
           Precio teórico de un CEDEAR vs su precio real de mercado, para ver si está caro o barato y definir entradas/salidas. Teórico = (acción USD × CCL) ÷ ratio.
         </p>
         </div>
-        <button onClick={openPip} title="Ventana flotante siempre visible, en paralelo con Matriz (Chrome/Edge)"
-          style={{ flexShrink: 0, padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${pipWin ? "#f59e0b" : C.border}`, background: pipWin ? "rgba(245,158,11,0.12)" : "transparent", color: pipWin ? "#f59e0b" : C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
-          📌 {pipWin ? "Ventana fijada" : "Ventana flotante"}
+        {onPopOut && (
+        <button onClick={onPopOut} title="Ventana flotante siempre visible, en paralelo con Matriz (Chrome/Edge)"
+          style={{ flexShrink: 0, padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${pipActive ? "#f59e0b" : C.border}`, background: pipActive ? "rgba(245,158,11,0.12)" : "transparent", color: pipActive ? "#f59e0b" : C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
+          📌 {pipActive ? "Ventana fijada" : "Ventana flotante"}
         </button>
+        )}
       </div>
       )}
 
@@ -25778,13 +25784,6 @@ function CedearValuacionModule({ compact = false } = {}) {
         </p>
         )}
       </div>
-
-      {/* La calculadora compacta vive dentro de la ventana flotante (PiP). El
-          instance compact no renderiza el botón → no hay recursión. */}
-      {!compact && pipWin && createPortal(
-        <div style={{ minHeight: "100vh", background: "#0F1B2B" }}><CedearValuacionModule compact /></div>,
-        pipWin.document.body
-      )}
     </div>
   );
 }
