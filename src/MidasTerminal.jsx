@@ -333,23 +333,28 @@ function MidasApp() {
   // siempre montado) y NO en el módulo, así sobrevive aunque cambies de pantalla.
   const [cedearPip, setCedearPip] = useState(null);
   const openCedearPip = useCallback(async () => {
-    if (cedearPip && !cedearPip.closed) { try { cedearPip.focus(); } catch {} return; }
-    if (!("documentPictureInPicture" in window)) {
-      window.open(window.location.origin + window.location.pathname + "?view=cedear-fv", "midas-cedear-fv", "width=480,height=660,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
-      return;
-    }
+    const fallback = () => window.open(window.location.origin + window.location.pathname + "?view=cedear-fv", "midas-cedear-fv", "width=480,height=660,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+    if (cedearPip && cedearPip.win && !cedearPip.win.closed) { try { cedearPip.win.focus(); } catch {} return; }
+    if (!("documentPictureInPicture" in window)) { fallback(); return; }
     try {
       const w = await window.documentPictureInPicture.requestWindow({ width: 470, height: 640 });
-      for (const node of document.querySelectorAll('style, link[rel="stylesheet"]')) {
-        try { w.document.head.appendChild(node.cloneNode(true)); } catch {}
+      // Copiar los estilos: cssRules inline para los same-origin (incluye Tailwind);
+      // los cross-origin (que tiran SecurityError) se enganchan como <link>.
+      for (const ss of Array.from(document.styleSheets)) {
+        try {
+          const css = Array.from(ss.cssRules).map((r) => r.cssText).join("\n");
+          const st = w.document.createElement("style"); st.textContent = css; w.document.head.appendChild(st);
+        } catch {
+          if (ss.href) { const ln = w.document.createElement("link"); ln.rel = "stylesheet"; ln.href = ss.href; w.document.head.appendChild(ln); }
+        }
       }
       w.document.body.style.margin = "0";
       w.document.body.style.background = "#0F1B2B";
+      const container = w.document.createElement("div");
+      w.document.body.appendChild(container);
       w.addEventListener("pagehide", () => setCedearPip(null));
-      setCedearPip(w);
-    } catch {
-      window.open(window.location.origin + window.location.pathname + "?view=cedear-fv", "midas-cedear-fv", "width=480,height=660,resizable=yes");
-    }
+      setCedearPip({ win: w, container });
+    } catch { fallback(); }
   }, [cedearPip]);
   const globalAlerts = useGlobalAlerts();
   const [bellOpen, setBellOpen] = useState(false);
@@ -1123,9 +1128,9 @@ function MidasApp() {
     </div>
     {/* Ventana flotante (PiP) de Valuación CEDEAR — montada en el shell, persiste
         aunque cambies de pantalla. */}
-    {cedearPip && createPortal(
+    {cedearPip && cedearPip.container && createPortal(
       <div style={{ minHeight: "100vh", background: "#0F1B2B" }}><CedearValuacionModule compact /></div>,
-      cedearPip.document.body
+      cedearPip.container
     )}
     </PrivacyProvider>
   );
