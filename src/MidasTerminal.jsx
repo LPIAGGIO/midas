@@ -12585,11 +12585,13 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
           pnlPct: openPnlPct,
           realizedPnl: 0,
           unrealizedPnl: openUnrealizedPnl,
-          // HISTÓRICO de la fila ABIERTA = solo su no-realizado (= P&L TOTAL).
-          // El realizado vive en la fila CERRADA; no se mezcla acá para no
-          // contarlo dos veces (se ve también en "Posiciones cerradas").
-          lifetimePnl: openUnrealizedPnl,
-          lifetimePnlPct: openPnlPct,
+          isPartialOpen: true,
+          // HISTÓRICO de la fila ABIERTA (cierre parcial) = el REALIZADO histórico
+          // del ticker (lo ya cobrado por las ventas pasadas). El no-realizado del
+          // lote vivo ya se muestra como P&L TOTAL en la fila principal; repetirlo
+          // acá era redundante. Por eso el label pasa a "Realizado histórico".
+          lifetimePnl: realizedPnl,
+          lifetimePnlPct: closedPnlPct,
           notional: openNotional,
           firstDate: g.firstDate,
           lastDate: g.lastDate,
@@ -16167,7 +16169,7 @@ function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPric
                     fontWeight: 600,
                     fontFamily: "'Roboto', sans-serif",
                   }}>
-                    {group.isClosed ? "Realizado histórico" : "Histórico"}
+                    {group.isClosed || group.isPartialOpen ? "Realizado histórico" : "Histórico"}
                   </span>
                   <span style={{
                     fontSize: 12.5,
