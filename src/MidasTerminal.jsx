@@ -315,6 +315,11 @@ export default function MidasTerminal() {
   if (!gateUser) {
     return <Landing onLogin={gateSignIn} />;
   }
+  // Modo pop-out: ventana chiquita con SOLO la calculadora (sin sidebar/header),
+  // para tenerla en paralelo con Matriz/Cocos. Se abre con ?view=cedear-fv.
+  if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "cedear-fv") {
+    return <div style={{ minHeight: "100vh", background: "#0F1B2B" }}><CedearValuacionModule compact /></div>;
+  }
   return <MidasApp />;
 }
 
@@ -25505,7 +25510,7 @@ function PaperTradingModule() {
 const CEDEAR_US_MAP = { DISN: "DIS", BRKB: "BRK.B", WBO: "WBD" };  // para data912 usa_stocks
 const CEDEAR_YH_MAP = { DISN: "DIS", BRKB: "BRK-B", WBO: "WBD" };  // para Yahoo (fallback)
 // ═══════════════════════════════════════════════════════════════════════
-function CedearValuacionModule() {
+function CedearValuacionModule({ compact = false } = {}) {
   const [ced, setCed] = useState({});
   const [usa, setUsa] = useState({});
   const [loading, setLoading] = useState(true);
@@ -25632,24 +25637,42 @@ function CedearValuacionModule() {
   const inputStyle = { width: "100%", padding: "9px 11px", fontSize: 14, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
 
   const ResCard = ({ label, value, color, sub, highlight }) => (
-    <div style={{ flex: "1 1 180px", minWidth: 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: 8, padding: "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent" }}>
-      <div style={{ fontSize: 11, color: C.dim, marginBottom: 7 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
+    <div style={{ flex: compact ? "1 1 calc(50% - 5px)" : "1 1 180px", minWidth: compact ? 0 : 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: 8, padding: compact ? "10px 12px" : "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent", boxSizing: "border-box" }}>
+      <div style={{ fontSize: compact ? 10 : 11, color: C.dim, marginBottom: compact ? 5 : 7 }}>{label}</div>
+      <div style={{ fontSize: compact ? 17 : 22, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
+      {sub && <div style={{ fontSize: compact ? 10 : 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
     </div>
   );
 
+  const openPopup = () => {
+    const u = window.location.origin + window.location.pathname + "?view=cedear-fv";
+    window.open(u, "midas-cedear-fv", "width=480,height=660,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+  };
+
   return (
-    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
-      <div style={{ marginBottom: 16 }}>
+    <div style={{ padding: compact ? "12px 14px" : "24px 32px", maxWidth: compact ? "none" : 1100, margin: compact ? 0 : "0 auto" }}>
+      {compact ? (
+        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Valuación CEDEAR</span>
+          <span style={{ fontSize: 9.5, color: C.dim, letterSpacing: "0.12em", textTransform: "uppercase" }}>midas</span>
+        </div>
+      ) : (
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12 }}>
+        <div>
         <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Valuación CEDEAR</h1>
         <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
           Precio teórico de un CEDEAR vs su precio real de mercado, para ver si está caro o barato y definir entradas/salidas. Teórico = (acción USD × CCL) ÷ ratio.
         </p>
+        </div>
+        <button onClick={openPopup} title="Abrir en ventana chica para tener en paralelo con Matriz"
+          style={{ flexShrink: 0, padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
+          ⤢ Abrir en ventana
+        </button>
       </div>
+      )}
 
       {/* Datos / inputs */}
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px" }}>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px" }}>
         <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 10 }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Datos</div>
@@ -25720,8 +25743,8 @@ function CedearValuacionModule() {
       </div>
 
       {/* Resultados */}
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginTop: 14 }}>
-        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px", marginTop: compact ? 10 : 14 }}>
+        <div className="flex" style={{ gap: compact ? 10 : 12, flexWrap: "wrap" }}>
           <ResCard label="Precio teórico CEDEAR" value={fAr(teorico)} color="#f59e0b" highlight />
           <ResCard label="Precio real de mercado" value={fAr(ce)} />
           <ResCard label="Premium / descuento"
@@ -25729,9 +25752,11 @@ function CedearValuacionModule() {
             color={premColor} sub={premLabel} />
           <ResCard label="CCL implícito" value={fAr(cclImpl)} color="#60a5fa" />
         </div>
+        {!compact && (
         <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
           Teórico = (acción USD × CCL) ÷ ratio. El premium compara el precio real contra el teórico: positivo = el CEDEAR cotiza <span style={{ color: "#f87171" }}>caro</span> respecto al subyacente; negativo = <span style={{ color: "#34d399" }}>barato</span> (arbitraje potencial). CCL implícito = (CEDEAR ARS × ratio) ÷ acción USD.
         </p>
+        )}
       </div>
     </div>
   );
