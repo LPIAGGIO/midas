@@ -854,21 +854,21 @@ async function cmdMep(chatId) {
 
 // /dolar — cotizaciones de los distintos dólares en tiempo real (dolarapi).
 const DOLAR_ORDER = ["oficial", "mayorista", "tarjeta", "bolsa", "contadoconliqui", "blue", "cripto"];
-const DOLAR_NOMBRE = { oficial: "Oficial", mayorista: "Mayorista", tarjeta: "Tarjeta", bolsa: "MEP (bolsa)", contadoconliqui: "CCL", blue: "Blue", cripto: "Cripto" };
+const DOLAR_NOMBRE = { oficial: "Oficial", mayorista: "Mayorista", tarjeta: "Tarjeta", bolsa: "MEP", contadoconliqui: "CCL", blue: "Blue", cripto: "Cripto" };
 async function cmdDolar(chatId) {
   let data = [];
   try { const r = await fetch("https://dolarapi.com/v1/dolares"); if (r.ok) data = await r.json(); } catch (e) { console.error("[dolar]", e.message); }
   if (!data.length) { await sendMessage(chatId, "Sin cotizaciones de dólar ahora."); return; }
-  const f = (n) => (n == null ? "—" : Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  const fInt = (n) => (n == null ? "—" : Math.round(Number(n)).toLocaleString("es-AR"));
   const byCasa = {}; for (const d of data) byCasa[d.casa] = d;
   const seen = new Set();
-  const lines = [];
-  for (const k of DOLAR_ORDER) {
-    const d = byCasa[k]; if (!d) continue; seen.add(k);
-    lines.push(`${DOLAR_NOMBRE[k] || d.nombre}: <b>$${f(d.venta)}</b>${d.compra ? ` <i>(compra ${f(d.compra)})</i>` : ""}`);
-  }
-  for (const d of data) if (!seen.has(d.casa)) lines.push(`${d.nombre}: <b>$${f(d.venta)}</b>`);
-  await sendMessage(chatId, `💵 <b>Dólar — cotizaciones</b>\n${lines.join("\n")}\n<i>Fuente dolarapi · venta (compra). Tiempo real con leve delay.</i>`);
+  const rows = [];
+  for (const k of DOLAR_ORDER) { const d = byCasa[k]; if (!d) continue; seen.add(k); rows.push({ name: DOLAR_NOMBRE[k] || d.nombre, venta: d.venta, compra: d.compra }); }
+  for (const d of data) if (!seen.has(d.casa)) rows.push({ name: d.nombre, venta: d.venta, compra: d.compra });
+  // Tabla monospace alineada (Telegram <pre> respeta los espacios).
+  const header = `${"".padEnd(10)}${"venta".padStart(7)}${"compra".padStart(9)}`;
+  const body = rows.map((r) => `${r.name.padEnd(10)}${fInt(r.venta).padStart(7)}${(r.compra != null ? fInt(r.compra) : "—").padStart(9)}`).join("\n");
+  await sendMessage(chatId, `💵 <b>Dólar — cotizaciones</b>\n<pre>${header}\n${body}</pre>\n<i>Fuente dolarapi.</i>`);
 }
 
 // /futuros — todos los futuros DLR con precio del momento y variación del día.
