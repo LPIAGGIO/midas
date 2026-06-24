@@ -9284,18 +9284,22 @@ function computeRealizedTodayContado(positions, bondPrices, stockPrices, futureP
   const all = consolidatePositions(positions, bondPrices, futurePrices, fciPrices, stockPrices);
   const closedToday = filterClosedToToday(all.filter((g) => g.isClosed), futurePrices);
   const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-  // Tickers cuya actividad fue TODA hoy (round-trip intradía: comprado Y vendido
-  // hoy). Para ellos el P&L del día es el realizado completo (venta − compra),
-  // NO (venta − cierre de ayer): ayer no tenías la posición. Sin esto, un CEDEAR
-  // comprado y vendido el mismo día se medía contra su cierre previo y daba un
-  // fantasma gigante (SPCX 16/06: +17,5M en lugar de −1,07M).
-  const allTodayByTicker = new Map();
+  // Un ticker es "intradía puro hoy" si estaba PLANO al empezar el día: el neto de
+  // sus operaciones de días ANTERIORES es 0. Para ellos el P&L del día = realizado
+  // completo (venta − compra), NO (venta − cierre de ayer): ayer no tenías posición.
+  // Si arrastraba un lote abierto de días previos → mide contra el cierre de ayer.
+  // (Antes pedía que TODAS las ops del ticker fueran de hoy; SPCX caía mal porque
+  // tenía round-trips viejos YA CERRADOS — 16/06, 23/06 — que lo marcaban "no todo
+  // hoy" aunque el round-trip de hoy fuese intradía puro y diera fantasma.)
+  const preTodayNetByTicker = new Map();
   for (const p of positions || []) {
     if (!p || p.instrument_type === "future" || !p.ticker) continue;
+    if (p.entry_date === todayAR) continue; // solo días anteriores
     const t = p.ticker.toUpperCase();
-    const prevFlag = allTodayByTicker.has(t) ? allTodayByTicker.get(t) : true;
-    allTodayByTicker.set(t, prevFlag && p.entry_date === todayAR);
+    const sign = p.operation_type === "sell" ? -1 : 1;
+    preTodayNetByTicker.set(t, (preTodayNetByTicker.get(t) || 0) + sign * (Number(p.quantity) || 0));
   }
+  const flatAtStartToday = (t) => Math.abs(preTodayNetByTicker.get(t) || 0) < 1e-6;
   let sum = 0;
   for (const g of closedToday) {
     if (g.instrument_type === "future") continue;
@@ -9308,7 +9312,7 @@ function computeRealizedTodayContado(positions, bondPrices, stockPrices, futureP
       if (den > 0) prev = Number(m.price) / den;
     }
     let dayValue;
-    if (allTodayByTicker.get(tk)) {
+    if (flatAtStartToday(tk)) {
       dayValue = g.realizedPnl ?? 0; // intradía puro: realizado completo (venta − compra)
     } else if (prev != null && prev > 0) {
       let dayRaw = 0;
