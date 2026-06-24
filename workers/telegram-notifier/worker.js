@@ -878,7 +878,12 @@ async function cmdFuturos(chatId) {
   const cv = curveVar(fut);
   if (!cv.all.length) { await sendMessage(chatId, "Sin precios de futuros ahora."); return; }
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-  const sorted = cv.all.slice().sort((a, b) => a.ord - b.ord);
+  // Solo contratos VIVOS (mes en curso en adelante); los vencidos (ej. MAY26) quedan
+  // en el feed con last=settle (+0,00%) y son ruido.
+  const now = new Date();
+  const curOrd = (now.getFullYear() % 100) * 12 + now.getMonth();
+  const sorted = cv.all.filter((c) => c.ord >= curOrd).sort((a, b) => a.ord - b.ord);
+  if (!sorted.length) { await sendMessage(chatId, "Sin futuros vigentes ahora."); return; }
   const lines = sorted.map((c) => {
     const chg = c.p - c.s; // variación del día en pesos (vs settle anterior)
     return `${cap(c.nombre)}: <b>${c.p}</b>  ${chg >= 0 ? "+" : "−"}${Math.abs(chg).toFixed(1)} (${c.varPct >= 0 ? "+" : ""}${c.varPct.toFixed(2)}%)`;
