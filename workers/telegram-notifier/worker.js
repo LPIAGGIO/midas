@@ -579,6 +579,45 @@ async function buildFuturesSummary(userId, rawBy, fut) {
   return `📊 <b>Cierre de futuros ${dateStr}</b>\n\n${futRes.block}\n<i>Ajuste de cierre de hoy vs ayer (como Matriz).</i>`;
 }
 
+// Realizado de HOY de CONTADO (CEDEARs/acciones/bonos/ON) por ticker: motor de
+// costo promedio cronologico, suma el realizado de los cierres de hoy. Captura los
+// round-trips intradia que ya no son tenencia (neto 0) — ej. SPCX, que el bloque
+// de Tenencias saltea por estar plano. Bonos/ON dividen /100 VN.
+function contadoRealizedToday(positions, dateStr) {
+  const CONT = ["bond_ars", "bond_usd", "on", "stock", "cedear"];
+  const byT = {};
+  for (const p of positions || []) {
+    if (!CONT.includes(p?.instrument_type) || !p.ticker) continue;
+    (byT[p.ticker] = byT[p.ticker] || []).push(p);
+  }
+  const out = {};
+  for (const [ticker, lotes] of Object.entries(byT)) {
+    const per100 = ["bond_ars", "bond_usd", "on"].includes(lotes[0].instrument_type);
+    const sorted = lotes.slice().sort((a, b) => (a.entry_date < b.entry_date ? -1 : a.entry_date > b.entry_date ? 1 : 0));
+    let posQty = 0, avg = 0, realized = 0;
+    for (const p of sorted) {
+      const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+      if (!q) continue;
+      const price = Number(p.entry_price) || 0;
+      const isToday = p.entry_date === dateStr;
+      if (posQty === 0 || Math.sign(posQty) === Math.sign(q)) {
+        const newQty = posQty + q;
+        avg = newQty !== 0 ? (avg * Math.abs(posQty) + price * Math.abs(q)) / Math.abs(newQty) : 0;
+        posQty = newQty;
+      } else {
+        const closeQty = Math.min(Math.abs(q), Math.abs(posQty));
+        const pnl = (posQty > 0 ? (price - avg) : (avg - price)) * closeQty / (per100 ? 100 : 1);
+        if (isToday) realized += pnl;
+        const remainder = Math.abs(q) - closeQty;
+        posQty = posQty + q;
+        if (remainder > 0) avg = price;
+      }
+    }
+    if (Math.abs(realized) > 0.005) out[ticker] = realized;
+  }
+  return out;
+}
+
 async function buildEodSummary(userId, rawBy, fut) {
   const { dateStr } = artParts();
   const raw = rawBy[userId] || [];
@@ -617,6 +656,24 @@ async function buildEodSummary(userId, rawBy, fut) {
     }
     grand += subtotal;
     lines.push(`\n<b>Tenencias — P&L del dia</b>\n${bl.join("\n")}\nSubtotal: <b>${money(subtotal)}</b>`);
+  }
+
+  // ── Cerrado hoy (contado): realizado de round-trips de hoy que ya no son tenencia
+  //    (neto 0) — ej. SPCX. Sin esto, una ganancia intradia grande se perdia del total.
+  //    Solo tickers en neto 0 (totalmente cerrados): el MTM de lo que sigue abierto
+  //    ya va en Tenencias, así no se pisa.
+  const netAll = {};
+  for (const p of raw) {
+    if (!["bond_ars", "bond_usd", "on", "stock", "cedear"].includes(p?.instrument_type) || !p.ticker) continue;
+    netAll[p.ticker] = (netAll[p.ticker] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+  }
+  const realToday = contadoRealizedToday(raw, dateStr);
+  const rtEntries = Object.entries(realToday).filter(([t]) => Math.abs(netAll[t] || 0) < 1e-6);
+  if (rtEntries.length) {
+    let subtotal = 0; const bl = [];
+    for (const [ticker, pnl] of rtEntries) { subtotal += pnl; bl.push(`• ${ticker}: ${money(pnl)}`); }
+    grand += subtotal;
+    lines.push(`\n<b>Cerrado hoy (contado) — realizado</b>\n${bl.join("\n")}\nSubtotal: <b>${money(subtotal)}</b>`);
   }
 
   lines.push(`\n<b>TOTAL del dia: ${money(grand)}</b>`);
