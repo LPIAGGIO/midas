@@ -837,7 +837,7 @@ async function fetchDolarBonds() {
   return { rows, bestBuy, bestSell, arbPct };
 }
 
-async function cmdDolar(chatId) {
+async function cmdMep(chatId) {
   const { rows, bestBuy, bestSell, arbPct } = await fetchDolarBonds();
   if (!rows.length) { await sendMessage(chatId, "Sin puntas de bonos ahora (¿mercado cerrado?)."); return; }
   const f = (n) => (n == null ? "s/d" : Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
@@ -851,6 +851,61 @@ async function cmdDolar(chatId) {
   }
   msg += "\n<i>Comprar = comprás el bono en $ y lo vendés en D; vender al revés. Incluye cruzar puntas.</i>";
   await sendMessage(chatId, msg);
+}
+
+// /dolar — cotizaciones de los distintos dólares en tiempo real (dolarapi).
+const DOLAR_ORDER = ["oficial", "mayorista", "tarjeta", "bolsa", "contadoconliqui", "blue", "cripto"];
+const DOLAR_NOMBRE = { oficial: "Oficial", mayorista: "Mayorista", tarjeta: "Tarjeta", bolsa: "MEP (bolsa)", contadoconliqui: "CCL", blue: "Blue", cripto: "Cripto" };
+async function cmdDolar(chatId) {
+  let data = [];
+  try { const r = await fetch("https://dolarapi.com/v1/dolares"); if (r.ok) data = await r.json(); } catch (e) { console.error("[dolar]", e.message); }
+  if (!data.length) { await sendMessage(chatId, "Sin cotizaciones de dólar ahora."); return; }
+  const f = (n) => (n == null ? "—" : Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  const byCasa = {}; for (const d of data) byCasa[d.casa] = d;
+  const seen = new Set();
+  const lines = [];
+  for (const k of DOLAR_ORDER) {
+    const d = byCasa[k]; if (!d) continue; seen.add(k);
+    lines.push(`${DOLAR_NOMBRE[k] || d.nombre}: <b>$${f(d.venta)}</b>${d.compra ? ` <i>(compra ${f(d.compra)})</i>` : ""}`);
+  }
+  for (const d of data) if (!seen.has(d.casa)) lines.push(`${d.nombre}: <b>$${f(d.venta)}</b>`);
+  await sendMessage(chatId, `💵 <b>Dólar — cotizaciones</b>\n${lines.join("\n")}\n<i>Fuente dolarapi · venta (compra). Tiempo real con leve delay.</i>`);
+}
+
+// /futuros — todos los futuros DLR con precio del momento y variación del día.
+async function cmdFuturos(chatId) {
+  const fut = await loadFutures();
+  const cv = curveVar(fut);
+  if (!cv.all.length) { await sendMessage(chatId, "Sin precios de futuros ahora."); return; }
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const sorted = cv.all.slice().sort((a, b) => a.ord - b.ord);
+  const lines = sorted.map((c) => {
+    const chg = c.p - c.s; // variación del día en pesos (vs settle anterior)
+    return `${cap(c.nombre)}: <b>${c.p}</b>  ${chg >= 0 ? "+" : "−"}${Math.abs(chg).toFixed(1)} (${c.varPct >= 0 ? "+" : ""}${c.varPct.toFixed(2)}%)`;
+  });
+  await sendMessage(chatId, `📈 <b>Futuros DLR</b> — precio y variación del día\n${lines.join("\n")}${inRueda() ? "" : "\n<i>(mercado cerrado — valores de settlement)</i>"}`);
+}
+
+// /rfx — futuros en cartera del usuario (long/short).
+async function cmdRfx(chatId) {
+  const userId = await userByChat(chatId);
+  if (!userId) { await sendMessage(chatId, "No estas vinculado. Vincula desde Midas → Configuracion → Notificaciones."); return; }
+  const positionsBy = await loadPositionsRaw([userId]);
+  const raw = positionsBy[userId] || [];
+  const fut = await loadFutures();
+  const net = {};
+  for (const p of raw) {
+    if (p.instrument_type !== "future" || !p.ticker) continue;
+    net[p.ticker] = (net[p.ticker] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+  }
+  const tickers = Object.keys(net).filter((t) => Math.abs(net[t]) >= 1e-6).sort();
+  if (!tickers.length) { await sendMessage(chatId, "📈 <b>Futuros en cartera (ROFEX)</b>\nNo tenés futuros abiertos."); return; }
+  const lines = tickers.map((t) => {
+    const n = net[t];
+    const px = fut.price[t];
+    return `${t}: <b>${n > 0 ? "LONG" : "SHORT"} ${Math.abs(n)}</b>${px != null ? ` · últ ${px}` : ""}`;
+  });
+  await sendMessage(chatId, `📈 <b>Futuros en cartera (ROFEX)</b>\n${lines.join("\n")}\n<i>Long = comprado / Short = vendido. Cantidad en contratos.</i>`);
 }
 
 /* ─────────────── Linking + comandos ─────────────── */
@@ -888,12 +943,15 @@ async function handleUpdate(u) {
     return;
   }
   if (text.startsWith("/pnl") || text.startsWith("/resumen")) { await cmdPnl(chatId); return; }
+  if (text.startsWith("/futuros")) { await cmdFuturos(chatId); return; }
+  if (text.startsWith("/rfx")) { await cmdRfx(chatId); return; }
   if (text.startsWith("/dlr")) { await cmdDlr(chatId); return; }
   if (text.startsWith("/canje")) { await cmdCanje(chatId); return; }
-  if (text.startsWith("/dolar") || text.startsWith("/dólar") || text.startsWith("/mep")) { await cmdDolar(chatId); return; }
+  if (text.startsWith("/mep")) { await cmdMep(chatId); return; }
+  if (text.startsWith("/dolar") || text.startsWith("/dólar")) { await cmdDolar(chatId); return; }
   if (text.startsWith("/ping")) { await sendMessage(chatId, "pong"); return; }
   if (text.startsWith("/help")) {
-    await sendMessage(chatId, "Comandos:\n/pnl — resumen de cierre\n/dlr — dolar futuro + spread\n/dolar — mejor bono para comprar/vender USD\n/canje — desarbitrajes MEP\n/stop — pausar\n/start &lt;codigo&gt; — vincular\n\nLa activacion y preferencias se manejan en Midas → Configuracion → Notificaciones.");
+    await sendMessage(chatId, "Comandos:\n/pnl — resumen del dia (todo)\n/futuros — todos los futuros DLR: precio y variacion del dia\n/rfx — tus futuros en cartera (long/short)\n/dolar — cotizaciones de los distintos dolares\n/dlr — dolar futuro del frente + spread\n/mep — mejor bono para comprar/vender USD\n/canje — desarbitrajes MEP\n/stop — pausar\n/start &lt;codigo&gt; — vincular\n\nLa activacion y preferencias se manejan en Midas → Configuracion → Notificaciones.");
     return;
   }
 }
