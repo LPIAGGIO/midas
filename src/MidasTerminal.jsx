@@ -26485,8 +26485,15 @@ function PaperCedearsModule() {
   );
 }
 
+// Identifica los cash_movements que son COSTO de operar (derechos de mercado,
+// IVA, aranceles, comisiones). Anclado al inicio del notes a propósito: así NO
+// agarra los ajustes de "Conciliacion caja vs Cocos..." (que mencionan
+// "derechos+IVA" en el texto pero son plugs, no una comisión suelta).
+const PNL_COMISION_RE = /^(comisi[oó]n|arancel|derechos?|iva|gastos)\b/i;
+
 function PnlPorInstrumentoModule() {
   const { positions, loading, error } = useUserPositions();
+  const { movements: cashMovements } = useCashMovements();
   const [typeFilter, setTypeFilter] = useState("all");
 
   // Precios en vivo: sin esto el "no realizado" (P&L de lo abierto a mercado)
@@ -26557,6 +26564,15 @@ function PnlPorInstrumentoModule() {
   const totReal = arsRows.reduce((s, r) => s + r.realized, 0);
   const totUnreal = arsRows.reduce((s, r) => s + r.unrealized, 0);
   const totTotal = arsRows.reduce((s, r) => s + r.total, 0);
+  // Comisiones (ARS): suma firmada (negativa) de los withdrawals de costo. Es un
+  // total global, por eso la línea solo se muestra en la vista "Todos".
+  const comisiones = useMemo(
+    () => (cashMovements || [])
+      .filter((m) => m.movement_type === "withdrawal" && (m.currency || "ARS") === "ARS" && PNL_COMISION_RE.test((m.notes || "").trim()))
+      .reduce((s, m) => s - Number(m.amount || 0), 0),
+    [cashMovements]
+  );
+  const totNeto = totTotal + comisiones;
 
   const fmtQ = (n) => Number(n).toLocaleString("es-AR", { maximumFractionDigits: 2 });
   const fmtP = (n) => (n == null ? "—" : Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 4 }));
@@ -26661,11 +26677,23 @@ function PnlPorInstrumentoModule() {
             </tbody>
             <tfoot>
               <tr style={{ borderTop: `2px solid ${C.border}`, background: "rgba(255,255,255,0.02)" }}>
-                <td colSpan={6} style={{ padding: "8px 10px", fontSize: 11, color: C.muted, fontWeight: 600 }}>Total (ARS)</td>
+                <td colSpan={6} style={{ padding: "8px 10px", fontSize: 11, color: C.muted, fontWeight: 600 }}>Total (ARS){typeFilter === "all" && comisiones !== 0 ? " · bruto" : ""}</td>
                 {[totReal, totUnreal, totTotal].map((v, i) => (
                   <td key={i} style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, whiteSpace: "nowrap", color: v > 0 ? C.green : v < 0 ? C.red : C.dim }}>{fmtM(v)}</td>
                 ))}
               </tr>
+              {typeFilter === "all" && comisiones !== 0 && (
+                <>
+                  <tr style={{ background: "rgba(255,255,255,0.02)" }}>
+                    <td colSpan={8} style={{ padding: "8px 10px", fontSize: 11, color: C.muted, fontWeight: 600 }}>Comisiones (derechos de mercado + IVA + aranceles)</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, whiteSpace: "nowrap", color: comisiones < 0 ? C.red : C.dim }}>{fmtM(comisiones)}</td>
+                  </tr>
+                  <tr style={{ borderTop: `1px solid ${C.border}`, background: "rgba(255,255,255,0.02)" }}>
+                    <td colSpan={8} style={{ padding: "8px 10px", fontSize: 11, color: C.text, fontWeight: 700 }}>Total neto (con comisiones)</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, whiteSpace: "nowrap", color: totNeto > 0 ? C.green : totNeto < 0 ? C.red : C.dim }}>{fmtM(totNeto)}</td>
+                  </tr>
+                </>
+              )}
             </tfoot>
           </table>
         </div>
@@ -26674,6 +26702,7 @@ function PnlPorInstrumentoModule() {
       <div style={{ fontSize: 11, color: C.dim, lineHeight: 1.6, marginTop: 12 }}>
         <strong style={{ color: C.muted }}>Realizado</strong> = lo cerrado (cobrado). <strong style={{ color: C.muted }}>No realizado</strong> = lo abierto valuado a precio de mercado de ahora (varía minuto a minuto). <strong style={{ color: C.text }}>Total</strong> = todo lo ganado/perdido en ese instrumento desde que lo operás. Misma contabilidad que la cartera (LIFO en futuros, PPP en contado, multiplicadores aplicados). Cauciones excluidas.
         {" "}<strong style={{ color: C.muted }}>Solo aparece lo cargado en Midas</strong>: tus futuros de abril-mayo (DLR ABR26/MAY26) no están cargados — importá el CSV de Matriz de ese período (Cartera → Importar CSV; no duplica) y este reporte los suma solo.
+        {" "}<strong style={{ color: C.muted }}>Comisiones</strong> (solo en la vista Todos): suma de los costos cargados como movimiento de caja (derechos de mercado, IVA y aranceles); el <strong style={{ color: C.text }}>Total neto</strong> = Total bruto − comisiones. Los costos absorbidos en ajustes de conciliación previos no se listan acá por separado.
       </div>
     </div>
   );
