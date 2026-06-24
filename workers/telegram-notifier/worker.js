@@ -677,7 +677,6 @@ async function buildEodSummary(userId, rawBy, fut) {
   }
 
   lines.push(`\n<b>TOTAL del dia: ${money(grand)}</b>`);
-  lines.push(`<i>Futuros settle-based (como Cocos); el P&L del dia YA incluye lo cerrado. Tenencias por variacion data912. FCI no incluidos.</i>`);
   return lines.join("\n");
 }
 
