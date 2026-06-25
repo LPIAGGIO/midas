@@ -25911,16 +25911,18 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
   // Buscar CUALQUIER CEDEAR (lo tengas o no) y traer su precio actual (data912)
   // para simular. Llena un lote con el precio de mercado; vos ponés la cantidad.
   const [cedPx, setCedPx] = useState({});
+  const [pxTick, setPxTick] = useState(0);
+  const [pxLoading, setPxLoading] = useState(false);
   useEffect(() => {
-    let m = true;
+    let m = true; setPxLoading(true);
     fetch(`/api/data912?type=cedears&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])).then((arr) => {
       if (!m) return;
       const px = {};
       for (const x of arr || []) if (x?.symbol) { const b = Number(x.px_bid), a = Number(x.px_ask), c = Number(x.c); px[String(x.symbol).toUpperCase()] = (b > 0 && a > 0) ? (a + b) / 2 : (c > 0 ? c : null); }
-      setCedPx(px);
-    }).catch(() => {});
+      setCedPx(px); setPxLoading(false);
+    }).catch(() => { if (m) setPxLoading(false); });
     return () => { m = false; };
-  }, []);
+  }, [pxTick]);
   const [tq, setTq] = useState("");
   const [topen, setTopen] = useState(false);
   const tOptions = useMemo(() => {
@@ -26072,9 +26074,17 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
 
       {/* Simular venta — una línea por venta parcial (a distintos precios) */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px", marginTop: compact ? 10 : 14 }}>
-        <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 10 }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Simular venta <span style={{ fontSize: 10.5, color: C.dim, fontWeight: 400 }}>· una línea por venta parcial</span></span>
-          <button onClick={addSell} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar venta</button>
+          <div className="flex items-center" style={{ gap: 8 }}>
+            {simTicker && (
+              <span style={{ fontSize: 11.5, color: C.muted, fontFamily: "'JetBrains Mono', monospace" }}>
+                Mercado: <b style={{ color: cedPx[simTicker] != null ? "#34d399" : C.dim }}>{cedPx[simTicker] != null ? `$${cedPx[simTicker].toLocaleString("es-AR", { maximumFractionDigits: 2 })}` : "s/precio"}</b>
+              </span>
+            )}
+            <button onClick={() => setPxTick((t) => t + 1)} disabled={pxLoading} title="Actualizar precio de mercado" style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: pxLoading ? "default" : "pointer", fontSize: 14 }}>↻</button>
+            <button onClick={addSell} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar venta</button>
+          </div>
         </div>
         {sells.map((s, i) => (
           <div key={i} className="flex items-center" style={{ gap: 8, marginBottom: 5 }}>
