@@ -332,10 +332,13 @@ function MidasApp() {
   const [active, setActive] = useState("dashboard");
   // Ventana flotante (Document PiP) de Valuación CEDEAR. Se maneja ACÁ (shell
   // siempre montado) y NO en el módulo, así sobrevive aunque cambies de pantalla.
+  // Ventana flotante (Document PiP) compartida por las herramientas CEDEAR
+  // (Valuación y Simulador de venta). view = "valuacion" | "venta". Una sola PiP
+  // a la vez; si ya está abierta, cambia el contenido sin reabrir.
   const [cedearPip, setCedearPip] = useState(null);
-  const openCedearPip = useCallback(async () => {
+  const openCedearPip = useCallback(async (view = "valuacion") => {
     const fallback = () => window.open(window.location.origin + window.location.pathname + "?view=cedear-fv", "midas-cedear-fv", "width=515,height=705,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
-    if (cedearPip && cedearPip.win && !cedearPip.win.closed) { try { cedearPip.win.focus(); } catch {} return; }
+    if (cedearPip && cedearPip.win && !cedearPip.win.closed) { setCedearPip((p) => ({ ...p, view })); try { cedearPip.win.focus(); } catch {} return; }
     if (!("documentPictureInPicture" in window)) { fallback(); return; }
     try {
       const w = await window.documentPictureInPicture.requestWindow({ width: 515, height: 705 });
@@ -354,7 +357,7 @@ function MidasApp() {
       const container = w.document.createElement("div");
       w.document.body.appendChild(container);
       w.addEventListener("pagehide", () => setCedearPip(null));
-      setCedearPip({ win: w, container });
+      setCedearPip({ win: w, container, view });
     } catch { fallback(); }
   }, [cedearPip]);
   const globalAlerts = useGlobalAlerts();
@@ -1052,9 +1055,9 @@ function MidasApp() {
             ) : active === "ejecucion-cedear" ? (
               <EjecucionInteligenteModule key={active} />
             ) : active === "calc-cedear-fv" ? (
-              <CedearValuacionModule key={active} onPopOut={openCedearPip} pipActive={!!cedearPip} />
+              <CedearValuacionModule key={active} onPopOut={() => openCedearPip("valuacion")} pipActive={cedearPip?.view === "valuacion"} />
             ) : active === "calc-cedear-venta" ? (
-              <SimuladorVentaCedearModule key={active} />
+              <SimuladorVentaCedearModule key={active} onPopOut={() => openCedearPip("venta")} pipActive={cedearPip?.view === "venta"} />
             ) : active === "paper-cripto" ? (
               <PaperTradingModule key={active} />
             ) : active === "paper-cedears" ? (
@@ -1129,10 +1132,12 @@ function MidasApp() {
         </main>
       </div>
     </div>
-    {/* Ventana flotante (PiP) de Valuación CEDEAR — montada en el shell, persiste
-        aunque cambies de pantalla. */}
+    {/* Ventana flotante (PiP) de las herramientas CEDEAR — montada en el shell,
+        persiste aunque cambies de pantalla. Renderiza según cedearPip.view. */}
     {cedearPip && cedearPip.container && createPortal(
-      <div style={{ minHeight: "100vh", background: "#0F1B2B" }}><CedearValuacionModule compact /></div>,
+      <div style={{ minHeight: "100vh", background: "#0F1B2B" }}>
+        {cedearPip.view === "venta" ? <SimuladorVentaCedearModule compact /> : <CedearValuacionModule compact />}
+      </div>,
       cedearPip.container
     )}
     </PrivacyProvider>
@@ -25859,7 +25864,7 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
 // Costos Cocos CEDEAR: 0 comisión, pero derechos de mercado (~0,044% del monto)
 // + IVA 21% sobre los derechos, en cada pata.
 // ═══════════════════════════════════════════════════════════════════════
-function SimuladorVentaCedearModule() {
+function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {}) {
   const { positions } = useUserPositions();
   const [lots, setLots] = useState([{ qty: "", price: "" }, { qty: "", price: "" }, { qty: "", price: "" }]);
   const [derechos, setDerechos] = useState("0,044");
@@ -25936,24 +25941,39 @@ function SimuladorVentaCedearModule() {
   const inputStyle = { width: "100%", padding: "9px 11px", fontSize: 14, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
   const tInput = { padding: "6px 9px", fontSize: 13, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
   const Card = ({ label, value, color, sub, highlight }) => (
-    <div style={{ flex: "1 1 180px", minWidth: 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: 8, padding: "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent" }}>
-      <div style={{ fontSize: 11, color: C.dim, marginBottom: 7 }}>{label}</div>
-      <div style={{ fontSize: 21, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
+    <div style={{ flex: compact ? "1 1 calc(50% - 5px)" : "1 1 180px", minWidth: compact ? 0 : 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: 8, padding: compact ? "10px 12px" : "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent", boxSizing: "border-box" }}>
+      <div style={{ fontSize: compact ? 10 : 11, color: C.dim, marginBottom: compact ? 5 : 7 }}>{label}</div>
+      <div style={{ fontSize: compact ? 16 : 21, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
+      {sub && <div style={{ fontSize: compact ? 9.5 : 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
     </div>
   );
 
   return (
-    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
-      <div style={{ marginBottom: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulador de venta CEDEAR</h1>
-        <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
-          Para scalping con compras escalonadas. Cargá tus lotes, simulá vender N papeles a un precio, y mirá el resultado neto de comisiones y el precio mínimo para no perder.
-        </p>
+    <div style={{ padding: compact ? "12px 14px" : "24px 32px", maxWidth: compact ? "none" : 1100, margin: compact ? 0 : "0 auto" }}>
+      {compact ? (
+        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Simulador venta</span>
+          <span style={{ fontSize: 9.5, color: C.dim, letterSpacing: "0.12em", textTransform: "uppercase" }}>midas</span>
+        </div>
+      ) : (
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulador de venta CEDEAR</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
+            Para scalping con compras escalonadas. Cargá tus lotes, simulá vender N papeles a un precio, y mirá el resultado neto de comisiones y el precio mínimo para no perder.
+          </p>
+        </div>
+        {onPopOut && (
+        <button onClick={onPopOut} title="Ventana flotante siempre visible, en paralelo con Matriz (Chrome/Edge)"
+          style={{ flexShrink: 0, padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${pipActive ? "#f59e0b" : C.border}`, background: pipActive ? "rgba(245,158,11,0.12)" : "transparent", color: pipActive ? "#f59e0b" : C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
+          📌 {pipActive ? "Ventana fijada" : "Ventana flotante"}
+        </button>
+        )}
       </div>
+      )}
 
       {/* Compras escalonadas */}
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px" }}>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px" }}>
         <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Compras (lotes)</span>
           <div className="flex items-center" style={{ gap: 8 }}>
@@ -25999,7 +26019,7 @@ function SimuladorVentaCedearModule() {
       </div>
 
       {/* Simular venta — una línea por venta parcial (a distintos precios) */}
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginTop: 14 }}>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px", marginTop: compact ? 10 : 14 }}>
         <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Simular venta <span style={{ fontSize: 10.5, color: C.dim, fontWeight: 400 }}>· una línea por venta parcial</span></span>
           <button onClick={addSell} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar venta</button>
@@ -26025,8 +26045,8 @@ function SimuladorVentaCedearModule() {
       </div>
 
       {/* Resultados */}
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginTop: 14 }}>
-        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px", marginTop: compact ? 10 : 14 }}>
+        <div className="flex" style={{ gap: compact ? 10 : 12, flexWrap: "wrap" }}>
           <Card label="Break-even (no perder)" value={fAr(breakeven)} color="#f59e0b" highlight
             sub={avg != null ? `+${((breakeven / avg - 1) * 100).toFixed(2)}% sobre tu promedio` : ""} />
           <Card label="Resultado neto total"
@@ -26038,9 +26058,11 @@ function SimuladorVentaCedearModule() {
           <Card label="Te quedan" value={`${fQ(hasSells ? remaining : totalQty)} papeles`} color="#60a5fa"
             sub={hasSells ? (remaining > 0 ? `costo ${fAr0(remaining * avg)} · prom ${fAr(avg)}` : "cerrás la posición") : ""} />
         </div>
+        {!compact && (
         <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
           Cada línea de venta consume del remanente (ventas parciales). El número a la derecha es el resultado neto de esa venta; las tarjetas suman todo. Break-even = promedio × (1 + costo) ÷ (1 − costo), cubriendo derechos+IVA de compra y venta. Por encima del break-even ganás; por debajo perdés.
         </p>
+        )}
       </div>
     </div>
   );
