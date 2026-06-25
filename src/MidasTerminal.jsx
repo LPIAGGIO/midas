@@ -25860,6 +25860,7 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
 // + IVA 21% sobre los derechos, en cada pata.
 // ═══════════════════════════════════════════════════════════════════════
 function SimuladorVentaCedearModule() {
+  const { positions } = useUserPositions();
   const [lots, setLots] = useState([{ qty: "", price: "" }, { qty: "", price: "" }, { qty: "", price: "" }]);
   const [derechos, setDerechos] = useState("0,044");
   const [iva, setIva] = useState("21");
@@ -25867,6 +25868,39 @@ function SimuladorVentaCedearModule() {
   const [sellPrice, setSellPrice] = useState("");
 
   const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : null; };
+  const dc = (v) => v.replace(/\./g, ",");  // tecla . → coma decimal (igual que Valuación CEDEAR)
+
+  // Tenencias ABIERTAS de CEDEAR/acción (qty neto + costo del lote vivo, motor de
+  // costo promedio cronológico = mismo que la cartera). Para "Cargar de mi cartera".
+  const holdings = useMemo(() => {
+    const byT = {};
+    for (const p of positions || []) {
+      if (!["cedear", "stock"].includes(p?.instrument_type) || !p.ticker) continue;
+      (byT[p.ticker] = byT[p.ticker] || []).push(p);
+    }
+    const out = [];
+    for (const [ticker, lotes] of Object.entries(byT)) {
+      const sorted = lotes.slice().sort((a, b) => (a.entry_date < b.entry_date ? -1 : a.entry_date > b.entry_date ? 1 : 0));
+      let posQty = 0, avg = 0;
+      for (const p of sorted) {
+        const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+        if (!q) continue;
+        const price = Number(p.entry_price) || 0;
+        if (posQty === 0 || Math.sign(posQty) === Math.sign(q)) {
+          const nq = posQty + q; avg = nq !== 0 ? (avg * Math.abs(posQty) + price * Math.abs(q)) / Math.abs(nq) : 0; posQty = nq;
+        } else {
+          const closeQty = Math.min(Math.abs(q), Math.abs(posQty)); const rem = Math.abs(q) - closeQty; posQty = posQty + q; if (rem > 0) avg = price;
+        }
+      }
+      if (posQty > 1e-6) out.push({ ticker, qty: posQty, avg });
+    }
+    return out.sort((a, b) => (a.ticker < b.ticker ? -1 : 1));
+  }, [positions]);
+  const loadFromCartera = (ticker) => {
+    const h = holdings.find((x) => x.ticker === ticker);
+    if (!h) return;
+    setLots([{ qty: String(Math.round(h.qty)), price: h.avg.toFixed(2).replace(".", ",") }]);
+  };
   const fAr = (n) => (n == null ? "—" : `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
   const fAr0 = (n) => (n == null ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
   const fQ = (n) => (n == null ? "—" : n.toLocaleString("es-AR", { maximumFractionDigits: 0 }));
@@ -25915,15 +25949,26 @@ function SimuladorVentaCedearModule() {
 
       {/* Compras escalonadas */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px" }}>
-        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Compras (lotes)</span>
-          <button onClick={addLot} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar lote</button>
+          <div className="flex items-center" style={{ gap: 8 }}>
+            {holdings.length > 0 && (
+              <select defaultValue="" onChange={(e) => { if (e.target.value) loadFromCartera(e.target.value); e.target.value = ""; }}
+                style={{ padding: "5px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: C.deep, color: C.muted, borderRadius: 6 }}>
+                <option value="">Cargar de mi cartera…</option>
+                {holdings.map((h) => (
+                  <option key={h.ticker} value={h.ticker}>{h.ticker} · {Math.round(h.qty).toLocaleString("es-AR")} @ {h.avg.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</option>
+                ))}
+              </select>
+            )}
+            <button onClick={addLot} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar lote</button>
+          </div>
         </div>
         {lots.map((l, i) => (
           <div key={i} className="flex items-center" style={{ gap: 10, marginBottom: 8 }}>
-            <input value={l.qty} onChange={(e) => setLot(i, "qty", e.target.value)} placeholder="Cantidad" inputMode="decimal" style={{ ...inputStyle, flex: "1 1 140px" }} />
+            <input value={l.qty} onChange={(e) => setLot(i, "qty", dc(e.target.value))} placeholder="Cantidad" inputMode="decimal" style={{ ...inputStyle, flex: "1 1 140px" }} />
             <span style={{ color: C.dim, fontSize: 12 }}>@</span>
-            <input value={l.price} onChange={(e) => setLot(i, "price", e.target.value)} placeholder="Precio compra" inputMode="decimal" style={{ ...inputStyle, flex: "1 1 140px" }} />
+            <input value={l.price} onChange={(e) => setLot(i, "price", dc(e.target.value))} placeholder="Precio compra" inputMode="decimal" style={{ ...inputStyle, flex: "1 1 140px" }} />
             <button onClick={() => delLot(i)} title="Quitar lote" style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer" }}>✕</button>
           </div>
         ))}
@@ -25935,11 +25980,11 @@ function SimuladorVentaCedearModule() {
         <div className="flex items-end" style={{ gap: 12, marginTop: 14, flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 120px", minWidth: 110 }}>
             <label style={labelStyle}>Derechos mercado %</label>
-            <input value={derechos} onChange={(e) => setDerechos(e.target.value)} inputMode="decimal" style={inputStyle} />
+            <input value={derechos} onChange={(e) => setDerechos(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
           </div>
           <div style={{ flex: "1 1 120px", minWidth: 110 }}>
             <label style={labelStyle}>IVA % (s/ derechos)</label>
-            <input value={iva} onChange={(e) => setIva(e.target.value)} inputMode="decimal" style={inputStyle} />
+            <input value={iva} onChange={(e) => setIva(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
           </div>
           <div style={{ flex: "2 1 240px", fontSize: 10.5, color: C.dim, paddingBottom: 8 }}>
             Cocos CEDEAR: 0 comisión, solo derechos de mercado + IVA, en cada pata (compra y venta). Costo por pata ≈ {(c * 100).toFixed(3)}%.
@@ -25953,11 +25998,11 @@ function SimuladorVentaCedearModule() {
         <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 160px", minWidth: 150 }}>
             <label style={labelStyle}>Papeles a vender</label>
-            <input value={sellQty} onChange={(e) => setSellQty(e.target.value)} placeholder={totalQty ? `máx ${fQ(totalQty)}` : ""} inputMode="decimal" style={inputStyle} />
+            <input value={sellQty} onChange={(e) => setSellQty(dc(e.target.value))} placeholder={totalQty ? `máx ${fQ(totalQty)}` : ""} inputMode="decimal" style={inputStyle} />
           </div>
           <div style={{ flex: "1 1 160px", minWidth: 150 }}>
             <label style={labelStyle}>Precio de venta</label>
-            <input value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} inputMode="decimal" style={inputStyle} />
+            <input value={sellPrice} onChange={(e) => setSellPrice(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
           </div>
         </div>
       </div>
