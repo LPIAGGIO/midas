@@ -239,6 +239,7 @@ const NAV = [
       { id: "calc-kelly", label: "Criterio de Kelly", icon: Percent },
       { id: "calc-montecarlo", label: "Monte Carlo", icon: Activity },
       { id: "calc-cedear-fv", label: "Valuación CEDEAR", icon: Scale },
+      { id: "calc-cedear-venta", label: "Simulador Venta CEDEAR", icon: Calculator },
     ],
   },
   {
@@ -1052,6 +1053,8 @@ function MidasApp() {
               <EjecucionInteligenteModule key={active} />
             ) : active === "calc-cedear-fv" ? (
               <CedearValuacionModule key={active} onPopOut={openCedearPip} pipActive={!!cedearPip} />
+            ) : active === "calc-cedear-venta" ? (
+              <SimuladorVentaCedearModule key={active} />
             ) : active === "paper-cripto" ? (
               <PaperTradingModule key={active} />
             ) : active === "paper-cedears" ? (
@@ -25843,6 +25846,139 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
           Teórico = (acción USD × CCL) ÷ ratio. El premium compara el precio real contra el teórico: positivo = el CEDEAR cotiza <span style={{ color: "#f87171" }}>caro</span> respecto al subyacente; negativo = <span style={{ color: "#34d399" }}>barato</span> (arbitraje potencial). CCL implícito = (CEDEAR ARS × ratio) ÷ acción USD.
         </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Simulador de venta CEDEAR — para scalping con compras escalonadas (ej. SPCX).
+// Cargás tus lotes de compra, simulás vender N papeles a un precio X, y te dice
+// el P&L NETO (con derechos de mercado + IVA de las dos patas), lo que queda, y
+// el precio de BREAK-EVEN: el mínimo al que tenés que vender para no perder.
+// Costos Cocos CEDEAR: 0 comisión, pero derechos de mercado (~0,044% del monto)
+// + IVA 21% sobre los derechos, en cada pata.
+// ═══════════════════════════════════════════════════════════════════════
+function SimuladorVentaCedearModule() {
+  const [lots, setLots] = useState([{ qty: "", price: "" }, { qty: "", price: "" }, { qty: "", price: "" }]);
+  const [derechos, setDerechos] = useState("0,044");
+  const [iva, setIva] = useState("21");
+  const [sellQty, setSellQty] = useState("");
+  const [sellPrice, setSellPrice] = useState("");
+
+  const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : null; };
+  const fAr = (n) => (n == null ? "—" : `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  const fAr0 = (n) => (n == null ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
+  const fQ = (n) => (n == null ? "—" : n.toLocaleString("es-AR", { maximumFractionDigits: 0 }));
+
+  let totalQty = 0, totalCost = 0;
+  for (const l of lots) { const q = pn(l.qty), p = pn(l.price); if (q && q > 0 && p && p > 0) { totalQty += q; totalCost += q * p; } }
+  const avg = totalQty > 0 ? totalCost / totalQty : null;
+  const dPct = pn(derechos), iPct = pn(iva);
+  const c = (dPct != null && iPct != null) ? (dPct / 100) * (1 + iPct / 100) : 0; // costo por pata (fracción del monto)
+  const breakeven = (avg != null && c < 1) ? (avg * (1 + c)) / (1 - c) : null;
+
+  const sq = pn(sellQty), sp = pn(sellPrice);
+  const sim = (sq != null && sq > 0 && sp != null && sp > 0 && avg != null) ? (() => {
+    const n = Math.min(sq, totalQty);
+    const proceeds = n * sp;
+    const sellComm = proceeds * c;
+    const netProceeds = proceeds - sellComm;
+    const costN = n * avg;
+    const buyComm = costN * c;     // derechos+IVA que pagaste al comprar esos N
+    const pnl = netProceeds - costN - buyComm;
+    return { n, proceeds, sellComm, netProceeds, costN, buyComm, pnl, remaining: totalQty - n, restoCost: (totalQty - n) * avg };
+  })() : null;
+
+  const setLot = (i, field, val) => setLots((ls) => ls.map((l, j) => (j === i ? { ...l, [field]: val } : l)));
+  const addLot = () => setLots((ls) => [...ls, { qty: "", price: "" }]);
+  const delLot = (i) => setLots((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+
+  const labelStyle = { fontSize: 11, color: C.muted, marginBottom: 6, display: "block" };
+  const inputStyle = { width: "100%", padding: "9px 11px", fontSize: 14, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
+  const Card = ({ label, value, color, sub, highlight }) => (
+    <div style={{ flex: "1 1 180px", minWidth: 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: 8, padding: "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent" }}>
+      <div style={{ fontSize: 11, color: C.dim, marginBottom: 7 }}>{label}</div>
+      <div style={{ fontSize: 21, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulador de venta CEDEAR</h1>
+        <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
+          Para scalping con compras escalonadas. Cargá tus lotes, simulá vender N papeles a un precio, y mirá el resultado neto de comisiones y el precio mínimo para no perder.
+        </p>
+      </div>
+
+      {/* Compras escalonadas */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px" }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Compras (lotes)</span>
+          <button onClick={addLot} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar lote</button>
+        </div>
+        {lots.map((l, i) => (
+          <div key={i} className="flex items-center" style={{ gap: 10, marginBottom: 8 }}>
+            <input value={l.qty} onChange={(e) => setLot(i, "qty", e.target.value)} placeholder="Cantidad" inputMode="decimal" style={{ ...inputStyle, flex: "1 1 140px" }} />
+            <span style={{ color: C.dim, fontSize: 12 }}>@</span>
+            <input value={l.price} onChange={(e) => setLot(i, "price", e.target.value)} placeholder="Precio compra" inputMode="decimal" style={{ ...inputStyle, flex: "1 1 140px" }} />
+            <button onClick={() => delLot(i)} title="Quitar lote" style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer" }}>✕</button>
+          </div>
+        ))}
+        <div className="flex" style={{ gap: 16, marginTop: 10, fontSize: 12, color: C.muted, flexWrap: "wrap" }}>
+          <span>Total: <b style={{ color: C.text }}>{fQ(totalQty)}</b> papeles</span>
+          <span>Costo: <b style={{ color: C.text }}>{fAr0(totalCost)}</b></span>
+          <span>Precio promedio: <b style={{ color: "#f59e0b" }}>{fAr(avg)}</b></span>
+        </div>
+        <div className="flex items-end" style={{ gap: 12, marginTop: 14, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 120px", minWidth: 110 }}>
+            <label style={labelStyle}>Derechos mercado %</label>
+            <input value={derechos} onChange={(e) => setDerechos(e.target.value)} inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={{ flex: "1 1 120px", minWidth: 110 }}>
+            <label style={labelStyle}>IVA % (s/ derechos)</label>
+            <input value={iva} onChange={(e) => setIva(e.target.value)} inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={{ flex: "2 1 240px", fontSize: 10.5, color: C.dim, paddingBottom: 8 }}>
+            Cocos CEDEAR: 0 comisión, solo derechos de mercado + IVA, en cada pata (compra y venta). Costo por pata ≈ {(c * 100).toFixed(3)}%.
+          </div>
+        </div>
+      </div>
+
+      {/* Simular venta */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginTop: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 10 }}>Simular venta</div>
+        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 160px", minWidth: 150 }}>
+            <label style={labelStyle}>Papeles a vender</label>
+            <input value={sellQty} onChange={(e) => setSellQty(e.target.value)} placeholder={totalQty ? `máx ${fQ(totalQty)}` : ""} inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={{ flex: "1 1 160px", minWidth: 150 }}>
+            <label style={labelStyle}>Precio de venta</label>
+            <input value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} inputMode="decimal" style={inputStyle} />
+          </div>
+        </div>
+      </div>
+
+      {/* Resultados */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginTop: 14 }}>
+        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
+          <Card label="Break-even (no perder)" value={fAr(breakeven)} color="#f59e0b" highlight
+            sub={avg != null ? `+${((breakeven / avg - 1) * 100).toFixed(2)}% sobre tu promedio` : ""} />
+          <Card label="Resultado neto de la venta"
+            value={sim ? fAr0(sim.pnl) : "—"}
+            color={sim ? (sim.pnl > 0 ? C.green : sim.pnl < 0 ? C.red : C.muted) : C.text}
+            sub={sim ? (sim.pnl >= 0 ? "ganás" : "perdés") + ` vendiendo ${fQ(sim.n)} @ ${fAr(sp)}` : "cargá venta"} />
+          <Card label="Comisión de la venta" value={sim ? fAr0(sim.sellComm) : "—"} color={C.muted}
+            sub={sim ? "derechos + IVA" : ""} />
+          <Card label="Te quedan" value={sim ? `${fQ(sim.remaining)} papeles` : (totalQty ? `${fQ(totalQty)} papeles` : "—")} color="#60a5fa"
+            sub={sim && sim.remaining > 0 ? `costo ${fAr0(sim.restoCost)} · prom ${fAr(avg)}` : (sim && sim.remaining === 0 ? "cerrás la posición" : "")} />
+        </div>
+        <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
+          Break-even = promedio × (1 + costo) ÷ (1 − costo), cubriendo derechos+IVA de la compra y de la venta. Resultado neto = (venta − comisión de venta) − (costo de los papeles + comisión que pagaste al comprarlos). Por encima del break-even ganás; por debajo perdés.
+        </p>
       </div>
     </div>
   );
