@@ -863,13 +863,14 @@ async function cmdDolar(chatId) {
   const fInt = (n) => (n == null ? "—" : Math.round(Number(n)).toLocaleString("es-AR"));
   const byCasa = {}; for (const d of data) byCasa[d.casa] = d;
   const seen = new Set();
-  const lines = [];
-  for (const k of DOLAR_ORDER) {
-    const d = byCasa[k]; if (!d) continue; seen.add(k);
-    lines.push(`${DOLAR_EMOJI[k] || "💵"} ${DOLAR_NOMBRE[k] || d.nombre}: <b>$${fInt(d.venta)}</b>${d.compra != null ? ` <i>· compra ${fInt(d.compra)}</i>` : ""}`);
-  }
-  for (const d of data) if (!seen.has(d.casa)) lines.push(`💵 ${d.nombre}: <b>$${fInt(d.venta)}</b>`);
-  await sendMessage(chatId, `💵 <b>Dólar — cotizaciones</b>\n\n${lines.join("\n")}`);
+  const rows = [];
+  for (const k of DOLAR_ORDER) { const d = byCasa[k]; if (!d) continue; seen.add(k); rows.push({ name: DOLAR_NOMBRE[k] || d.nombre, venta: d.venta, compra: d.compra }); }
+  for (const d of data) if (!seen.has(d.casa)) rows.push({ name: d.nombre, venta: d.venta, compra: d.compra });
+  // Tabla monospace alineada con <code> (no <pre>): mantiene la alineación SIN el
+  // botón "copy" que <pre> agrega arriba (que se veía mal en el celu).
+  const header = `${"".padEnd(10)}${"venta".padStart(7)}${"compra".padStart(9)}`;
+  const body = rows.map((r) => `${r.name.padEnd(10)}${fInt(r.venta).padStart(7)}${(r.compra != null ? fInt(r.compra) : "—").padStart(9)}`).join("\n");
+  await sendMessage(chatId, `💵 <b>Dólar — cotizaciones</b>\n<code>${header}\n${body}</code>`);
 }
 
 // /futuros — todos los futuros DLR con precio del momento y variación del día.
