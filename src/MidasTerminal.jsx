@@ -26008,7 +26008,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
           <div className="flex items-center" style={{ gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Compras (lotes)</span>
             {simTicker && (
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 4, padding: "1px 8px", fontFamily: "'JetBrains Mono', monospace" }}>{simTicker}{cedPx[simTicker] != null ? ` · $${Math.round(cedPx[simTicker]).toLocaleString("es-AR")}` : ""}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 4, padding: "1px 8px", fontFamily: "'JetBrains Mono', monospace" }}>{simTicker}</span>
             )}
           </div>
           <div className="flex items-center" style={{ gap: 8 }}>
