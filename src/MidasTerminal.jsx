@@ -25864,8 +25864,7 @@ function SimuladorVentaCedearModule() {
   const [lots, setLots] = useState([{ qty: "", price: "" }, { qty: "", price: "" }, { qty: "", price: "" }]);
   const [derechos, setDerechos] = useState("0,044");
   const [iva, setIva] = useState("21");
-  const [sellQty, setSellQty] = useState("");
-  const [sellPrice, setSellPrice] = useState("");
+  const [sells, setSells] = useState([{ qty: "", price: "" }]);
 
   const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : null; };
   const dc = (v) => v.replace(/\./g, ",");  // tecla . → coma decimal (igual que Valuación CEDEAR)
@@ -25912,24 +25911,30 @@ function SimuladorVentaCedearModule() {
   const c = (dPct != null && iPct != null) ? (dPct / 100) * (1 + iPct / 100) : 0; // costo por pata (fracción del monto)
   const breakeven = (avg != null && c < 1) ? (avg * (1 + c)) / (1 - c) : null;
 
-  const sq = pn(sellQty), sp = pn(sellPrice);
-  const sim = (sq != null && sq > 0 && sp != null && sp > 0 && avg != null) ? (() => {
-    const n = Math.min(sq, totalQty);
-    const proceeds = n * sp;
-    const sellComm = proceeds * c;
-    const netProceeds = proceeds - sellComm;
-    const costN = n * avg;
-    const buyComm = costN * c;     // derechos+IVA que pagaste al comprar esos N
-    const pnl = netProceeds - costN - buyComm;
-    return { n, proceeds, sellComm, netProceeds, costN, buyComm, pnl, remaining: totalQty - n, restoCost: (totalQty - n) * avg };
-  })() : null;
-
+  // Ventas parciales: cada línea consume del remanente; resultado acumulado.
   const setLot = (i, field, val) => setLots((ls) => ls.map((l, j) => (j === i ? { ...l, [field]: val } : l)));
   const addLot = () => setLots((ls) => [...ls, { qty: "", price: "" }]);
   const delLot = (i) => setLots((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+  const setSell = (i, field, val) => setSells((ss) => ss.map((s, j) => (j === i ? { ...s, [field]: val } : s)));
+  const addSell = () => setSells((ss) => [...ss, { qty: "", price: "" }]);
+  const delSell = (i) => setSells((ss) => (ss.length > 1 ? ss.filter((_, j) => j !== i) : ss));
+
+  const lineSim = [];
+  let remaining = totalQty, totalPnl = 0, totalSellComm = 0, totalSold = 0;
+  for (const s of sells) {
+    const q = pn(s.qty), p = pn(s.price);
+    if (q == null || q <= 0 || p == null || p <= 0 || avg == null) { lineSim.push(null); continue; }
+    const n = Math.min(q, Math.max(0, remaining));
+    const proceeds = n * p, sellComm = proceeds * c, costN = n * avg, buyComm = costN * c;
+    const pnl = proceeds - sellComm - costN - buyComm;
+    remaining -= n; totalPnl += pnl; totalSellComm += sellComm; totalSold += n;
+    lineSim.push({ n, pnl });
+  }
+  const hasSells = totalSold > 0;
 
   const labelStyle = { fontSize: 11, color: C.muted, marginBottom: 6, display: "block" };
   const inputStyle = { width: "100%", padding: "9px 11px", fontSize: 14, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
+  const tInput = { padding: "6px 9px", fontSize: 13, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
   const Card = ({ label, value, color, sub, highlight }) => (
     <div style={{ flex: "1 1 180px", minWidth: 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: 8, padding: "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent" }}>
       <div style={{ fontSize: 11, color: C.dim, marginBottom: 7 }}>{label}</div>
@@ -25965,11 +25970,12 @@ function SimuladorVentaCedearModule() {
           </div>
         </div>
         {lots.map((l, i) => (
-          <div key={i} className="flex items-center" style={{ gap: 10, marginBottom: 8 }}>
-            <input value={l.qty} onChange={(e) => setLot(i, "qty", dc(e.target.value))} placeholder="Cantidad" inputMode="decimal" style={{ ...inputStyle, flex: "1 1 140px" }} />
+          <div key={i} className="flex items-center" style={{ gap: 8, marginBottom: 5 }}>
+            <span style={{ color: C.dim, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>›</span>
+            <input value={l.qty} onChange={(e) => setLot(i, "qty", dc(e.target.value))} placeholder="cant" inputMode="decimal" style={{ ...tInput, flex: "1 1 110px" }} />
             <span style={{ color: C.dim, fontSize: 12 }}>@</span>
-            <input value={l.price} onChange={(e) => setLot(i, "price", dc(e.target.value))} placeholder="Precio compra" inputMode="decimal" style={{ ...inputStyle, flex: "1 1 140px" }} />
-            <button onClick={() => delLot(i)} title="Quitar lote" style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer" }}>✕</button>
+            <input value={l.price} onChange={(e) => setLot(i, "price", dc(e.target.value))} placeholder="precio" inputMode="decimal" style={{ ...tInput, flex: "1 1 110px" }} />
+            <button onClick={() => delLot(i)} title="Quitar lote" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 11 }}>✕</button>
           </div>
         ))}
         <div className="flex" style={{ gap: 16, marginTop: 10, fontSize: 12, color: C.muted, flexWrap: "wrap" }}>
@@ -25992,19 +25998,30 @@ function SimuladorVentaCedearModule() {
         </div>
       </div>
 
-      {/* Simular venta */}
+      {/* Simular venta — una línea por venta parcial (a distintos precios) */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginTop: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 10 }}>Simular venta</div>
-        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 160px", minWidth: 150 }}>
-            <label style={labelStyle}>Papeles a vender</label>
-            <input value={sellQty} onChange={(e) => setSellQty(dc(e.target.value))} placeholder={totalQty ? `máx ${fQ(totalQty)}` : ""} inputMode="decimal" style={inputStyle} />
-          </div>
-          <div style={{ flex: "1 1 160px", minWidth: 150 }}>
-            <label style={labelStyle}>Precio de venta</label>
-            <input value={sellPrice} onChange={(e) => setSellPrice(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
-          </div>
+        <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Simular venta <span style={{ fontSize: 10.5, color: C.dim, fontWeight: 400 }}>· una línea por venta parcial</span></span>
+          <button onClick={addSell} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar venta</button>
         </div>
+        {sells.map((s, i) => (
+          <div key={i} className="flex items-center" style={{ gap: 8, marginBottom: 5 }}>
+            <span style={{ color: C.dim, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>›</span>
+            <input value={s.qty} onChange={(e) => setSell(i, "qty", dc(e.target.value))} placeholder="papeles" inputMode="decimal" style={{ ...tInput, flex: "1 1 100px" }} />
+            <span style={{ color: C.dim, fontSize: 12 }}>@</span>
+            <input value={s.price} onChange={(e) => setSell(i, "price", dc(e.target.value))} placeholder="precio" inputMode="decimal" style={{ ...tInput, flex: "1 1 100px" }} />
+            <span style={{ flex: "0 0 112px", textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, fontWeight: 700, color: lineSim[i] ? (lineSim[i].pnl >= 0 ? C.green : C.red) : C.dim }}>
+              {lineSim[i] ? fAr0(lineSim[i].pnl) : "—"}
+            </span>
+            <button onClick={() => delSell(i)} title="Quitar venta" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 11 }}>✕</button>
+          </div>
+        ))}
+        {hasSells && (
+          <div className="flex" style={{ gap: 16, marginTop: 9, fontSize: 12, color: C.muted, flexWrap: "wrap" }}>
+            <span>Vendés: <b style={{ color: C.text }}>{fQ(totalSold)}</b> papeles</span>
+            <span>Resultado acumulado: <b style={{ color: totalPnl >= 0 ? C.green : C.red }}>{fAr0(totalPnl)}</b></span>
+          </div>
+        )}
       </div>
 
       {/* Resultados */}
@@ -26012,17 +26029,17 @@ function SimuladorVentaCedearModule() {
         <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
           <Card label="Break-even (no perder)" value={fAr(breakeven)} color="#f59e0b" highlight
             sub={avg != null ? `+${((breakeven / avg - 1) * 100).toFixed(2)}% sobre tu promedio` : ""} />
-          <Card label="Resultado neto de la venta"
-            value={sim ? fAr0(sim.pnl) : "—"}
-            color={sim ? (sim.pnl > 0 ? C.green : sim.pnl < 0 ? C.red : C.muted) : C.text}
-            sub={sim ? (sim.pnl >= 0 ? "ganás" : "perdés") + ` vendiendo ${fQ(sim.n)} @ ${fAr(sp)}` : "cargá venta"} />
-          <Card label="Comisión de la venta" value={sim ? fAr0(sim.sellComm) : "—"} color={C.muted}
-            sub={sim ? "derechos + IVA" : ""} />
-          <Card label="Te quedan" value={sim ? `${fQ(sim.remaining)} papeles` : (totalQty ? `${fQ(totalQty)} papeles` : "—")} color="#60a5fa"
-            sub={sim && sim.remaining > 0 ? `costo ${fAr0(sim.restoCost)} · prom ${fAr(avg)}` : (sim && sim.remaining === 0 ? "cerrás la posición" : "")} />
+          <Card label="Resultado neto total"
+            value={hasSells ? fAr0(totalPnl) : "—"}
+            color={hasSells ? (totalPnl > 0 ? C.green : totalPnl < 0 ? C.red : C.muted) : C.text}
+            sub={hasSells ? (totalPnl >= 0 ? "ganás" : "perdés") + ` vendiendo ${fQ(totalSold)} papeles` : "cargá ventas"} />
+          <Card label="Comisión total (venta)" value={hasSells ? fAr0(totalSellComm) : "—"} color={C.muted}
+            sub={hasSells ? "derechos + IVA, todas las ventas" : ""} />
+          <Card label="Te quedan" value={`${fQ(hasSells ? remaining : totalQty)} papeles`} color="#60a5fa"
+            sub={hasSells ? (remaining > 0 ? `costo ${fAr0(remaining * avg)} · prom ${fAr(avg)}` : "cerrás la posición") : ""} />
         </div>
         <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
-          Break-even = promedio × (1 + costo) ÷ (1 − costo), cubriendo derechos+IVA de la compra y de la venta. Resultado neto = (venta − comisión de venta) − (costo de los papeles + comisión que pagaste al comprarlos). Por encima del break-even ganás; por debajo perdés.
+          Cada línea de venta consume del remanente (ventas parciales). El número a la derecha es el resultado neto de esa venta; las tarjetas suman todo. Break-even = promedio × (1 + costo) ÷ (1 − costo), cubriendo derechos+IVA de compra y venta. Por encima del break-even ganás; por debajo perdés.
         </p>
       </div>
     </div>
