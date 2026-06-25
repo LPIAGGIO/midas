@@ -25870,6 +25870,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
   const [derechos, setDerechos] = useState("0,044");
   const [iva, setIva] = useState("21");
   const [sells, setSells] = useState([{ qty: "", price: "" }]);
+  const [simTicker, setSimTicker] = useState("");
 
   const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : null; };
   const dc = (v) => v.replace(/\./g, ",");  // tecla . → coma decimal (igual que Valuación CEDEAR)
@@ -25904,6 +25905,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
     const h = holdings.find((x) => x.ticker === ticker);
     if (!h) return;
     setLots([{ qty: String(Math.round(h.qty)), price: h.avg.toFixed(2).replace(".", ",") }]);
+    setSimTicker(ticker);
   };
 
   // Buscar CUALQUIER CEDEAR (lo tengas o no) y traer su precio actual (data912)
@@ -25930,6 +25932,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
   const pickTicker = (sym) => {
     const p = cedPx[sym];
     setLots([{ qty: "", price: p != null ? p.toFixed(2).replace(".", ",") : "" }]);
+    setSimTicker(sym);
     setTopen(false); setTq("");
   };
   const fAr = (n) => (n == null ? "—" : `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
@@ -26002,7 +26005,12 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
       {/* Compras escalonadas */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px" }}>
         <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Compras (lotes)</span>
+          <div className="flex items-center" style={{ gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Compras (lotes)</span>
+            {simTicker && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 4, padding: "1px 8px", fontFamily: "'JetBrains Mono', monospace" }}>{simTicker}{cedPx[simTicker] != null ? ` · $${Math.round(cedPx[simTicker]).toLocaleString("es-AR")}` : ""}</span>
+            )}
+          </div>
           <div className="flex items-center" style={{ gap: 8 }}>
             {holdings.length > 0 && (
               <select defaultValue="" onChange={(e) => { if (e.target.value) loadFromCartera(e.target.value); e.target.value = ""; }}
