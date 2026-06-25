@@ -25905,6 +25905,33 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
     if (!h) return;
     setLots([{ qty: String(Math.round(h.qty)), price: h.avg.toFixed(2).replace(".", ",") }]);
   };
+
+  // Buscar CUALQUIER CEDEAR (lo tengas o no) y traer su precio actual (data912)
+  // para simular. Llena un lote con el precio de mercado; vos ponés la cantidad.
+  const [cedPx, setCedPx] = useState({});
+  useEffect(() => {
+    let m = true;
+    fetch(`/api/data912?type=cedears&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])).then((arr) => {
+      if (!m) return;
+      const px = {};
+      for (const x of arr || []) if (x?.symbol) { const b = Number(x.px_bid), a = Number(x.px_ask), c = Number(x.c); px[String(x.symbol).toUpperCase()] = (b > 0 && a > 0) ? (a + b) / 2 : (c > 0 ? c : null); }
+      setCedPx(px);
+    }).catch(() => {});
+    return () => { m = false; };
+  }, []);
+  const [tq, setTq] = useState("");
+  const [topen, setTopen] = useState(false);
+  const tOptions = useMemo(() => {
+    const all = Object.keys(CEDEAR_CAT).map((k) => ({ sym: k, name: CEDEAR_CAT[k].n }));
+    const term = tq.trim().toUpperCase();
+    const list = term ? all.filter((o) => o.sym.includes(term) || o.name.toUpperCase().includes(term)) : all;
+    return list.sort((a, b) => a.sym.localeCompare(b.sym)).slice(0, 30);
+  }, [tq]);
+  const pickTicker = (sym) => {
+    const p = cedPx[sym];
+    setLots([{ qty: "", price: p != null ? p.toFixed(2).replace(".", ",") : "" }]);
+    setTopen(false); setTq("");
+  };
   const fAr = (n) => (n == null ? "—" : `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
   const fAr0 = (n) => (n == null ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
   const fQ = (n) => (n == null ? "—" : n.toLocaleString("es-AR", { maximumFractionDigits: 0 }));
@@ -25988,6 +26015,23 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
             )}
             <button onClick={addLot} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar lote</button>
           </div>
+        </div>
+        {/* Buscar cualquier CEDEAR (lo tengas o no) y traer su precio actual. */}
+        <div style={{ position: "relative", marginBottom: 9 }}>
+          <input value={topen ? tq : ""} onFocus={() => { setTopen(true); setTq(""); }} onBlur={() => setTimeout(() => setTopen(false), 150)} onChange={(e) => setTq(e.target.value)}
+            placeholder="🔎 Buscar un CEDEAR para simular (trae precio actual)…" style={{ ...tInput, width: "100%" }} />
+          {topen && tOptions.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 3, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, zIndex: 10, maxHeight: 220, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+              {tOptions.map((o) => (
+                <div key={o.sym} onMouseDown={() => pickTicker(o.sym)} className="flex items-center justify-between"
+                  style={{ padding: "7px 10px", cursor: "pointer", borderBottom: `1px solid ${C.border}`, gap: 8 }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#f59e0b", fontSize: 12, minWidth: 50 }}>{o.sym}</span>
+                  <span style={{ fontSize: 11, color: C.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
+                  <span style={{ fontSize: 11.5, color: cedPx[o.sym] != null ? "#34d399" : C.dim, fontFamily: "'JetBrains Mono', monospace" }}>{cedPx[o.sym] != null ? `$${Math.round(cedPx[o.sym]).toLocaleString("es-AR")}` : "s/precio"}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         {lots.map((l, i) => (
           <div key={i} className="flex items-center" style={{ gap: 8, marginBottom: 5 }}>
