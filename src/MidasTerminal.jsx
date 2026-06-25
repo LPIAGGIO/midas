@@ -12762,12 +12762,23 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
       const isPartialClose = netQty !== 0 && g.totalSellQty > 0;
 
       if (isPartialClose) {
-        // ── Entrada ABIERTA: usa netQty + PPP + precio actual ──
+        // Costo del LOTE VIVO (no el PPP histórico de TODAS las compras). Si la
+        // posición cruzó cero —round-trips cerrados a otros precios, ej. SPCX
+        // comprado y vendido varias veces y reabierto— el PPP de todas las compras
+        // contamina el MTM (daba −15M fantasma). Usamos el costo running del lado
+        // abierto del sintético, igual que la rama de futuros. Para una posición que
+        // nunca se cerró, openBasePrice === ppp, así que NO cambia nada.
+        const openBasePrice = (netQty > 0 && synth.openBuyQty > 0)
+          ? synth.openBuyValue / synth.openBuyQty
+          : (netQty < 0 && synth.openSellQty > 0)
+            ? synth.openSellValue / synth.openSellQty
+            : ppp;
+        // ── Entrada ABIERTA: usa netQty + costo del lote vivo + precio actual ──
         const openValueAtMarket = currentPrice != null
           ? applyConventionToValue(g.instrument_type, netQty, currentPrice)
           : null;
-        const openValueAtCost = ppp != null
-          ? applyConventionToValue(g.instrument_type, netQty, ppp)
+        const openValueAtCost = openBasePrice != null
+          ? applyConventionToValue(g.instrument_type, netQty, openBasePrice)
           : null;
         const openPnl = (openValueAtMarket != null && openValueAtCost != null)
           ? openValueAtMarket - openValueAtCost
@@ -12810,7 +12821,7 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
           netQty,
           isShort: netQty < 0,
           isClosed: false,
-          ppp,
+          ppp: openBasePrice,
           ppv: null,
           currentPrice,
           priceSource,
@@ -26620,6 +26631,14 @@ function PnlPorInstrumentoModule() {
           </button>
         ))}
       </div>
+
+      {/* Comisiones acumuladas — fila destacada arriba (lo que LP fue pagando). */}
+      {comisiones !== 0 && (
+        <div className="flex items-center justify-between" style={{ gap: 12, padding: "10px 14px", marginBottom: 12, border: `1px solid ${C.border}`, borderRadius: 6, background: "rgba(248,113,113,0.06)" }}>
+          <span style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Comisiones acumuladas <span style={{ fontSize: 10, color: C.dim, fontWeight: 400 }}>· derechos de mercado + IVA + aranceles</span></span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: C.red, fontVariantNumeric: "tabular-nums" }}>{fmtM(comisiones)}</span>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center" style={{ height: 200 }}>
