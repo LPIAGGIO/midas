@@ -25941,10 +25941,10 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
   const inputStyle = { width: "100%", padding: "9px 11px", fontSize: 14, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
   const tInput = { padding: "6px 9px", fontSize: 13, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
   const Card = ({ label, value, color, sub, highlight }) => (
-    <div style={{ flex: compact ? "1 1 calc(50% - 5px)" : "1 1 180px", minWidth: compact ? 0 : 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: 8, padding: compact ? "10px 12px" : "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent", boxSizing: "border-box" }}>
-      <div style={{ fontSize: compact ? 10 : 11, color: C.dim, marginBottom: compact ? 5 : 7 }}>{label}</div>
-      <div style={{ fontSize: compact ? 16 : 21, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
-      {sub && <div style={{ fontSize: compact ? 9.5 : 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
+    <div style={{ flex: compact ? "1 1 0" : "1 1 180px", minWidth: compact ? 0 : 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: compact ? 6 : 8, padding: compact ? "7px 8px" : "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent", boxSizing: "border-box" }}>
+      <div style={{ fontSize: compact ? 8.5 : 11, color: C.dim, marginBottom: compact ? 3 : 7, lineHeight: 1.15 }}>{label}</div>
+      <div style={{ fontSize: compact ? 13 : 21, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
+      {sub && !compact && <div style={{ fontSize: 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
     </div>
   );
 
@@ -26055,7 +26055,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
             sub={hasSells ? (totalPnl >= 0 ? "ganás" : "perdés") + ` vendiendo ${fQ(totalSold)} papeles` : "cargá ventas"} />
           <Card label="Comisión total (venta)" value={hasSells ? fAr0(totalSellComm) : "—"} color={C.muted}
             sub={hasSells ? "derechos + IVA, todas las ventas" : ""} />
-          <Card label="Te quedan" value={`${fQ(hasSells ? remaining : totalQty)} papeles`} color="#60a5fa"
+          <Card label={compact ? "Te quedan (pap.)" : "Te quedan"} value={compact ? fQ(hasSells ? remaining : totalQty) : `${fQ(hasSells ? remaining : totalQty)} papeles`} color="#60a5fa"
             sub={hasSells ? (remaining > 0 ? `costo ${fAr0(remaining * avg)} · prom ${fAr(avg)}` : "cerrás la posición") : ""} />
         </div>
         {!compact && (
