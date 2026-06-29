@@ -21,6 +21,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Menu,
   Bell,
   Settings,
   LineChart,
@@ -330,6 +331,30 @@ function MidasApp() {
   const [now, setNow] = useState(new Date());
   const [open, setOpen] = useState({ bcra: false, mercado: false, analizadores: false, calculadoras: false, reportes: false });
   const [active, setActive] = useState("dashboard");
+
+  // ─── Mobile / PWA: la sidebar pasa a ser un drawer (menú hamburguesa) ───
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== "undefined" && window.innerWidth <= 768
+  );
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  // Al pasar a desktop cerramos el drawer; en mobile forzamos labels completos.
+  useEffect(() => {
+    if (!isMobile) setDrawerOpen(false);
+    else setCollapsed(false);
+  }, [isMobile]);
+  // En mobile elegir un ítem cierra el drawer.
+  const navSetActive = useCallback(
+    (id) => {
+      setActive(id);
+      if (isMobile) setDrawerOpen(false);
+    },
+    [isMobile]
+  );
   // Ventana flotante (Document PiP) de Valuación CEDEAR. Se maneja ACÁ (shell
   // siempre montado) y NO en el módulo, así sobrevive aunque cambies de pantalla.
   // Ventana flotante (Document PiP) compartida por las herramientas CEDEAR
@@ -589,11 +614,22 @@ function MidasApp() {
         }}
         className="flex items-stretch flex-shrink-0"
       >
+        {/* Hamburguesa — solo mobile, abre/cierra el drawer */}
+        {isMobile && (
+          <button
+            className="eco-icon-btn"
+            aria-label="Menú"
+            onClick={() => setDrawerOpen((o) => !o)}
+            style={{ width: 52, flexShrink: 0, borderRight: `1px solid ${C.border}` }}
+          >
+            <Menu size={20} strokeWidth={1.7} />
+          </button>
+        )}
         {/* Logo block */}
         <div
           style={{
-            width: sidebarWidth,
-            borderRight: `1px solid ${C.border}`,
+            width: isMobile ? "auto" : sidebarWidth,
+            borderRight: isMobile ? "none" : `1px solid ${C.border}`,
             transition: "width 0.25s ease",
           }}
           className="flex items-center px-5 flex-shrink-0 overflow-hidden"
@@ -647,6 +683,7 @@ function MidasApp() {
 
         {/* Buscador */}
         <div className="flex-1 flex items-center justify-center px-6 min-w-0">
+          {!isMobile && (
           <div
             className="eco-search flex items-center gap-3 w-full"
             style={{
@@ -684,11 +721,13 @@ function MidasApp() {
               ⌘K
             </span>
           </div>
+          )}
         </div>
 
         {/* Sección derecha */}
         <div className="flex items-stretch flex-shrink-0">
-          {/* Estado mercado */}
+          {/* Estado mercado — oculto en mobile */}
+          {!isMobile && (
           <div
             className="flex items-center gap-2.5 px-5"
             style={{ borderLeft: `1px solid ${C.border}` }}
@@ -729,8 +768,10 @@ function MidasApp() {
               </span>
             </div>
           </div>
+          )}
 
-          {/* Reloj */}
+          {/* Reloj — oculto en mobile */}
+          {!isMobile && (
           <div
             className="flex flex-col items-end justify-center px-5"
             style={{ borderLeft: `1px solid ${C.border}`, minWidth: 130 }}
@@ -760,10 +801,11 @@ function MidasApp() {
               {baDate} · ART
             </span>
           </div>
+          )}
 
           {/* Botones de íconos + perfil */}
           <div className="flex items-stretch" style={{ borderLeft: `1px solid ${C.border}` }}>
-            <GlobalRefreshButton />
+            {!isMobile && <GlobalRefreshButton />}
             <PrivacyToggleButton />
             <div ref={bellRef} style={{ position: "relative", display: "flex" }}>
               <button
@@ -832,15 +874,44 @@ function MidasApp() {
       </header>
 
       {/* ─────────── ÁREA PRINCIPAL ─────────── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* SIDEBAR */}
+      <div className="flex flex-1 overflow-hidden" style={{ position: "relative" }}>
+        {/* Backdrop del drawer (mobile) */}
+        {isMobile && drawerOpen && (
+          <div
+            onClick={() => setDrawerOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.5)",
+              zIndex: 70,
+            }}
+          />
+        )}
+        {/* SIDEBAR — fija en desktop, drawer deslizante en mobile */}
         <aside
-          style={{
-            width: sidebarWidth,
-            backgroundColor: C.panel,
-            borderRight: `1px solid ${C.border}`,
-            transition: "width 0.25s ease",
-          }}
+          style={
+            isMobile
+              ? {
+                  position: "fixed",
+                  top: 0,
+                  left: 0,
+                  bottom: 0,
+                  width: 248,
+                  maxWidth: "82vw",
+                  backgroundColor: C.panel,
+                  borderRight: `1px solid ${C.border}`,
+                  zIndex: 71,
+                  transform: drawerOpen ? "translateX(0)" : "translateX(-100%)",
+                  transition: "transform 0.25s ease",
+                  boxShadow: drawerOpen ? "4px 0 30px rgba(0,0,0,0.5)" : "none",
+                }
+              : {
+                  width: sidebarWidth,
+                  backgroundColor: C.panel,
+                  borderRight: `1px solid ${C.border}`,
+                  transition: "width 0.25s ease",
+                }
+          }
           className="flex flex-col flex-shrink-0"
         >
           {/* Header del sidebar */}
@@ -868,10 +939,12 @@ function MidasApp() {
             )}
             <button
               className="eco-toggle-btn"
-              onClick={() => setCollapsed((c) => !c)}
-              aria-label={collapsed ? "Expandir" : "Colapsar"}
+              onClick={() => (isMobile ? setDrawerOpen(false) : setCollapsed((c) => !c))}
+              aria-label={isMobile ? "Cerrar menú" : collapsed ? "Expandir" : "Colapsar"}
             >
-              {collapsed ? (
+              {isMobile ? (
+                <X size={16} strokeWidth={1.7} />
+              ) : collapsed ? (
                 <ChevronRight size={15} strokeWidth={1.6} />
               ) : (
                 <ChevronLeft size={15} strokeWidth={1.6} />
@@ -889,7 +962,7 @@ function MidasApp() {
                 isOpen={open[item.id]}
                 onToggle={() => toggleGroup(item.id)}
                 active={active}
-                setActive={setActive}
+                setActive={navSetActive}
               />
             ))}
           </nav>
@@ -925,7 +998,7 @@ function MidasApp() {
           <CornerMark position="top-right" />
 
           {/* Router del workspace según item activo */}
-          <div className="absolute inset-0 overflow-auto eco-scroll" style={{ paddingBottom: 26 }}>
+          <div className="absolute inset-0 overflow-auto eco-scroll" style={{ paddingBottom: "calc(26px + env(safe-area-inset-bottom))" }}>
             {showIolBanner && (
               <IOLConnectBanner
                 onConnect={() => setActive("settings")}
