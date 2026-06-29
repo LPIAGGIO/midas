@@ -15282,7 +15282,49 @@ function ConsolidatedSection({
   // por fecha de venta y recalculamos P&L solo del día. Esto evita que
   // ventas de días previos se mezclen con las de hoy en la UI y en el
   // total realizado del banner.
-  const closed = filterClosedToToday(closedAll, futurePrices, futurePriorSettles);
+  const closedRaw = filterClosedToToday(closedAll, futurePrices, futurePriorSettles);
+  // Para CONTADO arrastrado (lote comprado en días previos, vendido hoy) el
+  // número que importa en "cerradas hoy" es la GANANCIA DEL DÍA (venta − cierre
+  // de ayer), NO el realizado de punta a punta (venta − PPP). Si no, un bono que
+  // tenías hace semanas muestra toda su ganancia histórica como si fuera de hoy.
+  // Reusamos la misma lógica que el banner "P&L hoy" (computeRealizedTodayContado).
+  // Los round-trips intradía puros (planos al empezar el día) quedan igual: ahí
+  // realizado = día. El lifetime se conserva en lifetimePnl (lo ves en el detalle).
+  const closed = (() => {
+    const todayStr = getTodayStringAR();
+    const preTodayNet = new Map();
+    for (const p of positions || []) {
+      if (!p || p.instrument_type === "future" || !p.ticker) continue;
+      if (p.entry_date === todayStr) continue; // solo lotes de días anteriores
+      const t = p.ticker.toUpperCase();
+      const sign = p.operation_type === "sell" ? -1 : 1;
+      preTodayNet.set(t, (preTodayNet.get(t) || 0) + sign * (Number(p.quantity) || 0));
+    }
+    return closedRaw.map((g) => {
+      if (g.instrument_type === "future") return g;
+      const tk = (g.ticker || "").toUpperCase();
+      if (Math.abs(preTodayNet.get(tk) || 0) < 1e-6) return g; // intradía puro: realizado = día
+      const isEq = g.instrument_type === "stock" || g.instrument_type === "cedear";
+      const m = isEq ? stockPrices?.[tk] : bondPrices?.[tk];
+      let prev = m?.previousClose;
+      if (prev == null && m?.changePct != null) {
+        const den = 1 + Number(m.changePct) / 100;
+        if (den > 0) prev = Number(m.price) / den;
+      }
+      if (prev == null || !(prev > 0)) return g; // sin cierre de ayer: dejamos el realizado
+      let dayRaw = 0, baseRaw = 0;
+      for (const pair of (g.operations || [])) {
+        const qty = Number(pair.quantity) || 0;
+        const sell = Number(pair.sell_price) || 0;
+        if (qty > 0 && sell > 0) { dayRaw += qty * (sell - prev); baseRaw += qty * prev; }
+      }
+      const dayPnl = applyConventionToValue(g.instrument_type, 1, dayRaw);
+      const dayPct = baseRaw > 0 ? (dayRaw / baseRaw) * 100 : g.pnlPct;
+      // pnl/valueAtMarket → tramo del día; lifetimePnl queda como el realizado
+      // total del trade (se ve en la fila expandida como "Histórico del ticker").
+      return { ...g, pnl: dayPnl, realizedPnl: dayPnl, valueAtMarket: dayPnl, pnlPct: dayPct };
+    });
+  })();
 
   return (
     <div style={{ marginBottom: 24 }}>
@@ -15502,7 +15544,9 @@ function ConsolidatedSection({
  * = 0). Útil para ver el P&L realizado de tus trades cerrados sin que
  * ensucien la consolidada principal.
  *
- * El P&L acá ya es REALIZADO (efectivo en tu comitente, no mark-to-market).
+ * El número que se muestra es la GANANCIA DEL DÍA de cada cierre (venta − cierre
+ * de ayer para lotes arrastrados; venta − compra para round-trips intradía), no
+ * el realizado de punta a punta. El realizado total queda en el detalle expandido.
  */
 
 function ClosedPositionsSection({ closed, bondPrices, futurePrices, stockPrices, fciPrices, futureAdjLookup, onEdit, onDelete, onUpdatePrice }) {
@@ -15556,7 +15600,7 @@ function ClosedPositionsSection({ closed, bondPrices, futurePrices, stockPrices,
             {totalRealizedPnl >= 0 ? "+" : ""}{fmtNumber(totalRealizedPnl, { maxDecimals: 2 })}
           </span>
           <span style={{ fontSize: 9, color: C.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-            P&L realizado
+            Ganancia del día
           </span>
         </div>
         <span style={{ fontSize: 10, color: C.dim }}>
