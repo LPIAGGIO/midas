@@ -603,6 +603,26 @@ function MidasApp() {
         .eco-table-row:hover { background-color: rgba(246, 247, 246, 0.025); }
 
         .eco-th-sortable:hover { color: ${C.text} !important; }
+
+        /* ───────── Mobile (<=768px): capa de adaptación ───────── */
+        @media (max-width: 768px) {
+          /* Grillas densas (3+ columnas) → 2 columnas para que se lean */
+          main [style*="repeat(3"],
+          main [style*="repeat(4"],
+          main [style*="repeat(5"],
+          main [style*="repeat(6"],
+          main [style*="repeat(7"],
+          main [style*="repeat(8"] {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+          /* Tablas anchas: scroll horizontal propio, no rompen la pantalla */
+          main table {
+            display: block;
+            max-width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+          }
+        }
       `}</style>
 
       {/* ─────────── NAVBAR ─────────── */}
