@@ -11176,9 +11176,11 @@ function addBusinessDays(yyyymmdd, n) {
 const FUTURE_MULTIPLIER_DEFAULT = 1000;
 
 function getFutureMultiplier(p) {
-  // Hook para futuro: si en metadata viene un multiplicador específico
-  // (ej. otros futuros que no son DLR), lo usamos. Por ahora todos 1000.
-  return FUTURE_MULTIPLIER_DEFAULT;
+  // Multiplicador (tamaño de contrato) del futuro. Si la posición trae uno
+  // específico en metadata lo usamos — ej. WTI petróleo = 10 barriles/contrato
+  // (extra.contract_size = 10). El resto (futuros DLR) cae al default de 1000.
+  const cs = Number(p?.extra?.contract_size);
+  return Number.isFinite(cs) && cs > 0 ? cs : FUTURE_MULTIPLIER_DEFAULT;
 }
 
 /**
