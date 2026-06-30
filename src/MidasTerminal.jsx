@@ -26987,6 +26987,42 @@ function PnlPorInstrumentoModule() {
       }
     } catch (err) { console.warn("[PnlPorInstrumento] consolidate falló:", err); }
 
+    // Futuros DUAL (ej. WTI petróleo): liquidan en PESOS vía "Débito/Crédito
+    // Cambio" (incluye la pata del dólar), NO por la fórmula USD del consolidado
+    // — esa subestima porque ignora la revaluación del dólar de la posición. Su
+    // realizado real son las liquidaciones diarias en caja ("Ajuste futuro
+    // {ticker}"). Las usamos tal cual y la fila pasa a pesos (moneda de
+    // liquidación). El MTM del día sin liquidar queda en la cartera, no acá.
+    try {
+      const dualTickers = new Set(
+        (positions || [])
+          .filter((p) => p.instrument_type === "future" && /DUAL/i.test(p.extra?.security_id || ""))
+          .map((p) => (p.ticker || "").toUpperCase().trim())
+      );
+      if (dualTickers.size) {
+        const adjRe = /^Ajuste futuro\s+([A-Z0-9]+)\b/i;
+        const cambioByTk = new Map();
+        for (const m of cashMovements || []) {
+          const mm = adjRe.exec((m.notes || "").trim());
+          if (!mm) continue;
+          const tk = mm[1].toUpperCase();
+          if (!dualTickers.has(tk)) continue;
+          const signed = (m.movement_type === "deposit" ? 1 : -1) * Number(m.amount || 0);
+          cambioByTk.set(tk, (cambioByTk.get(tk) || 0) + signed);
+        }
+        for (const tk of dualTickers) {
+          const e = acc.get("future|" + tk);
+          if (!e) continue;
+          const cambio = cambioByTk.get(tk) || 0;
+          e.realized = cambio;
+          e.total = cambio;
+          e.currency = "ARS";
+          e.hasPnl = true;
+          e.priceSource = "liquidacion";
+        }
+      }
+    } catch (err) { console.warn("[PnlPorInstrumento] dual futures falló:", err); }
+
     return Array.from(acc.values()).map((e) => ({
       ...e,
       pppBuy: e.buyQty > 0 ? e.buyNot / e.buyQty : null,
@@ -26995,7 +27031,7 @@ function PnlPorInstrumentoModule() {
       unrealized: e.total - e.realized,
       atMarket: e.priceSource != null, // hay precio de mercado para lo abierto
     })).sort((a, b) => Math.abs(b.total) - Math.abs(a.total) || (a.ticker < b.ticker ? -1 : 1));
-  }, [positions, bondPrices, futurePrices, fciPrices, stockPrices]);
+  }, [positions, bondPrices, futurePrices, fciPrices, stockPrices, cashMovements]);
 
   const presentTypes = useMemo(() => Array.from(new Set(rows.map((r) => r.type))), [rows]);
   const shown = typeFilter === "all" ? rows : rows.filter((r) => r.type === typeFilter);
