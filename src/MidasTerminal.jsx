@@ -13617,12 +13617,19 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
       // sin /100), no un bono. Sin esto, todo CEDEAR/acción importado caía como
       // bono (caso SPCX 16/06: P&L 100× chico). El sufijo D/C (MEP/CCL) se respeta.
       const baseTk = (sfx === "D" || sfx === "C") ? (ticker || "").slice(0, -1) : ticker;
+      // El sufijo D/C indica MEP/CCL SOLO cuando aplica sobre una BASE conocida
+      // (ej. AAPLD = AAPL liquidado en MEP). Si el ticker COMPLETO ya está en la
+      // lista, es la especie LOCAL en pesos aunque termine en "D" — caso YPFD
+      // (YPF escriturales clase D, ARS), GGAL, etc. Sin esto el importador cargaba
+      // YPFD como USD-MEP y lo multiplicaba por el dólar (fantasma de ~11.766M).
+      const localPlazaCurrency = (set) =>
+        set.has(ticker) ? "ARS" : sfx === "D" ? "USD-MEP" : sfx === "C" ? "USD-CCL" : "ARS";
       if (cedearSet && (cedearSet.has(ticker) || cedearSet.has(baseTk))) {
         instrumentType = "cedear"; kind = "CEDEAR";
-        entryCurrency = sfx === "D" ? "USD-MEP" : sfx === "C" ? "USD-CCL" : "ARS";
+        entryCurrency = localPlazaCurrency(cedearSet);
       } else if (stockSet && (stockSet.has(ticker) || stockSet.has(baseTk))) {
         instrumentType = "stock"; kind = "Acción";
-        entryCurrency = sfx === "D" ? "USD-MEP" : sfx === "C" ? "USD-CCL" : "ARS";
+        entryCurrency = localPlazaCurrency(stockSet);
       }
       // Soberanos hard-dollar (AL/GD/AE/GE) entran como posición igual que
       // cualquier bono; consolidatePositions los unifica por bono base y matchea
