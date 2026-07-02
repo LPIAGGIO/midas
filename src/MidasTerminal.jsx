@@ -25848,6 +25848,62 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
     setSimTicker(ticker);
   };
 
+  // Subir CSV de operaciones (ReporteOperaciones de Cocos/Matriz: execution report).
+  // Cada fila es un fill parcial; agrupamos por ticker y precio para armar los lotes
+  // reales de lo operado (compras → promedio; ventas → cierres ya hechos). OJO: este
+  // CSV usa formato inglés (punto decimal), a diferencia del de movimientos de cuenta.
+  const [csvGroups, setCsvGroups] = useState([]);
+  const numEn = (v) => { const n = Number(String(v ?? "").trim()); return Number.isFinite(n) ? n : null; };
+  const parseOpsCsv = (text) => {
+    const lines = String(text || "").split(/\r?\n/).filter((l) => l.trim());
+    if (!lines.length) return [];
+    const start = /symbol|security_id|,side,/i.test(lines[0]) ? 1 : 0;
+    const map = {};
+    for (let i = start; i < lines.length; i++) {
+      const f = lines[i].split(",");
+      if (f.length < 12) continue;
+      const symbol = (f[4] || "").trim();               // ej: "MERV - XMEV - SPCX - 24hs"
+      const side = (f[6] || "").trim().toUpperCase();   // BUY / SELL
+      const lastPrice = numEn(f[f.length - 6]);         // last_price (desde la derecha, robusto al campo text)
+      const lastQty = numEn(f[f.length - 5]);           // last_qty
+      if (!symbol || (side !== "BUY" && side !== "SELL")) continue;
+      if (!(lastPrice > 0) || !(lastQty > 0)) continue; // solo fills reales
+      const parts = symbol.split(" - ");
+      const ticker = (parts.length >= 3 ? parts[2] : symbol).trim().toUpperCase();
+      const g = map[ticker] || (map[ticker] = { buys: new Map(), sells: new Map() });
+      const bucket = side === "BUY" ? g.buys : g.sells;
+      bucket.set(lastPrice, (bucket.get(lastPrice) || 0) + lastQty);   // colapsa fills al mismo precio
+    }
+    const toLots = (m) => [...m.entries()].map(([price, qty]) => ({ price, qty })).sort((a, b) => a.price - b.price);
+    const out = [];
+    for (const [ticker, g] of Object.entries(map)) {
+      const buys = toLots(g.buys), sells = toLots(g.sells);
+      const buyQty = buys.reduce((s, x) => s + x.qty, 0);
+      const buyCost = buys.reduce((s, x) => s + x.qty * x.price, 0);
+      const sellQty = sells.reduce((s, x) => s + x.qty, 0);
+      out.push({ ticker, buys, sells, buyQty, buyAvg: buyQty > 0 ? buyCost / buyQty : 0, sellQty, netQty: buyQty - sellQty });
+    }
+    return out.sort((a, b) => (b.buyQty + b.sellQty) - (a.buyQty + a.sellQty));
+  };
+  const loadFromCsvGroup = (g) => {
+    if (!g) return;
+    setLots(g.buys.length ? g.buys.map((b) => ({ qty: String(Math.round(b.qty)), price: b.price.toFixed(2).replace(".", ",") })) : [{ qty: "", price: "" }]);
+    setSells(g.sells.length ? g.sells.map((s) => ({ qty: String(Math.round(s.qty)), price: s.price.toFixed(2).replace(".", ",") })) : [{ qty: "", price: "" }]);
+    setSimTicker(g.ticker);
+  };
+  const onCsvFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const groups = parseOpsCsv(reader.result);
+      setCsvGroups(groups);
+      if (groups.length === 1) loadFromCsvGroup(groups[0]);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   // Buscar CUALQUIER CEDEAR (lo tengas o no) y traer su precio actual (data912)
   // para simular. Llena un lote con el precio de mercado; vos ponés la cantidad.
   const [cedPx, setCedPx] = useState({});
@@ -25932,7 +25988,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulador de venta CEDEAR</h1>
           <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
-            Para scalping con compras escalonadas. Cargá tus lotes, simulá vender N papeles a un precio, y mirá el resultado neto de comisiones y el precio mínimo para no perder.
+            Para scalping con compras escalonadas. Cargá tus lotes a mano, desde tu cartera, o subí el CSV de operaciones (ReporteOperaciones de Cocos/Matriz) y arma solo lo operado — promedio y cierres. Simulá vender N papeles a un precio y mirá el resultado neto de comisiones y el precio mínimo para no perder.
           </p>
         </div>
         {onPopOut && (
@@ -25953,13 +26009,27 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
               <span style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 4, padding: "1px 8px", fontFamily: "'JetBrains Mono', monospace" }}>{simTicker}</span>
             )}
           </div>
-          <div className="flex items-center" style={{ gap: 8 }}>
+          <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
             {holdings.length > 0 && (
               <select defaultValue="" onChange={(e) => { if (e.target.value) loadFromCartera(e.target.value); e.target.value = ""; }}
                 style={{ padding: "5px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: C.deep, color: C.muted, borderRadius: 6 }}>
                 <option value="">Cargar de mi cartera…</option>
                 {holdings.map((h) => (
                   <option key={h.ticker} value={h.ticker}>{h.ticker} · {Math.round(h.qty).toLocaleString("es-AR")} @ {h.avg.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</option>
+                ))}
+              </select>
+            )}
+            <label title="Subir ReporteOperaciones de Cocos/Matriz — arma los lotes reales de lo operado (compras y ventas)"
+              style={{ padding: "5px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: C.deep, color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
+              📄 Subir CSV
+              <input type="file" accept=".csv,text/csv" onChange={onCsvFile} style={{ display: "none" }} />
+            </label>
+            {csvGroups.length > 0 && (
+              <select defaultValue="" onChange={(e) => { const g = csvGroups.find((x) => x.ticker === e.target.value); if (g) loadFromCsvGroup(g); e.target.value = ""; }}
+                style={{ padding: "5px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid #f59e0b`, background: "rgba(245,158,11,0.08)", color: "#f59e0b", borderRadius: 6 }}>
+                <option value="">Del CSV… ({csvGroups.length})</option>
+                {csvGroups.map((g) => (
+                  <option key={g.ticker} value={g.ticker}>{g.ticker} · compra {Math.round(g.buyQty).toLocaleString("es-AR")} @ {g.buyAvg.toLocaleString("es-AR", { maximumFractionDigits: 2 })}{g.sellQty > 0 ? ` · vend ${Math.round(g.sellQty).toLocaleString("es-AR")}` : ""}</option>
                 ))}
               </select>
             )}
