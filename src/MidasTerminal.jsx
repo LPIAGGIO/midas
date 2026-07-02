@@ -25849,46 +25849,72 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
   };
 
   // Subir CSV de operaciones (ReporteOperaciones de Cocos/Matriz: execution report).
-  // Cada fila es un fill parcial; agrupamos por ticker y precio para armar los lotes
-  // reales de lo operado (compras → promedio; ventas → cierres ya hechos). OJO: este
+  // Separa lo CERRADO (round-trips ya realizados) de lo que quedó ABIERTO (posición
+  // neta a costo promedio) y carga la parte abierta para simular su cierre. OJO: este
   // CSV usa formato inglés (punto decimal), a diferencia del de movimientos de cuenta.
   const [csvGroups, setCsvGroups] = useState([]);
+  const [csvSummary, setCsvSummary] = useState(null);
   const numEn = (v) => { const n = Number(String(v ?? "").trim()); return Number.isFinite(n) ? n : null; };
   const parseOpsCsv = (text) => {
     const lines = String(text || "").split(/\r?\n/).filter((l) => l.trim());
     if (!lines.length) return [];
     const start = /symbol|security_id|,side,/i.test(lines[0]) ? 1 : 0;
-    const map = {};
+    // 1) Consolidar por orden: nos quedamos con el fill final (mayor cum_qty). Eso
+    //    ignora los duplicados con event_subtype "cancel" y la granularidad de fills.
+    const orders = {};
     for (let i = start; i < lines.length; i++) {
       const f = lines[i].split(",");
       if (f.length < 12) continue;
-      const symbol = (f[4] || "").trim();               // ej: "MERV - XMEV - SPCX - 24hs"
-      const side = (f[6] || "").trim().toUpperCase();   // BUY / SELL
-      const lastPrice = numEn(f[f.length - 6]);         // last_price (desde la derecha, robusto al campo text)
-      const lastQty = numEn(f[f.length - 5]);           // last_qty
-      if (!symbol || (side !== "BUY" && side !== "SELL")) continue;
-      if (!(lastPrice > 0) || !(lastQty > 0)) continue; // solo fills reales
+      if ((f[f.length - 1] || "").trim() === "cancel") continue;   // event_subtype = cancelación (duplica el último fill)
+      const orderId = (f[1] || "").trim();
+      const symbol = (f[4] || "").trim();                          // ej: "MERV - XMEV - SPCX - 24hs"
+      const ts = (f[5] || "").trim();                              // transact_time (para orden cronológico)
+      const side = (f[6] || "").trim().toUpperCase();              // BUY / SELL
+      const avgPrice = numEn(f[f.length - 4]);                     // avg_price (promedio de la orden)
+      const cumQty = numEn(f[f.length - 3]);                       // cum_qty (acumulado de la orden)
+      if (!orderId || (side !== "BUY" && side !== "SELL")) continue;
+      if (!(cumQty > 0) || !(avgPrice > 0)) continue;
       const parts = symbol.split(" - ");
       const ticker = (parts.length >= 3 ? parts[2] : symbol).trim().toUpperCase();
-      const g = map[ticker] || (map[ticker] = { buys: new Map(), sells: new Map() });
-      const bucket = side === "BUY" ? g.buys : g.sells;
-      bucket.set(lastPrice, (bucket.get(lastPrice) || 0) + lastQty);   // colapsa fills al mismo precio
+      const o = orders[orderId] || (orders[orderId] = { ticker, side, cum: 0, price: 0, ts });
+      if (cumQty >= o.cum) { o.cum = cumQty; o.price = avgPrice; o.ts = ts; }   // fill final de la orden
     }
-    const toLots = (m) => [...m.entries()].map(([price, qty]) => ({ price, qty })).sort((a, b) => a.price - b.price);
+    // 2) Motor de costo promedio cronológico por ticker → realizado (cerrado) y abierto.
+    const byT = {};
+    for (const o of Object.values(orders)) (byT[o.ticker] = byT[o.ticker] || []).push(o);
     const out = [];
-    for (const [ticker, g] of Object.entries(map)) {
-      const buys = toLots(g.buys), sells = toLots(g.sells);
-      const buyQty = buys.reduce((s, x) => s + x.qty, 0);
-      const buyCost = buys.reduce((s, x) => s + x.qty * x.price, 0);
-      const sellQty = sells.reduce((s, x) => s + x.qty, 0);
-      out.push({ ticker, buys, sells, buyQty, buyAvg: buyQty > 0 ? buyCost / buyQty : 0, sellQty, netQty: buyQty - sellQty });
+    for (const [ticker, os] of Object.entries(byT)) {
+      os.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+      let pos = 0, avg = 0, boughtQty = 0, boughtCost = 0, soldQty = 0, soldCost = 0;
+      let matched = 0, closedBuyNotional = 0, closedSellNotional = 0;
+      for (const o of os) {
+        const q = o.cum, p = o.price;
+        if (o.side === "BUY") {
+          boughtQty += q; boughtCost += q * p;
+          const nq = pos + q; avg = nq > 0 ? (avg * pos + p * q) / nq : 0; pos = nq;
+        } else {
+          soldQty += q; soldCost += q * p;
+          const m = Math.min(q, pos);                        // cierra contra lo que hay (long-only, como CEDEARs)
+          matched += m; closedBuyNotional += m * avg; closedSellNotional += m * p;
+          pos -= m; if (pos < 1e-9) pos = 0;
+        }
+      }
+      out.push({
+        ticker,
+        boughtQty, boughtAvg: boughtQty > 0 ? boughtCost / boughtQty : 0,
+        soldQty, soldAvg: soldQty > 0 ? soldCost / soldQty : 0,
+        closedQty: Math.round(matched), closedBuyNotional, closedSellNotional,
+        grossRealized: closedSellNotional - closedBuyNotional,
+        openQty: Math.round(pos), openAvg: avg,
+      });
     }
-    return out.sort((a, b) => (b.buyQty + b.sellQty) - (a.buyQty + a.sellQty));
+    return out.sort((a, b) => (b.openQty + b.closedQty) - (a.openQty + a.closedQty));
   };
   const loadFromCsvGroup = (g) => {
     if (!g) return;
-    setLots(g.buys.length ? g.buys.map((b) => ({ qty: String(Math.round(b.qty)), price: b.price.toFixed(2).replace(".", ",") })) : [{ qty: "", price: "" }]);
-    setSells(g.sells.length ? g.sells.map((s) => ({ qty: String(Math.round(s.qty)), price: s.price.toFixed(2).replace(".", ",") })) : [{ qty: "", price: "" }]);
+    setCsvSummary(g);
+    setLots(g.openQty > 0 ? [{ qty: String(g.openQty), price: g.openAvg.toFixed(2).replace(".", ",") }] : [{ qty: "", price: "" }]);
+    setSells([{ qty: "", price: "" }]);   // limpio: el cierre lo simula el usuario sobre lo abierto
     setSimTicker(g.ticker);
   };
   const onCsvFile = (e) => {
@@ -25898,6 +25924,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
     reader.onload = () => {
       const groups = parseOpsCsv(reader.result);
       setCsvGroups(groups);
+      setCsvSummary(null);
       if (groups.length === 1) loadFromCsvGroup(groups[0]);
     };
     reader.readAsText(file);
@@ -25988,7 +26015,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulador de venta CEDEAR</h1>
           <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
-            Para scalping con compras escalonadas. Cargá tus lotes a mano, desde tu cartera, o subí el CSV de operaciones (ReporteOperaciones de Cocos/Matriz) y arma solo lo operado — promedio y cierres. Simulá vender N papeles a un precio y mirá el resultado neto de comisiones y el precio mínimo para no perder.
+            Para scalping con compras escalonadas. Cargá tus lotes a mano, desde tu cartera, o subí el CSV de operaciones (ReporteOperaciones de Cocos/Matriz): separa lo cerrado (round-trips ya realizados, con su resultado) de lo que quedó abierto, y carga la posición abierta a su costo promedio para simular el cierre. Simulá vender N papeles a un precio y mirá el resultado neto de comisiones y el precio mínimo para no perder.
           </p>
         </div>
         {onPopOut && (
@@ -26029,13 +26056,36 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
                 style={{ padding: "5px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid #f59e0b`, background: "rgba(245,158,11,0.08)", color: "#f59e0b", borderRadius: 6 }}>
                 <option value="">Del CSV… ({csvGroups.length})</option>
                 {csvGroups.map((g) => (
-                  <option key={g.ticker} value={g.ticker}>{g.ticker} · compra {Math.round(g.buyQty).toLocaleString("es-AR")} @ {g.buyAvg.toLocaleString("es-AR", { maximumFractionDigits: 2 })}{g.sellQty > 0 ? ` · vend ${Math.round(g.sellQty).toLocaleString("es-AR")}` : ""}</option>
+                  <option key={g.ticker} value={g.ticker}>{g.ticker} · abierto {g.openQty.toLocaleString("es-AR")} @ {g.openAvg.toLocaleString("es-AR", { maximumFractionDigits: 2 })}{g.closedQty > 0 ? ` · cerrado ${g.closedQty.toLocaleString("es-AR")}` : ""}</option>
                 ))}
               </select>
             )}
             <button onClick={addLot} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar lote</button>
           </div>
         </div>
+        {/* Resumen del CSV cargado: lo cerrado (realizado) y lo que quedó abierto. */}
+        {csvSummary && (
+          <div style={{ marginBottom: 10, borderRadius: 8, border: `1px solid ${C.border}`, background: C.deep, padding: "9px 12px" }}>
+            <div className="flex" style={{ gap: 18, flexWrap: "wrap", alignItems: "baseline" }}>
+              <span style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase" }}>Del CSV · {csvSummary.ticker}</span>
+              {csvSummary.closedQty > 0 && (() => {
+                const net = csvSummary.grossRealized - c * (csvSummary.closedBuyNotional + csvSummary.closedSellNotional);
+                return (
+                  <span style={{ fontSize: 12.5, color: C.muted }}>
+                    Cerrado: <b style={{ color: C.text }}>{fQ(csvSummary.closedQty)}</b> pap · resultado <b style={{ color: net >= 0 ? C.green : C.red }}>{fAr0(net)}</b>
+                    <span style={{ color: C.dim }}> (compra ~{fAr(csvSummary.closedBuyNotional / csvSummary.closedQty)} → venta ~{fAr(csvSummary.closedSellNotional / csvSummary.closedQty)})</span>
+                  </span>
+                );
+              })()}
+              <span style={{ fontSize: 12.5, color: C.muted }}>
+                Abierto: <b style={{ color: csvSummary.openQty > 0 ? "#f59e0b" : C.dim }}>{fQ(csvSummary.openQty)}</b> pap
+                {csvSummary.openQty > 0
+                  ? <> @ <b style={{ color: "#f59e0b" }}>{fAr(csvSummary.openAvg)}</b> <span style={{ color: C.dim }}>· cargado abajo para simular el cierre</span></>
+                  : <span style={{ color: C.dim }}> · nada abierto</span>}
+              </span>
+            </div>
+          </div>
+        )}
         {/* Buscar cualquier CEDEAR (lo tengas o no) y traer su precio actual. */}
         <div style={{ position: "relative", marginBottom: 9 }}>
           <input value={topen ? tq : ""} onFocus={() => { setTopen(true); setTq(""); }} onBlur={() => setTimeout(() => setTopen(false), 150)} onChange={(e) => setTq(e.target.value)}
