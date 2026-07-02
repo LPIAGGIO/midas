@@ -25495,6 +25495,1059 @@ function fmtPeriodLabel(days) {
   if (days >= 60) return `~${Math.round(days / 30)} meses`;
   return `${Math.round(days)} días`;
 }
+// ═══════════════════════════════════════════════════════════════════════
+// Valuación CEDEAR — fair value: teórico = (acción USD × CCL) ÷ ratio.
+// Compara el precio real del CEDEAR contra el teórico (premium = caro/barato) y
+// muestra el CCL implícito. Sirve para cotizar, ver si un papel está caro/barato
+// y definir entradas/salidas. Datos data912 (CEDEAR ARS + acción USD), ratios y
+// nombres del catálogo CEDEAR_CAT (~425 CEDEARs, tabla pública BYMA/Comafi). El
+// CCL default = la referencia (mediana de los líquidos, igual que Ejecución).
+// Símbolo del subyacente cuando el código BYMA difiere del ticker USA. data912
+// USA usa punto (BRK.B); Yahoo usa guion (BRK-B). El resto matchea directo.
+const CEDEAR_US_MAP = { DISN: "DIS", BRKB: "BRK.B", WBO: "WBD" };  // para data912 usa_stocks
+const CEDEAR_YH_MAP = { DISN: "DIS", BRKB: "BRK-B", WBO: "WBD" };  // para Yahoo (fallback)
+// ═══════════════════════════════════════════════════════════════════════
+function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
+  const [ced, setCed] = useState({});
+  const [usa, setUsa] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [lastFetch, setLastFetch] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [sym, setSym] = useState("AAPL");
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);              // índice resaltado del autocomplete
+  const listRef = useRef(null);
+  const [ccl, setCcl] = useState("");
+  const [cclTouched, setCclTouched] = useState(false);
+  const [accion, setAccion] = useState("");
+  const [cedear, setCedear] = useState("");
+  const [yhCache, setYhCache] = useState({});   // sym -> precio subyacente de Yahoo (fallback)
+  const [usaSrc, setUsaSrc] = useState(null);    // "data912" | "yahoo" | null
+
+  const num = (x) => { const n = Number(x); return Number.isFinite(n) && n > 0 ? n : null; };
+  const mid = (a, b) => (a && b ? (a + b) / 2 : (a || b || null));
+  // Parseo de los inputs en formato AR (coma decimal, punto miles) → número.
+  const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
+  const fmtUsdIn = (n) => n.toFixed(2).replace(".", ",");  // acción USD: 299,43
+  const fmtArsIn = (n) => String(Math.round(n));           // CEDEAR ARS: entero
+  const fmtNum = (n) => (Math.round(n * 100) / 100).toString().replace(".", ",");
+  // Flechas ↑/↓ del teclado suben/bajan el valor (step por campo).
+  const onArrow = (e, current, step, apply) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const n = pn(current) ?? 0;
+    const next = Math.max(0, Math.round((n + (e.key === "ArrowUp" ? step : -step)) * 100) / 100);
+    apply(fmtNum(next));
+  };
+
+  // Fetch data912 (mount + ↻). Diferido, no hace falta poll agresivo.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const [cR, uR] = await Promise.all([
+          fetch(`/api/data912?type=cedears&_=${Date.now()}`),
+          fetch(`/api/data912?type=usa&_=${Date.now()}`),
+        ]);
+        const cArr = cR.ok ? await cR.json() : [];
+        const uArr = uR.ok ? await uR.json() : [];
+        if (!mounted) return;
+        const cm = {}; for (const x of cArr) if (x?.symbol) cm[String(x.symbol).toUpperCase()] = x;
+        const um = {}; for (const x of uArr) if (x?.symbol) um[String(x.symbol).toUpperCase()] = x;
+        setCed(cm); setUsa(um); setLastFetch(new Date()); setLoading(false);
+      } catch { if (mounted) setLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, [tick]);
+
+  // CCL de referencia (mediana de los líquidos), igual que Ejecución Inteligente.
+  const cclRef = useMemo(() => {
+    const pool = [];
+    for (const s of EJEC_CORE) {
+      const c = ced[s], u = usa[s], r = EJEC_RATIOS[s];
+      if (!c || !u || !r) continue;
+      const cMid = mid(num(c.px_bid), num(c.px_ask)) || num(c.c);
+      const uMid = mid(num(u.px_bid), num(u.px_ask)) || num(u.c);
+      if (cMid && uMid) pool.push((r * cMid) / uMid);
+    }
+    return ejecMedian(pool);
+  }, [ced, usa]);
+
+  // CCL default = referencia, hasta que el usuario lo edite.
+  useEffect(() => {
+    if (!cclTouched && cclRef) setCcl(String(Math.round(cclRef)));
+  }, [cclRef, cclTouched]);
+
+  // ↻ limpia el cache de Yahoo para que el refresco también actualice el fallback.
+  useEffect(() => { setYhCache({}); }, [tick]);
+
+  // Al cambiar de símbolo o al refrescar, traer los precios REALES (independientes)
+  // del feed → así el premium refleja el desvío real. El subyacente USD sale de
+  // data912 (con mapeo de símbolo); si data912 no lo tiene (ETFs, ADRs), cae a
+  // Yahoo. (La edición manual asume paridad y completa el otro campo.)
+  useEffect(() => {
+    let active = true;
+    const c = ced[sym];
+    const cPx = c ? (mid(num(c.px_bid), num(c.px_ask)) || num(c.c)) : null;
+    setCedear(cPx ? fmtArsIn(cPx) : "");
+
+    const u = usa[CEDEAR_US_MAP[sym] || sym];
+    const uPx = u ? (mid(num(u.px_bid), num(u.px_ask)) || num(u.c)) : null;
+    if (uPx) { setAccion(fmtUsdIn(uPx)); setUsaSrc("data912"); return; }
+    if (yhCache[sym] != null) { setAccion(fmtUsdIn(yhCache[sym])); setUsaSrc("yahoo"); return; }
+    setAccion(""); setUsaSrc(null);
+    const ys = CEDEAR_YH_MAP[sym] || sym;
+    fetch(`/api/fundamentals?price=${encodeURIComponent(ys)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!active) return;
+        const p = j?.prices?.[ys];
+        if (Number.isFinite(p) && p > 0) { setYhCache((prev) => ({ ...prev, [sym]: p })); setAccion(fmtUsdIn(p)); setUsaSrc("yahoo"); }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [sym, ced, usa]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ratio = CEDEAR_CAT[sym]?.r ?? null;
+  const name = CEDEAR_CAT[sym]?.n || sym;
+
+  const onAccion = (v) => {
+    setAccion(v);
+    const a = pn(v), cc = pn(ccl);
+    if (ratio && a && cc) setCedear(fmtArsIn((a * cc) / ratio));
+  };
+  const onCedear = (v) => {
+    setCedear(v);
+    const ce = pn(v), cc = pn(ccl);
+    if (ratio && ce && cc) setAccion(fmtUsdIn((ce * ratio) / cc));
+  };
+
+  const options = useMemo(() => {
+    const all = Object.keys(CEDEAR_CAT).map((k) => ({ sym: k, name: CEDEAR_CAT[k].n, ratio: CEDEAR_CAT[k].r }));
+    const term = q.trim().toUpperCase();
+    const list = term ? all.filter((o) => o.sym.includes(term) || o.name.toUpperCase().includes(term)) : all;
+    return list.sort((x, y) => x.sym.localeCompare(y.sym));
+  }, [q]);
+
+  // Scrollea el item resaltado para que quede visible al navegar con flechas.
+  useEffect(() => {
+    if (open && listRef.current && listRef.current.children[hi]) {
+      listRef.current.children[hi].scrollIntoView({ block: "nearest" });
+    }
+  }, [hi, open]);
+
+  // Navegación del autocomplete con teclado (↑/↓ mueve, Enter elige, Esc cierra).
+  const onCedearKey = (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!open) { setOpen(true); setHi(0); return; }
+      setHi((h) => Math.min(h + 1, options.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (open) setHi((h) => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      if (open && options[hi]) { e.preventDefault(); setSym(options[hi].sym); setOpen(false); setQ(""); }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    }
+  };
+
+  const a = pn(accion), ce = pn(cedear), cc = pn(ccl);
+  const teorico = (a && cc && ratio) ? (a * cc) / ratio : null;
+  const premium = (teorico && ce) ? (ce / teorico - 1) * 100 : null;
+  const cclImpl = (ce && a && ratio) ? (ce * ratio) / a : null;
+  const premColor = premium == null ? C.text : premium > 0.05 ? "#f87171" : premium < -0.05 ? "#34d399" : C.muted;
+  const premLabel = premium == null ? "" : premium > 0.05 ? "caro" : premium < -0.05 ? "barato" : "en línea";
+
+  const fAr = (n) => (n == null ? "—" : `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+
+  const fieldWrap = { flex: "1 1 150px", minWidth: 140 };
+  const labelStyle = { fontSize: 11, color: C.muted, marginBottom: 6, display: "block" };
+  const inputStyle = { width: "100%", padding: "9px 11px", fontSize: 14, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
+
+  const ResCard = ({ label, value, color, sub, highlight }) => (
+    <div style={{ flex: compact ? "1 1 calc(50% - 5px)" : "1 1 180px", minWidth: compact ? 0 : 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: 8, padding: compact ? "10px 12px" : "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent", boxSizing: "border-box" }}>
+      <div style={{ fontSize: compact ? 10 : 11, color: C.dim, marginBottom: compact ? 5 : 7 }}>{label}</div>
+      <div style={{ fontSize: compact ? 17 : 22, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
+      {sub && <div style={{ fontSize: compact ? 10 : 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: compact ? "12px 14px" : "24px 32px", maxWidth: compact ? "none" : 1100, margin: compact ? 0 : "0 auto" }}>
+      {compact ? (
+        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Valuación CEDEAR</span>
+          <span style={{ fontSize: 9.5, color: C.dim, letterSpacing: "0.12em", textTransform: "uppercase" }}>midas</span>
+        </div>
+      ) : (
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12 }}>
+        <div>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Valuación CEDEAR</h1>
+        <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
+          Precio teórico de un CEDEAR vs su precio real de mercado, para ver si está caro o barato y definir entradas/salidas. Teórico = (acción USD × CCL) ÷ ratio.
+        </p>
+        </div>
+        {onPopOut && (
+        <button onClick={onPopOut} title="Ventana flotante siempre visible, en paralelo con Matriz (Chrome/Edge)"
+          style={{ flexShrink: 0, padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${pipActive ? "#f59e0b" : C.border}`, background: pipActive ? "rgba(245,158,11,0.12)" : "transparent", color: pipActive ? "#f59e0b" : C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
+          📌 {pipActive ? "Ventana fijada" : "Ventana flotante"}
+        </button>
+        )}
+      </div>
+      )}
+
+      {/* Datos / inputs */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px" }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Datos</div>
+          <div className="flex items-center" style={{ gap: 10 }}>
+            <span style={{ fontSize: 11, color: lastFetch ? "#34d399" : C.dim, fontWeight: 600 }}>
+              {lastFetch ? "● en vivo" : "○ sin datos"}
+            </span>
+            <button onClick={() => setTick((t) => t + 1)} title="Actualizar precios" disabled={loading}
+              style={{ width: 40, height: 40, borderRadius: 999, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: loading ? "default" : "pointer", fontSize: 19 }}>↻</button>
+          </div>
+        </div>
+
+        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
+          {/* CEDEAR autocomplete */}
+          <div style={{ flex: "1 1 240px", minWidth: 220, position: "relative" }}>
+            <label style={labelStyle}>CEDEAR</label>
+            <input
+              value={open ? q : `${sym} — ${name}`}
+              onFocus={() => { setOpen(true); setQ(""); setHi(0); }}
+              onBlur={() => setTimeout(() => setOpen(false), 150)}
+              onChange={(e) => { setQ(e.target.value); setHi(0); }}
+              onKeyDown={onCedearKey}
+              placeholder="Buscá ticker o nombre…"
+              style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }}
+            />
+            {open && options.length > 0 && (
+              <div ref={listRef} style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, zIndex: 10, maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+                {options.map((o, i) => (
+                  <div key={o.sym} onMouseDown={() => { setSym(o.sym); setOpen(false); setQ(""); }}
+                    onMouseEnter={() => setHi(i)}
+                    className="flex items-center justify-between"
+                    style={{ padding: "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`, gap: 10, background: i === hi ? "rgba(245,158,11,0.14)" : "transparent" }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#f59e0b", fontSize: 12, minWidth: 56 }}>{o.sym}</span>
+                    <span style={{ fontSize: 12, color: C.text, flex: 1 }}>{o.name}</span>
+                    <span style={{ fontSize: 11, color: C.dim, fontFamily: "'JetBrains Mono', monospace" }}>{o.ratio}:1</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Ratio 🔒</label>
+            <input value={ratio ?? "—"} readOnly style={{ ...inputStyle, color: C.muted, background: "transparent" }} />
+          </div>
+          <div style={fieldWrap}>
+            <label style={labelStyle}>CCL — venta (ARS)</label>
+            <input value={ccl}
+              onChange={(e) => { setCclTouched(true); setCcl(e.target.value.replace(/\./g, ",")); }}
+              onKeyDown={(e) => onArrow(e, ccl, 1, (s) => { setCclTouched(true); setCcl(s); })}
+              inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Precio ACCIÓN (USD)</label>
+            <input value={accion}
+              onChange={(e) => onAccion(e.target.value.replace(/\./g, ","))}
+              onKeyDown={(e) => onArrow(e, accion, 0.01, onAccion)}
+              inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Precio CEDEAR (ARS)</label>
+            <input value={cedear}
+              onChange={(e) => onCedear(e.target.value.replace(/\./g, ","))}
+              onKeyDown={(e) => onArrow(e, cedear, 1, onCedear)}
+              inputMode="decimal" style={inputStyle} />
+          </div>
+        </div>
+        {!loading && !a && cedear && (
+          <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 10 }}>
+            No encontré el precio del subyacente de <b>{sym}</b> en los feeds (data912 ni Yahoo lo traen). Cargá el precio en USD a mano y el resto se calcula solo.
+          </div>
+        )}
+        {a && usaSrc === "yahoo" && (
+          <div style={{ fontSize: 10.5, color: C.dim, marginTop: 10 }}>Subyacente de {sym} traído de Yahoo (data912 no lo tiene en su feed USA).</div>
+        )}
+      </div>
+
+      {/* Resultados */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px", marginTop: compact ? 10 : 14 }}>
+        <div className="flex" style={{ gap: compact ? 10 : 12, flexWrap: "wrap" }}>
+          <ResCard label="Precio teórico CEDEAR" value={fAr(teorico)} color="#f59e0b" highlight />
+          <ResCard label="Precio real de mercado" value={fAr(ce)} />
+          <ResCard label="Premium / descuento"
+            value={premium == null ? "—" : `${premium >= 0 ? "+" : ""}${premium.toFixed(2)}%`}
+            color={premColor} sub={premLabel} />
+          <ResCard label="CCL implícito" value={fAr(cclImpl)} color="#60a5fa" />
+        </div>
+        {!compact && (
+        <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
+          Teórico = (acción USD × CCL) ÷ ratio. El premium compara el precio real contra el teórico: positivo = el CEDEAR cotiza <span style={{ color: "#f87171" }}>caro</span> respecto al subyacente; negativo = <span style={{ color: "#34d399" }}>barato</span> (arbitraje potencial). CCL implícito = (CEDEAR ARS × ratio) ÷ acción USD.
+        </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Simulador de venta CEDEAR — para scalping con compras escalonadas (ej. SPCX).
+// Cargás tus lotes de compra, simulás vender N papeles a un precio X, y te dice
+// el P&L NETO (con derechos de mercado + IVA de las dos patas), lo que queda, y
+// el precio de BREAK-EVEN: el mínimo al que tenés que vender para no perder.
+// Costos Cocos CEDEAR: 0 comisión, pero derechos de mercado (~0,044% del monto)
+// + IVA 21% sobre los derechos, en cada pata.
+// ═══════════════════════════════════════════════════════════════════════
+function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {}) {
+  const { positions } = useUserPositions();
+  const [lots, setLots] = useState([{ qty: "", price: "" }, { qty: "", price: "" }, { qty: "", price: "" }]);
+  const [derechos, setDerechos] = useState("0,044");
+  const [iva, setIva] = useState("21");
+  const [sells, setSells] = useState([{ qty: "", price: "" }]);
+  const [simTicker, setSimTicker] = useState("");
+
+  const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : null; };
+  const dc = (v) => v.replace(/\./g, ",");  // tecla . → coma decimal (igual que Valuación CEDEAR)
+
+  // Tenencias ABIERTAS de CEDEAR/acción (qty neto + costo del lote vivo, motor de
+  // costo promedio cronológico = mismo que la cartera). Para "Cargar de mi cartera".
+  const holdings = useMemo(() => {
+    const byT = {};
+    for (const p of positions || []) {
+      if (!["cedear", "stock"].includes(p?.instrument_type) || !p.ticker) continue;
+      (byT[p.ticker] = byT[p.ticker] || []).push(p);
+    }
+    const out = [];
+    for (const [ticker, lotes] of Object.entries(byT)) {
+      const sorted = lotes.slice().sort((a, b) => (a.entry_date < b.entry_date ? -1 : a.entry_date > b.entry_date ? 1 : 0));
+      let posQty = 0, avg = 0;
+      for (const p of sorted) {
+        const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+        if (!q) continue;
+        const price = Number(p.entry_price) || 0;
+        if (posQty === 0 || Math.sign(posQty) === Math.sign(q)) {
+          const nq = posQty + q; avg = nq !== 0 ? (avg * Math.abs(posQty) + price * Math.abs(q)) / Math.abs(nq) : 0; posQty = nq;
+        } else {
+          const closeQty = Math.min(Math.abs(q), Math.abs(posQty)); const rem = Math.abs(q) - closeQty; posQty = posQty + q; if (rem > 0) avg = price;
+        }
+      }
+      if (posQty > 1e-6) out.push({ ticker, qty: posQty, avg });
+    }
+    return out.sort((a, b) => (a.ticker < b.ticker ? -1 : 1));
+  }, [positions]);
+  const loadFromCartera = (ticker) => {
+    const h = holdings.find((x) => x.ticker === ticker);
+    if (!h) return;
+    setLots([{ qty: String(Math.round(h.qty)), price: h.avg.toFixed(2).replace(".", ",") }]);
+    setSimTicker(ticker);
+  };
+
+  // Buscar CUALQUIER CEDEAR (lo tengas o no) y traer su precio actual (data912)
+  // para simular. Llena un lote con el precio de mercado; vos ponés la cantidad.
+  const [cedPx, setCedPx] = useState({});
+  const [pxTick, setPxTick] = useState(0);
+  const [pxLoading, setPxLoading] = useState(false);
+  useEffect(() => {
+    let m = true; setPxLoading(true);
+    fetch(`/api/data912?type=cedears&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])).then((arr) => {
+      if (!m) return;
+      const px = {};
+      for (const x of arr || []) if (x?.symbol) { const b = Number(x.px_bid), a = Number(x.px_ask), c = Number(x.c); px[String(x.symbol).toUpperCase()] = (b > 0 && a > 0) ? (a + b) / 2 : (c > 0 ? c : null); }
+      setCedPx(px); setPxLoading(false);
+    }).catch(() => { if (m) setPxLoading(false); });
+    return () => { m = false; };
+  }, [pxTick]);
+  const [tq, setTq] = useState("");
+  const [topen, setTopen] = useState(false);
+  const tOptions = useMemo(() => {
+    const all = Object.keys(CEDEAR_CAT).map((k) => ({ sym: k, name: CEDEAR_CAT[k].n }));
+    const term = tq.trim().toUpperCase();
+    const list = term ? all.filter((o) => o.sym.includes(term) || o.name.toUpperCase().includes(term)) : all;
+    return list.sort((a, b) => a.sym.localeCompare(b.sym)).slice(0, 30);
+  }, [tq]);
+  const pickTicker = (sym) => {
+    const p = cedPx[sym];
+    setLots([{ qty: "", price: p != null ? p.toFixed(2).replace(".", ",") : "" }]);
+    setSimTicker(sym);
+    setTopen(false); setTq("");
+  };
+  const fAr = (n) => (n == null ? "—" : `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  const fAr0 = (n) => (n == null ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
+  const fQ = (n) => (n == null ? "—" : n.toLocaleString("es-AR", { maximumFractionDigits: 0 }));
+
+  let totalQty = 0, totalCost = 0;
+  for (const l of lots) { const q = pn(l.qty), p = pn(l.price); if (q && q > 0 && p && p > 0) { totalQty += q; totalCost += q * p; } }
+  const avg = totalQty > 0 ? totalCost / totalQty : null;
+  const dPct = pn(derechos), iPct = pn(iva);
+  const c = (dPct != null && iPct != null) ? (dPct / 100) * (1 + iPct / 100) : 0; // costo por pata (fracción del monto)
+  const breakeven = (avg != null && c < 1) ? (avg * (1 + c)) / (1 - c) : null;
+
+  // Ventas parciales: cada línea consume del remanente; resultado acumulado.
+  const setLot = (i, field, val) => setLots((ls) => ls.map((l, j) => (j === i ? { ...l, [field]: val } : l)));
+  const addLot = () => setLots((ls) => [...ls, { qty: "", price: "" }]);
+  const delLot = (i) => setLots((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+  const setSell = (i, field, val) => setSells((ss) => ss.map((s, j) => (j === i ? { ...s, [field]: val } : s)));
+  const addSell = () => setSells((ss) => [...ss, { qty: "", price: "" }]);
+  const delSell = (i) => setSells((ss) => (ss.length > 1 ? ss.filter((_, j) => j !== i) : ss));
+
+  const lineSim = [];
+  let remaining = totalQty, totalPnl = 0, totalSellComm = 0, totalSold = 0;
+  for (const s of sells) {
+    const q = pn(s.qty), p = pn(s.price);
+    if (q == null || q <= 0 || p == null || p <= 0 || avg == null) { lineSim.push(null); continue; }
+    const n = Math.min(q, Math.max(0, remaining));
+    const proceeds = n * p, sellComm = proceeds * c, costN = n * avg, buyComm = costN * c;
+    const pnl = proceeds - sellComm - costN - buyComm;
+    remaining -= n; totalPnl += pnl; totalSellComm += sellComm; totalSold += n;
+    lineSim.push({ n, pnl });
+  }
+  const hasSells = totalSold > 0;
+
+  const labelStyle = { fontSize: 11, color: C.muted, marginBottom: 6, display: "block" };
+  const inputStyle = { width: "100%", padding: "9px 11px", fontSize: 14, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
+  const tInput = { padding: "6px 9px", fontSize: 13, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
+  const Card = ({ label, value, color, sub, highlight }) => (
+    <div style={{ flex: compact ? "1 1 0" : "1 1 180px", minWidth: compact ? 0 : 165, border: `1px solid ${highlight ? "#f59e0b" : C.border}`, borderRadius: compact ? 6 : 8, padding: compact ? "7px 8px" : "13px 15px", background: highlight ? "rgba(245,158,11,0.06)" : "transparent", boxSizing: "border-box" }}>
+      <div style={{ fontSize: compact ? 8.5 : 11, color: C.dim, marginBottom: compact ? 3 : 7, lineHeight: 1.15 }}>{label}</div>
+      <div style={{ fontSize: compact ? 13 : 21, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
+      {sub && !compact && <div style={{ fontSize: 11, color: color || C.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: compact ? "12px 14px" : "24px 32px", maxWidth: compact ? "none" : 1100, margin: compact ? 0 : "0 auto" }}>
+      {compact ? (
+        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Simulador venta</span>
+          <span style={{ fontSize: 9.5, color: C.dim, letterSpacing: "0.12em", textTransform: "uppercase" }}>midas</span>
+        </div>
+      ) : (
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulador de venta CEDEAR</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
+            Para scalping con compras escalonadas. Cargá tus lotes, simulá vender N papeles a un precio, y mirá el resultado neto de comisiones y el precio mínimo para no perder.
+          </p>
+        </div>
+        {onPopOut && (
+        <button onClick={onPopOut} title="Ventana flotante siempre visible, en paralelo con Matriz (Chrome/Edge)"
+          style={{ flexShrink: 0, padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${pipActive ? "#f59e0b" : C.border}`, background: pipActive ? "rgba(245,158,11,0.12)" : "transparent", color: pipActive ? "#f59e0b" : C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
+          📌 {pipActive ? "Ventana fijada" : "Ventana flotante"}
+        </button>
+        )}
+      </div>
+      )}
+
+      {/* Compras escalonadas */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px" }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
+          <div className="flex items-center" style={{ gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Compras (lotes)</span>
+            {simTicker && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 4, padding: "1px 8px", fontFamily: "'JetBrains Mono', monospace" }}>{simTicker}</span>
+            )}
+          </div>
+          <div className="flex items-center" style={{ gap: 8 }}>
+            {holdings.length > 0 && (
+              <select defaultValue="" onChange={(e) => { if (e.target.value) loadFromCartera(e.target.value); e.target.value = ""; }}
+                style={{ padding: "5px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: C.deep, color: C.muted, borderRadius: 6 }}>
+                <option value="">Cargar de mi cartera…</option>
+                {holdings.map((h) => (
+                  <option key={h.ticker} value={h.ticker}>{h.ticker} · {Math.round(h.qty).toLocaleString("es-AR")} @ {h.avg.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</option>
+                ))}
+              </select>
+            )}
+            <button onClick={addLot} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar lote</button>
+          </div>
+        </div>
+        {/* Buscar cualquier CEDEAR (lo tengas o no) y traer su precio actual. */}
+        <div style={{ position: "relative", marginBottom: 9 }}>
+          <input value={topen ? tq : ""} onFocus={() => { setTopen(true); setTq(""); }} onBlur={() => setTimeout(() => setTopen(false), 150)} onChange={(e) => setTq(e.target.value)}
+            placeholder="🔎 Buscar un CEDEAR para simular (trae precio actual)…" style={{ ...tInput, width: "100%" }} />
+          {topen && tOptions.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 3, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, zIndex: 10, maxHeight: 220, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+              {tOptions.map((o) => (
+                <div key={o.sym} onMouseDown={() => pickTicker(o.sym)} className="flex items-center justify-between"
+                  style={{ padding: "7px 10px", cursor: "pointer", borderBottom: `1px solid ${C.border}`, gap: 8 }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#f59e0b", fontSize: 12, minWidth: 50 }}>{o.sym}</span>
+                  <span style={{ fontSize: 11, color: C.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
+                  <span style={{ fontSize: 11.5, color: cedPx[o.sym] != null ? "#34d399" : C.dim, fontFamily: "'JetBrains Mono', monospace" }}>{cedPx[o.sym] != null ? `$${Math.round(cedPx[o.sym]).toLocaleString("es-AR")}` : "s/precio"}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {lots.map((l, i) => (
+          <div key={i} className="flex items-center" style={{ gap: 8, marginBottom: 5 }}>
+            <span style={{ color: C.dim, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>›</span>
+            <input value={l.qty} onChange={(e) => setLot(i, "qty", dc(e.target.value))} placeholder="cant" inputMode="decimal" style={{ ...tInput, flex: "1 1 110px" }} />
+            <span style={{ color: C.dim, fontSize: 12 }}>@</span>
+            <input value={l.price} onChange={(e) => setLot(i, "price", dc(e.target.value))} placeholder="precio" inputMode="decimal" style={{ ...tInput, flex: "1 1 110px" }} />
+            <button onClick={() => delLot(i)} title="Quitar lote" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 11 }}>✕</button>
+          </div>
+        ))}
+        <div className="flex" style={{ gap: 16, marginTop: 10, fontSize: 12, color: C.muted, flexWrap: "wrap" }}>
+          <span>Total: <b style={{ color: C.text }}>{fQ(totalQty)}</b> papeles</span>
+          <span>Costo: <b style={{ color: C.text }}>{fAr0(totalCost)}</b></span>
+          <span>Precio promedio: <b style={{ color: "#f59e0b" }}>{fAr(avg)}</b></span>
+        </div>
+        <div className="flex items-end" style={{ gap: 12, marginTop: 14, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 120px", minWidth: 110 }}>
+            <label style={labelStyle}>Derechos mercado %</label>
+            <input value={derechos} onChange={(e) => setDerechos(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={{ flex: "1 1 120px", minWidth: 110 }}>
+            <label style={labelStyle}>IVA % (s/ derechos)</label>
+            <input value={iva} onChange={(e) => setIva(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={{ flex: "2 1 240px", fontSize: 10.5, color: C.dim, paddingBottom: 8 }}>
+            Cocos CEDEAR: 0 comisión, solo derechos de mercado + IVA, en cada pata (compra y venta). Costo por pata ≈ {(c * 100).toFixed(3)}%.
+          </div>
+        </div>
+      </div>
+
+      {/* Simular venta — una línea por venta parcial (a distintos precios) */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px", marginTop: compact ? 10 : 14 }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Simular venta <span style={{ fontSize: 10.5, color: C.dim, fontWeight: 400 }}>· una línea por venta parcial</span></span>
+          <div className="flex items-center" style={{ gap: 8 }}>
+            {simTicker && (
+              <span style={{ fontSize: 11.5, color: C.muted, fontFamily: "'JetBrains Mono', monospace" }}>
+                Mercado: <b style={{ color: cedPx[simTicker] != null ? "#34d399" : C.dim }}>{cedPx[simTicker] != null ? `$${cedPx[simTicker].toLocaleString("es-AR", { maximumFractionDigits: 2 })}` : "s/precio"}</b>
+              </span>
+            )}
+            <button onClick={() => setPxTick((t) => t + 1)} disabled={pxLoading} title="Actualizar precio de mercado" style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: pxLoading ? "default" : "pointer", fontSize: 14 }}>↻</button>
+            <button onClick={addSell} style={{ padding: "5px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.accent, borderRadius: 6 }}>+ Agregar venta</button>
+          </div>
+        </div>
+        {sells.map((s, i) => (
+          <div key={i} className="flex items-center" style={{ gap: 8, marginBottom: 5 }}>
+            <span style={{ color: C.dim, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>›</span>
+            <input value={s.qty} onChange={(e) => setSell(i, "qty", dc(e.target.value))} placeholder="papeles" inputMode="decimal" style={{ ...tInput, flex: "1 1 100px" }} />
+            <span style={{ color: C.dim, fontSize: 12 }}>@</span>
+            <input value={s.price} onChange={(e) => setSell(i, "price", dc(e.target.value))} placeholder="precio" inputMode="decimal" style={{ ...tInput, flex: "1 1 100px" }} />
+            <span style={{ flex: "0 0 112px", textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, fontWeight: 700, color: lineSim[i] ? (lineSim[i].pnl >= 0 ? C.green : C.red) : C.dim }}>
+              {lineSim[i] ? fAr0(lineSim[i].pnl) : "—"}
+            </span>
+            <button onClick={() => delSell(i)} title="Quitar venta" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 11 }}>✕</button>
+          </div>
+        ))}
+        {hasSells && (
+          <div className="flex" style={{ gap: 16, marginTop: 9, fontSize: 12, color: C.muted, flexWrap: "wrap" }}>
+            <span>Vendés: <b style={{ color: C.text }}>{fQ(totalSold)}</b> papeles</span>
+            <span>Resultado acumulado: <b style={{ color: totalPnl >= 0 ? C.green : C.red }}>{fAr0(totalPnl)}</b></span>
+          </div>
+        )}
+      </div>
+
+      {/* Resultados */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px", marginTop: compact ? 10 : 14 }}>
+        <div className="flex" style={{ gap: compact ? 10 : 12, flexWrap: "wrap" }}>
+          <Card label="Break-even (no perder)" value={fAr(breakeven)} color="#f59e0b" highlight
+            sub={avg != null ? `+${((breakeven / avg - 1) * 100).toFixed(2)}% sobre tu promedio` : ""} />
+          <Card label="Resultado neto total"
+            value={hasSells ? fAr0(totalPnl) : "—"}
+            color={hasSells ? (totalPnl > 0 ? C.green : totalPnl < 0 ? C.red : C.muted) : C.text}
+            sub={hasSells ? (totalPnl >= 0 ? "ganás" : "perdés") + ` vendiendo ${fQ(totalSold)} papeles` : "cargá ventas"} />
+          <Card label="Comisión total (venta)" value={hasSells ? fAr0(totalSellComm) : "—"} color={C.muted}
+            sub={hasSells ? "derechos + IVA, todas las ventas" : ""} />
+          <Card label={compact ? "Te quedan (pap.)" : "Te quedan"} value={compact ? fQ(hasSells ? remaining : totalQty) : `${fQ(hasSells ? remaining : totalQty)} papeles`} color="#60a5fa"
+            sub={hasSells ? (remaining > 0 ? `costo ${fAr0(remaining * avg)} · prom ${fAr(avg)}` : "cerrás la posición") : ""} />
+        </div>
+        {!compact && (
+        <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
+          Cada línea de venta consume del remanente (ventas parciales). El número a la derecha es el resultado neto de esa venta; las tarjetas suman todo. Break-even = promedio × (1 + costo) ÷ (1 − costo), cubriendo derechos+IVA de compra y venta. Por encima del break-even ganás; por debajo perdés.
+        </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Fundamentals CEDEARs — ratios de balance/resultados de los subyacentes USA
+// (vía /api/fundamentals → Yahoo). Calcula un ÍNDICE compuesto calidad+valuación
+// y rankea de mejor a peor. Marca cuáles tienen CEDEAR operable (feed data912).
+// ═══════════════════════════════════════════════════════════════════════
+const FUND_UNIVERSE = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,AMD,NFLX,AVGO,KO,MELI,JPM,V,MA,WMT,JNJ,PG,XOM,DIS,COIN,PLTR,MSTR,QCOM,MU,INTC,ORCL,CRM,NKE,BA,CRWV,IREN,SNDK,SPCX";
+
+// Tema/exposición editorial (qué mueve a cada nombre). Cae al sector de Yahoo
+// para tickers fuera de esta lista.
+const FUND_THEME = {
+  NVDA: "IA · Semis", AMD: "IA · Semis", AVGO: "IA · Semis", QCOM: "Semis", INTC: "Semis",
+  MU: "Semis · Memoria", SNDK: "Semis · Memoria", LITE: "IA · Óptica",
+  MSFT: "Software · IA", GOOGL: "Internet · IA", META: "Internet · IA", PLTR: "Software · IA",
+  CRM: "Software", ORCL: "Software · Cloud", AMZN: "E-commerce · Cloud", AAPL: "Hardware",
+  NFLX: "Streaming", DIS: "Medios", TSLA: "Autos · EV", MELI: "E-commerce LatAm",
+  CRWV: "IA · Cloud GPU", IREN: "IA · Datacenters", CORZ: "IA · Datacenters", APLD: "IA · Datacenters",
+  COIN: "Cripto", MSTR: "Cripto · BTC", CIFR: "Cripto · Minería",
+  KO: "Consumo", PG: "Consumo", WMT: "Retail", NKE: "Consumo",
+  JNJ: "Salud", JPM: "Bancos", V: "Pagos", MA: "Pagos",
+  XOM: "Petróleo · Energía", BE: "Energía · Fuel cells", BA: "Aeroespacial", SPCX: "Aeroespacial · Espacio",
+};
+
+function FundamentalsModule() {
+  const [input, setInput] = useState(FUND_UNIVERSE);
+  const [tickers, setTickers] = useState(FUND_UNIVERSE);
+  const [data, setData] = useState(null);
+  const [cedearSet, setCedearSet] = useState(null);
+  const [sortKey, setSortKey] = useState("total");
+  const [sortDir, setSortDir] = useState(-1);
+
+  useEffect(() => {
+    let alive = true; setData(null);
+    fetch(`/api/fundamentals?tickers=${encodeURIComponent(tickers)}`)
+      .then((r) => r.json()).then((j) => { if (alive) setData(j.data || []); })
+      .catch(() => { if (alive) setData([]); });
+    return () => { alive = false; };
+  }, [tickers]);
+
+  useEffect(() => {
+    fetch(`/api/data912?type=cedears`).then((r) => r.json())
+      .then((arr) => setCedearSet(new Set((arr || []).map((x) => x.symbol))))
+      .catch(() => setCedearSet(new Set()));
+  }, []);
+
+  // Índice compuesto: percentil de cada métrica dentro del universo (0..1),
+  // dirección según convenga (margen ↑ bueno, P/E ↓ bueno), promediado en dos
+  // ejes (Calidad y Valuación) y combinado 50/50. Lossmaking en P/E o EV/EBITDA
+  // se castiga (sentinel alto). Heurística, NO señal de compra.
+  const scored = useMemo(() => {
+    if (!data || !data.length) return [];
+    const rows = data, N = rows.length;
+    const metric = (getter, dir) => {
+      const vals = rows.map(getter);
+      const valid = vals.map((v, i) => ({ v, i })).filter((o) => o.v != null && isFinite(o.v));
+      const sorted = [...valid].sort((a, b) => a.v - b.v);
+      const pr = new Array(N).fill(0.5);
+      sorted.forEach((o, rank) => { pr[o.i] = valid.length > 1 ? rank / (valid.length - 1) : 0.5; });
+      return pr.map((p) => (dir > 0 ? p : 1 - p));
+    };
+    const fwdAdj = (r) => (r.fwdPE != null && r.fwdPE > 0 ? r.fwdPE : 9999);
+    const evAdj = (r) => (r.evEbitda != null && r.evEbitda > 0 ? r.evEbitda : 9999);
+    const fcfY = (r) => (r.fcf != null && r.mcap ? r.fcf / r.mcap : null);
+    const q = [metric((r) => r.netMrg, 1), metric((r) => r.roe, 1), metric((r) => r.revGrw, 1), metric((r) => r.grossMrg, 1), metric(fcfY, 1), metric((r) => r.de, -1)];
+    const v = [metric(fwdAdj, -1), metric((r) => r.ps, -1), metric(evAdj, -1)];
+    const avg = (arrs, i) => arrs.reduce((s, a) => s + a[i], 0) / arrs.length;
+    const ws = rows.map((r, i) => ({ ...r, fcfY: fcfY(r), calidad: avg(q, i) * 100, valuacion: avg(v, i) * 100, total: (0.5 * avg(q, i) + 0.5 * avg(v, i)) * 100 }));
+    const mr = new Map();
+    [...ws].filter((r) => r.mcap != null).sort((a, b) => b.mcap - a.mcap).forEach((r, i) => mr.set(r.ticker, i + 1));
+    return ws.map((r) => ({ ...r, mcapRank: mr.get(r.ticker) ?? null }));
+  }, [data]);
+
+  const rankByTotal = useMemo(() => {
+    const m = new Map();
+    [...scored].sort((a, b) => b.total - a.total).forEach((r, i) => m.set(r.ticker, i + 1));
+    return m;
+  }, [scored]);
+
+  const sorted = useMemo(() => {
+    const arr = [...scored];
+    arr.sort((a, b) => { const av = a[sortKey], bv = b[sortKey]; if (av == null || !isFinite(av)) return 1; if (bv == null || !isFinite(bv)) return -1; return (av - bv) * sortDir; });
+    return arr;
+  }, [scored, sortKey, sortDir]);
+
+  const fP = (x, d = 0) => (x == null || !isFinite(x) ? "—" : `${(x * 100).toFixed(d)}%`);
+  const fR = (x, d = 1) => (x == null || !isFinite(x) ? "—" : x.toFixed(d));
+  const fBig = (x) => (x == null ? "—" : Math.abs(x) >= 1e12 ? `${(x / 1e12).toFixed(2)}T` : Math.abs(x) >= 1e9 ? `${(x / 1e9).toFixed(1)}B` : `${(x / 1e6).toFixed(0)}M`);
+  const fDE = (x) => (x == null || !isFinite(x) ? "—" : x >= 10 ? x.toFixed(0) : x.toFixed(1));
+  const scColor = (s) => (s >= 66 ? "#34d399" : s >= 45 ? "#fbbf24" : "#f87171");
+
+  const Th = ({ k, label, right, asc }) => (
+    <th onClick={() => { if (sortKey === k) setSortDir((d) => -d); else { setSortKey(k); setSortDir(asc ? 1 : -1); } }}
+      style={{ padding: "7px 9px", fontWeight: 600, cursor: "pointer", textAlign: right ? "right" : "left", whiteSpace: "nowrap", color: sortKey === k ? C.text : C.dim, userSelect: "none" }}>
+      {label}{sortKey === k ? (sortDir < 0 ? " ↓" : " ↑") : ""}
+    </th>
+  );
+  const td = { padding: "6px 9px", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1340, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Fundamentals CEDEARs</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 860 }}>
+            Ratios de balance y resultados de los subyacentes en USA (fuente Yahoo). El <strong>Score</strong> es un índice compuesto que ordena de mejor a peor combinando <strong>Calidad</strong> (margen, ROE, crecimiento, FCF, deuda) y <strong>Valuación</strong> (P/E, P/S, EV/EBITDA: más barato puntúa más alto), 50/50. Es una heurística de ranking relativo dentro de esta lista — <strong>no es una señal de compra</strong>. La columna CEDEAR marca cuáles podés operar localmente.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center" style={{ gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <input value={input} onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") setTickers(input); }}
+          style={{ flex: "1 1 480px", minWidth: 280, padding: "8px 11px", fontSize: 12, background: "transparent", color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, outline: "none", fontVariantNumeric: "tabular-nums" }} />
+        <button onClick={() => setTickers(input)} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.accent}`, background: "transparent", color: C.accent, borderRadius: 6 }}>Consultar</button>
+        <button onClick={() => { setInput(FUND_UNIVERSE); setTickers(FUND_UNIVERSE); }} style={{ padding: "8px 12px", fontSize: 11, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6 }}>Reset</button>
+      </div>
+
+      {!data ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando fundamentals…</div>
+      ) : !sorted.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin datos. Revisá los tickers (deben ser símbolos de acciones USA).</div>
+      ) : (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left", background: "rgba(255,255,255,0.02)" }}>
+              <th style={{ padding: "7px 9px", fontWeight: 600 }}>#</th>
+              <Th k="ticker" label="Ticker" />
+              <th style={{ padding: "7px 9px", fontWeight: 600 }}>Tema / Sector</th>
+              <th style={{ padding: "7px 9px", fontWeight: 600 }}>CEDEAR</th>
+              <Th k="total" label="Score" right />
+              <Th k="calidad" label="Calidad" right />
+              <Th k="valuacion" label="Valuación" right />
+              <Th k="fwdPE" label="P/E fwd" right />
+              <Th k="ps" label="P/S" right />
+              <Th k="evEbitda" label="EV/EBITDA" right />
+              <Th k="netMrg" label="Mrg neto" right />
+              <Th k="revGrw" label="Crec." right />
+              <Th k="roe" label="ROE" right />
+              <Th k="de" label="D/E" right />
+              <Th k="fcfY" label="FCF yield" right />
+              <Th k="mcap" label="Cap." right />
+              <Th k="mcapRank" label="Rank Cap." right asc />
+            </tr></thead>
+            <tbody>
+              {sorted.map((r) => {
+                const hasCedear = cedearSet ? cedearSet.has(r.ticker) : null;
+                return (
+                  <tr key={r.ticker} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ ...td, color: C.dim }}>{rankByTotal.get(r.ticker)}</td>
+                    <td style={{ ...td, color: C.text, fontWeight: 600 }}>{r.ticker}</td>
+                    <td style={{ ...td, color: C.muted, whiteSpace: "nowrap" }}>{FUND_THEME[r.ticker] || r.sector || "—"}</td>
+                    <td style={td}>{hasCedear == null ? "" : hasCedear ? <span style={{ color: "#34d399", fontWeight: 700 }}>✓</span> : <span style={{ color: C.dim }}>—</span>}</td>
+                    <td style={{ ...td, textAlign: "right", fontWeight: 700, color: scColor(r.total) }}>{r.total.toFixed(0)}</td>
+                    <td style={{ ...td, textAlign: "right", color: scColor(r.calidad) }}>{r.calidad.toFixed(0)}</td>
+                    <td style={{ ...td, textAlign: "right", color: scColor(r.valuacion) }}>{r.valuacion.toFixed(0)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.fwdPE != null && r.fwdPE < 0 ? "#f87171" : C.muted }}>{r.fwdPE != null && r.fwdPE < 0 ? "neg" : fR(r.fwdPE)}</td>
+                    <td style={{ ...td, textAlign: "right", color: C.muted }}>{fR(r.ps)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.evEbitda != null && r.evEbitda < 0 ? "#f87171" : C.muted }}>{r.evEbitda != null && r.evEbitda < 0 ? "neg" : fR(r.evEbitda)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.netMrg != null && r.netMrg < 0 ? "#f87171" : C.muted }}>{fP(r.netMrg)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.revGrw != null && r.revGrw < 0 ? "#f87171" : "#34d399" }}>{fP(r.revGrw)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.roe != null && r.roe < 0 ? "#f87171" : C.muted }}>{fP(r.roe)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.de != null && r.de >= 200 ? "#f87171" : C.muted }}>{fDE(r.de)}</td>
+                    <td style={{ ...td, textAlign: "right", color: r.fcfY != null && r.fcfY < 0 ? "#f87171" : C.muted }}>{fP(r.fcfY, 1)}</td>
+                    <td style={{ ...td, textAlign: "right", color: C.muted }}>{fBig(r.mcap)}</td>
+                    <td style={{ ...td, textAlign: "right", color: C.dim }}>{r.mcapRank ? `#${r.mcapRank}` : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.55, maxWidth: 900 }}>
+        Clic en cualquier columna para reordenar. El Score rankea <strong>relativo a esta lista</strong>: un 90 no significa "barato en absoluto", significa "de los mejores de este grupo en calidad+precio". P/E y EV/EBITDA negativos (empresa en pérdida) se castigan en el índice. Datos del subyacente en USD; los CEDEARs replican esto con un ratio de conversión. No es recomendación de inversión.
+      </p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Calculadora — Monte Carlo. Simula miles de secuencias de operaciones con
+// el perfil de la estrategia (win rate, ganancia/pérdida, sizing) y muestra
+// la DISTRIBUCIÓN de resultados: percentiles, drawdown, prob de pérdida y
+// de ruina. El complemento de Kelly: Kelly da el sizing, esto la cola de riesgo.
+// ═══════════════════════════════════════════════════════════════════════
+function MonteCarloModule() {
+  const [win, setWin] = useState(50);
+  const [gain, setGain] = useState(20);
+  const [loss, setLoss] = useState(10);
+  const [trades, setTrades] = useState(100);
+  const [frac, setFrac] = useState(20);
+  const [capital, setCapital] = useState(1000);
+
+  const sim = useMemo(() => {
+    const W = Math.min(1, Math.max(0, win / 100)), g = gain / 100, l = loss / 100, f = Math.max(0, frac / 100);
+    const N = 5000, T = Math.max(1, Math.min(1000, Math.round(trades)));
+    const finals = [], dds = [];
+    for (let s = 0; s < N; s++) {
+      let eq = 1, peak = 1, dd = 0;
+      for (let t = 0; t < T; t++) {
+        eq *= Math.random() < W ? (1 + f * g) : (1 - f * l);
+        if (eq < 0.001) { eq = 0.001; break; }
+        if (eq > peak) peak = eq;
+        const d = eq / peak - 1; if (d < dd) dd = d;
+      }
+      finals.push(eq); dds.push(dd);
+    }
+    finals.sort((a, b) => a - b); dds.sort((a, b) => a - b);
+    const pc = (arr, p) => arr[Math.floor(p / 100 * arr.length)];
+    return {
+      finals,
+      p5: pc(finals, 5), p25: pc(finals, 25), p50: pc(finals, 50), p75: pc(finals, 75), p95: pc(finals, 95),
+      probLoss: finals.filter((x) => x < 1).length / N * 100,
+      probRuin: finals.filter((x) => x < 0.5).length / N * 100,
+      ddMed: pc(dds, 50) * 100, ddBad: pc(dds, 5) * 100,
+    };
+  }, [win, gain, loss, trades, frac]);
+
+  const kellyF = (() => { const W = win / 100, g = gain / 100, l = loss / 100; if (g <= 0 || l <= 0) return null; return (W / l - (1 - W) / g); })();
+  const fUsd = (x) => `US$ ${Math.round(x * capital).toLocaleString("es-AR")}`;
+  const fMul = (x) => `${x.toFixed(2)}×`;
+  const Field = ({ label, value, setValue, suffix, step = 1, hint }) => (
+    <div style={{ flex: "1 1 130px", minWidth: 120 }}>
+      <label style={{ display: "block", fontSize: 11, color: C.dim, marginBottom: 5 }}>{label}</label>
+      <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.border}`, borderRadius: 6 }}>
+        <input type="number" value={value} step={step} onChange={(e) => setValue(e.target.value === "" ? 0 : Number(e.target.value))}
+          style={{ flex: 1, padding: "8px 10px", fontSize: 14, background: "transparent", color: C.text, border: "none", outline: "none", width: "100%", fontVariantNumeric: "tabular-nums" }} />
+        {suffix && <span style={{ padding: "0 10px", fontSize: 12, color: C.dim }}>{suffix}</span>}
+      </div>
+      {hint && <div style={{ fontSize: 9.5, color: C.dim, marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
+  const Res = ({ label, value, color }) => (
+    <div style={{ flex: "1 1 130px", minWidth: 120, border: `1px solid ${C.border}`, borderRadius: 8, padding: "11px 13px" }}>
+      <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 5 }}>{label}</div>
+      <div style={{ fontSize: 17, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+    </div>
+  );
+
+  // histograma: bins del retorno final (× capital), recortado a [0, p95×1.2]
+  const hist = (() => {
+    const top = Math.max(sim.p95 * 1.2, 1.5), BINS = 24;
+    const counts = new Array(BINS).fill(0);
+    for (const v of sim.finals) { const b = Math.min(BINS - 1, Math.floor(v / top * BINS)); if (b >= 0) counts[b]++; }
+    const max = Math.max(...counts, 1);
+    return { counts, max, top, oneBin: Math.round(1 / top * BINS) };
+  })();
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 960, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulación Monte Carlo</h1>
+      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 18px 0", maxWidth: 720 }}>
+        Un backtest da un solo resultado; este simula <strong>5.000 caminos posibles</strong> con el perfil de tu estrategia y te muestra el abanico real: cuánto en un año típico, cuánto en uno malo, y qué probabilidad de perder o fundirte. Cargá los números (del paper o de tu historial).
+      </p>
+
+      <div className="flex" style={{ gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <Field label="Operaciones ganadoras" value={win} setValue={setWin} suffix="%" />
+        <Field label="Ganancia media" value={gain} setValue={setGain} suffix="%" hint="por acierto" />
+        <Field label="Pérdida media" value={loss} setValue={setLoss} suffix="%" hint="por error" />
+        <Field label="Cantidad de operaciones" value={trades} setValue={setTrades} hint="horizonte" />
+        <Field label="% del capital por operación" value={frac} setValue={setFrac} suffix="%" hint={kellyF != null ? `Kelly completo: ${(kellyF * 100).toFixed(0)}%` : ""} />
+        <Field label="Capital" value={capital} setValue={setCapital} suffix="$" step={1000} />
+      </div>
+
+      <div className="flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <Res label="Peor 5% (p5)" value={fUsd(sim.p5)} color={sim.p5 < 1 ? "#f87171" : C.text} />
+        <Res label="Mediana (típico)" value={fUsd(sim.p50)} color={sim.p50 >= 1 ? "#34d399" : "#f87171"} />
+        <Res label="Mejor 5% (p95)" value={fUsd(sim.p95)} color="#34d399" />
+        <Res label="Prob. de perder" value={`${sim.probLoss.toFixed(0)}%`} color={sim.probLoss > 50 ? "#f87171" : "#fbbf24"} />
+        <Res label="Prob. de fundirse (−50%)" value={`${sim.probRuin.toFixed(0)}%`} color={sim.probRuin > 10 ? "#f87171" : "#fbbf24"} />
+        <Res label="Peor caída típica" value={`${sim.ddMed.toFixed(0)}%`} color="#fbbf24" />
+      </div>
+
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 10 }}>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Distribución del capital final (de {fUsd(1)}) · cada barra = cuántos de los 5.000 caminos terminaron ahí</div>
+        <svg viewBox={`0 0 ${hist.counts.length * 16} 120`} preserveAspectRatio="none" style={{ width: "100%", height: 120, display: "block" }}>
+          {hist.counts.map((c, i) => (
+            <rect key={i} x={i * 16 + 1} y={120 - (c / hist.max) * 110} width={14} height={(c / hist.max) * 110}
+              fill={i < hist.oneBin ? "#f87171" : "#34d399"} opacity="0.85" />
+          ))}
+          <line x1={hist.oneBin * 16} x2={hist.oneBin * 16} y1="0" y2="120" stroke={C.dim} strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.dim, marginTop: 4 }}>
+          <span>$0</span><span style={{ color: C.muted }}>← rojo: terminás perdiendo · capital inicial · verde: ganás →</span><span>{fUsd(hist.top)}</span>
+        </div>
+      </div>
+
+      <p style={{ fontSize: 11.5, color: C.dim, margin: "16px 2px 0", lineHeight: 1.6, maxWidth: 760 }}>
+        <strong style={{ color: C.muted }}>Cómo leerlo:</strong> la <strong>mediana</strong> es el año típico (no el del backtest, que suele ser uno bueno). Mirá la <strong>prob. de perder</strong> y la <strong>de fundirte</strong> antes que el mejor caso. Subí el <strong>% del capital por operación</strong> y vas a ver cómo se estira todo: más arriba posible, pero también más prob. de ruina — por eso Kelly recomienda usar una fracción, no todo. Ojo: esto asume que el futuro se parece al perfil que cargaste; no anticipa un cambio de régimen.
+      </p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Semáforo del Merval — señal macro de timing para acciones argentinas.
+// Combina riesgo país (nivel + tendencia), brecha cambiaria e inflación en
+// un veredicto risk-on / cautela / risk-off. El riesgo país manda: el rally
+// argentino arranca cuando comprime y se derrumba cuando se dispara.
+// ═══════════════════════════════════════════════════════════════════════
+function SemaforoMervalModule() {
+  const macro = useMacroIndicators();
+  const [extra, setExtra] = useState(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [dol, rpSerie] = await Promise.all([
+          fetch("/api/dolares").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+          fetch("https://api.argentinadatos.com/v1/finanzas/indices/riesgo-pais").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        ]);
+        let brecha = null, ccl = null, oficial = null;
+        if (Array.isArray(dol)) {
+          const find = (c) => { const x = dol.find((y) => (y.casa || "").toLowerCase() === c); return x ? Number(x.venta) : null; };
+          ccl = find("contadoconliqui"); oficial = find("mayorista") || find("oficial");
+          if (ccl && oficial) brecha = (ccl / oficial - 1) * 100;
+        }
+        let rpTrend = null;
+        if (Array.isArray(rpSerie) && rpSerie.length > 21) {
+          const lv = Number(rpSerie[rpSerie.length - 1].valor), pv = Number(rpSerie[rpSerie.length - 21].valor);
+          if (lv && pv) rpTrend = (lv / pv - 1) * 100;
+        }
+        if (mounted) setExtra({ brecha, ccl, oficial, rpTrend });
+      } catch { if (mounted) setExtra({}); }
+    })();
+    return () => { mounted = false; };
+  }, [tick]);
+
+  const d = macro?.data || {};
+  const rp = d.riesgoPais, infl = d.inflacionMensual;
+  const brecha = extra?.brecha, rpTrend = extra?.rpTrend;
+
+  // Señales: +1 favorable, 0 neutro, −1 adverso.
+  let rpSig = rp == null ? 0 : rp < 700 ? 1 : rp > 1100 ? -1 : 0;
+  if (rpTrend != null) { if (rpTrend < -5) rpSig = Math.min(1, rpSig + 1); if (rpTrend > 8) rpSig = Math.max(-1, rpSig - 1); }
+  const brSig = brecha == null ? 0 : brecha < 15 ? 1 : brecha > 40 ? -1 : 0;
+  const inflSig = infl == null ? 0 : infl < 3 ? 1 : infl > 6 ? -1 : 0;
+  const score = 2 * rpSig + 1.5 * brSig + inflSig;
+  const verdict = score >= 1.5 ? "on" : score <= -1.5 ? "off" : "neutral";
+  const V = {
+    on: { c: "#34d399", t: "RISK-ON", s: "Viento de cola para acciones argentinas" },
+    neutral: { c: "#fbbf24", t: "CAUTELA", s: "Señales mixtas — selectivo, sin sobreexponerse" },
+    off: { c: "#f87171", t: "RISK-OFF", s: "Momento de cuidarse — el riesgo manda sobre el precio" },
+  }[verdict];
+
+  const loading = macro?.loading && !macro?.data;
+  const sigColor = (s) => (s > 0 ? "#34d399" : s < 0 ? "#f87171" : "#fbbf24");
+  const sigTxt = (s) => (s > 0 ? "favorable" : s < 0 ? "adverso" : "neutro");
+  const fmtN = (n, dec = 0) => (n == null ? "—" : Number(n).toLocaleString("es-AR", { minimumFractionDigits: dec, maximumFractionDigits: dec }));
+
+  const Comp = ({ label, value, sub, sig }) => (
+    <div style={{ flex: "1 1 200px", minWidth: 180, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", borderLeft: `3px solid ${sigColor(sig)}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ fontSize: 11, color: C.dim }}>{label}</span>
+        <span style={{ fontSize: 9.5, color: sigColor(sig), fontWeight: 700, textTransform: "uppercase" }}>{sigTxt(sig)}</span>
+      </div>
+      <div style={{ fontSize: 19, fontWeight: 600, color: C.text, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1000, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Semáforo del Merval</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 720 }}>
+            Señal de timing para acciones argentinas. El mercado entero sube cuando el riesgo país comprime y el dólar se calma, y se derrumba cuando pasa lo contrario — más que cualquier gráfico de la acción. Esto combina esos drivers macro en un solo veredicto.
+          </p>
+        </div>
+        <button onClick={() => setTick((t) => t + 1)} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>Actualizar</button>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando indicadores macro…</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 18, border: `1px solid ${V.c}`, borderRadius: 10, padding: "18px 22px", background: `${V.c}10`, marginBottom: 16 }}>
+            <div style={{ width: 54, height: 54, borderRadius: "50%", background: V.c, flex: "0 0 auto", boxShadow: `0 0 18px ${V.c}55` }} />
+            <div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: V.c, letterSpacing: "0.02em" }}>{V.t}</div>
+              <div style={{ fontSize: 13, color: C.text, marginTop: 2 }}>{V.s}</div>
+            </div>
+          </div>
+
+          <div className="flex" style={{ gap: 10, flexWrap: "wrap" }}>
+            <Comp label="Riesgo país" sig={rpSig} value={`${fmtN(rp)} pb`} sub={rpTrend != null ? `${rpTrend >= 0 ? "▲" : "▼"} ${Math.abs(rpTrend).toFixed(1)}% en ~1 mes` : "el driver #1"} />
+            <Comp label="Brecha cambiaria (CCL/oficial)" sig={brSig} value={brecha != null ? `${brecha.toFixed(1)}%` : "—"} sub={extra?.ccl ? `CCL $${fmtN(extra.ccl)} · mayorista $${fmtN(extra.oficial)}` : "estrés del dólar"} />
+            <Comp label="Inflación mensual" sig={inflSig} value={infl != null ? `${infl.toFixed(1)}%` : "—"} sub="bajando = alivio" />
+          </div>
+
+          <p style={{ fontSize: 11.5, color: C.dim, margin: "18px 2px 0", lineHeight: 1.6, maxWidth: 780 }}>
+            <strong style={{ color: C.muted }}>Cómo leerlo:</strong> es una guía de <strong>cuándo</strong> el contexto acompaña para estar en acciones AR, no de <strong>qué</strong> acción comprar. <span style={{ color: "#34d399" }}>Verde</span> = el macro empuja a favor (probamos que en acciones AR el timing técnico no sirve, pero el timing macro sí tiene sentido). <span style={{ color: "#fbbf24" }}>Amarillo</span> = mixto, ser selectivo. <span style={{ color: "#f87171" }}>Rojo</span> = el riesgo manda, cuidarse. El riesgo país pesa más que el resto porque es el que históricamente prende y apaga el rally argentino.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Calculadora — Criterio de Kelly. Fracción óptima del capital a arriesgar
+// para maximizar el crecimiento geométrico, dado el win rate y el tamaño
+// medio de aciertos/errores. f* = W/l − (1−W)/g  (g,l fraccionales).
+// ═══════════════════════════════════════════════════════════════════════
+function KellyCalcModule() {
+  const [win, setWin] = useState(50);     // % de operaciones ganadoras
+  const [gain, setGain] = useState(20);   // ganancia media por acierto (%)
+  const [loss, setLoss] = useState(10);   // pérdida media por error (%)
+  const [capital, setCapital] = useState(10000);
+
+  const W = Math.min(1, Math.max(0, win / 100));
+  const g = gain / 100, l = loss / 100;
+  const valid = g > 0 && l > 0;
+  const f = valid ? W / l - (1 - W) / g : null;        // Kelly completo (fracción)
+  const edge = valid ? W * g - (1 - W) * l : null;      // retorno esperado por unidad
+  const R = valid ? g / l : null;                       // ratio ganancia/pérdida
+  const fPos = f != null ? Math.max(0, f) : 0;
+  const half = fPos / 2;
+  const fmtPct = (x) => `${(x * 100).toFixed(1)}%`;
+  const fmtUsd = (x) => `$${Math.round(x).toLocaleString("es-AR")}`;
+
+  const Field = ({ label, value, setValue, suffix, step = 1, hint }) => (
+    <div style={{ flex: "1 1 150px", minWidth: 130 }}>
+      <label style={{ display: "block", fontSize: 11, color: C.dim, marginBottom: 5 }}>{label}</label>
+      <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.border}`, borderRadius: 6, overflow: "hidden" }}>
+        <input type="number" value={value} step={step} onChange={(e) => setValue(e.target.value === "" ? 0 : Number(e.target.value))}
+          style={{ flex: 1, padding: "8px 10px", fontSize: 14, background: "transparent", color: C.text, border: "none", outline: "none", width: "100%", fontVariantNumeric: "tabular-nums" }} />
+        {suffix && <span style={{ padding: "0 10px", fontSize: 12, color: C.dim }}>{suffix}</span>}
+      </div>
+      {hint && <div style={{ fontSize: 9.5, color: C.dim, marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
+  const Res = ({ label, value, sub, color, big }) => (
+    <div style={{ flex: big ? "1 1 220px" : "1 1 160px", minWidth: big ? 200 : 150, border: `1px solid ${big ? C.accent : C.border}`, borderRadius: 8, padding: "14px 16px", background: big ? "rgba(124,156,255,0.05)" : "transparent" }}>
+      <div style={{ fontSize: 11, color: C.dim, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: big ? 26 : 20, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 920, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Criterio de Kelly</h1>
+      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 18px 0", maxWidth: 720 }}>
+        Cuánto del capital conviene arriesgar en cada operación para que el capital crezca lo más rápido posible a largo plazo, sin riesgo de fundirse. Cargá tus números (de un backtest o tu historial real) y te dice la fracción óptima.
+      </p>
+
+      <div className="flex" style={{ gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+        <Field label="Operaciones ganadoras" value={win} setValue={setWin} suffix="%" hint="de cada 100, cuántas ganás" />
+        <Field label="Ganancia media (acierto)" value={gain} setValue={setGain} suffix="%" hint="cuánto ganás cuando acertás" />
+        <Field label="Pérdida media (error)" value={loss} setValue={setLoss} suffix="%" hint="cuánto perdés cuando errás" />
+        <Field label="Capital" value={capital} setValue={setCapital} suffix="$" step={1000} />
+      </div>
+
+      {!valid ? (
+        <div style={{ padding: 16, border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 13 }}>Cargá ganancia y pérdida mayores a cero.</div>
+      ) : f <= 0 ? (
+        <div style={{ padding: 16, border: `1px solid #f87171`, borderRadius: 8, color: "#f87171", fontSize: 13 }}>
+          <strong>Sin ventaja.</strong> Con estos números la estrategia no tiene edge (Kelly da {fmtPct(f)}). No conviene arriesgar capital: a la larga perdés. Necesitás más aciertos, ganancias más grandes o pérdidas más chicas.
+        </div>
+      ) : (
+        <div className="flex" style={{ gap: 12, flexWrap: "wrap" }}>
+          <Res big label="Medio Kelly (recomendado)" value={fmtPct(half)} sub={`${fmtUsd(Math.min(1, half) * capital)} de ${fmtUsd(capital)}`} color="#34d399" />
+          <Res label="Kelly completo" value={fmtPct(fPos)} sub={fPos > 1 ? "más de 100% = con apalancamiento" : "máximo teórico (volátil)"} color={C.text} />
+          <Res label="Ganancia esperada por operación" value={fmtPct(edge)} sub="sobre lo arriesgado" color={edge >= 0 ? "#34d399" : "#f87171"} />
+          <Res label="Relación ganancia / pérdida" value={`${R.toFixed(2)} : 1`} sub="cuánto ganás por cada $1 que arriesgás" color={C.muted} />
+        </div>
+      )}
+
+      <p style={{ fontSize: 11.5, color: C.dim, margin: "18px 2px 0", lineHeight: 1.6, maxWidth: 760 }}>
+        <strong style={{ color: C.muted }}>Cómo usarlo:</strong> el <strong>Kelly completo</strong> es el máximo matemático, pero es muy volátil y castiga fuerte cualquier error en tus números — casi nadie lo usa entero. En la práctica se opera <strong>medio Kelly o menos</strong>: casi todo el crecimiento, con la mitad de los sustos. Si Kelly da más de 100%, significa que el edge es tan bueno que sugeriría apalancarse — ahí conviene capear a lo que tengas y no estirarse. Y si da negativo, el mensaje es claro: no hay con qué, no arriesgues.
+      </p>
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // Paper CEDEARs — momentum en acciones USA (= CEDEARs), en 3 cadencias de
