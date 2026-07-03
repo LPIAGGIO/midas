@@ -251,6 +251,7 @@ const NAV = [
     children: [
       { id: "libro-operaciones", label: "Libro de operaciones", icon: BookOpen },
       { id: "pnl-instrumento", label: "P&L por Instrumento", icon: BarChart3 },
+      { id: "reporte-cartera", label: "Reporte de cartera", icon: FileText },
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
       { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
     ],
@@ -1144,6 +1145,8 @@ function MidasApp() {
               <RemTcModule key={active} />
             ) : active === "pnl-instrumento" ? (
               <PnlPorInstrumentoModule key={active} />
+            ) : active === "reporte-cartera" ? (
+              <ReporteCarteraModule key={active} />
             ) : active === "ejecucion-cedear" ? (
               <EjecucionInteligenteModule key={active} />
             ) : active === "calc-cedear-fv" ? (
@@ -26843,6 +26846,155 @@ function PaperCedearsModule() {
 // agarra los ajustes de "Conciliacion caja vs Cocos..." (que mencionan
 // "derechos+IVA" en el texto pero son plugs, no una comisión suelta).
 const PNL_COMISION_RE = /^(comisi[oó]n|arancel|derechos?|iva|gastos)\b/i;
+
+/* ─────────────── Reporte de cartera (estilo Balanz) ───────────────
+ * Tabla compacta tipo Excel: la cartera ABIERTA de contado agrupada por
+ * tipo, con PPC, precio actual, valor inicial (costo), valor actual,
+ * rendimiento ($ y %), días de tenencia (DPT) y anualizado (TNA). Misma
+ * contabilidad que la cartera (consolidatePositions, conventions ya
+ * aplicadas). Futuros/cauciones van en P&L por Instrumento.
+ */
+function ReporteCarteraModule() {
+  const { positions, loading } = useUserPositions();
+  const bondPrices = useBondPrices()?.prices || {};
+  const stockPrices = useStockPrices()?.prices || {};
+  const fciPrices = useFciPrices(positions)?.prices || {};
+  const futureTickers = useMemo(
+    () => Array.from(new Set((positions || []).filter((p) => p.instrument_type === "future").map((p) => (p.ticker || "").toUpperCase().trim()))),
+    [positions]
+  );
+  const futurePrices = useFuturePrices(futureTickers)?.prices || {};
+
+  const CONTADO = ["bond_ars", "bond_usd", "on", "stock", "cedear", "fci"];
+  const TYPE_LABEL = { bond_ars: "Bonos", bond_usd: "Bonos USD", on: "Obligaciones Negociables", stock: "Acciones", cedear: "CEDEARs", fci: "FCI" };
+
+  const { groups, totActual, totInicial } = useMemo(() => {
+    const empty = { groups: [], totActual: 0, totInicial: 0 };
+    if (!positions?.length) return empty;
+    let cons = [];
+    try { cons = consolidatePositions(positions.filter((p) => p.instrument_type !== "caucion"), bondPrices, futurePrices, fciPrices, stockPrices) || []; }
+    catch (e) { console.warn("[ReporteCartera] consolidate:", e); return empty; }
+    const rows = [];
+    for (const g of cons) {
+      if (!g || g.isClosed || !CONTADO.includes(g.instrument_type)) continue;
+      if (!g.netQty || g.netQty <= 0) continue;
+      const vAct = Number(g.valueAtMarket), vIni = Number(g.valueAtCost);
+      if (!Number.isFinite(vAct) || !Number.isFinite(vIni)) continue;
+      const rend = vAct - vIni;
+      const rendPct = Math.abs(vIni) > 0 ? (rend / Math.abs(vIni)) * 100 : null;
+      const dias = g.firstDate ? Math.max(1, Math.round((Date.now() - new Date(g.firstDate + "T00:00:00").getTime()) / 86400000)) : null;
+      const tna = (rendPct != null && dias) ? (rendPct * 365) / dias : null;
+      rows.push({ type: g.instrument_type, ticker: (g.ticker || "").split("|")[0], currency: g.currency || "ARS", cant: g.netQty, ppc: g.ppp, precio: g.currentPrice, vIni, vAct, rend, rendPct, dias, tna });
+    }
+    const totActual = rows.reduce((s, r) => s + r.vAct, 0);
+    const totInicial = rows.reduce((s, r) => s + r.vIni, 0);
+    const byType = {};
+    for (const r of rows) (byType[r.type] = byType[r.type] || []).push(r);
+    const groups = CONTADO.filter((t) => byType[t]).map((t) => {
+      const items = byType[t].sort((a, b) => b.vAct - a.vAct);
+      return { type: t, label: TYPE_LABEL[t] || t, items, subAct: items.reduce((s, r) => s + r.vAct, 0), subIni: items.reduce((s, r) => s + r.vIni, 0), subRend: items.reduce((s, r) => s + r.rend, 0) };
+    });
+    return { groups, totActual, totInicial };
+  }, [positions, bondPrices, futurePrices, fciPrices, stockPrices]);
+
+  const totRend = totActual - totInicial;
+  const fM = (n) => (n == null || !Number.isFinite(n) ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
+  const fP = (n) => (n == null || !Number.isFinite(n) ? "—" : Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 4 }));
+  const fQ = (n) => (n == null ? "—" : Number(n).toLocaleString("es-AR", { maximumFractionDigits: 2 }));
+  const fPct = (n) => (n == null || !Number.isFinite(n) ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}%`);
+  const colRend = (n) => (n == null ? C.dim : n >= 0 ? C.green : C.red);
+
+  const downloadCsv = () => {
+    const head = "tipo;ticker;moneda;cantidad;ppc;precio_actual;valor_inicial;valor_actual;rendimiento;rend_pct;dias;tna_pct;pct_cartera";
+    const lines = [];
+    for (const g of groups) for (const r of g.items)
+      lines.push([TYPE_LABEL[r.type] || r.type, r.ticker, r.currency, r.cant, r.ppc ?? "", r.precio ?? "", r.vIni.toFixed(2), r.vAct.toFixed(2), r.rend.toFixed(2), r.rendPct != null ? r.rendPct.toFixed(2) : "", r.dias ?? "", r.tna != null ? r.tna.toFixed(2) : "", totActual > 0 ? ((r.vAct / totActual) * 100).toFixed(2) : ""].join(";"));
+    const blob = new Blob(["﻿" + [head, ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `midas-reporte-cartera-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  };
+
+  const th = { padding: "6px 8px", fontSize: 10, fontWeight: 600, color: C.dim, textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" };
+  const td = { padding: "5px 8px", fontSize: 11.5, color: C.text, borderBottom: `1px solid ${C.border}`, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+  const num = { ...td, textAlign: "right" };
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1280, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Reporte de cartera</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
+            Tu cartera abierta de contado agrupada por tipo, estilo Balanz: costo (V. inicial), valor a mercado, rendimiento, días de tenencia (DPT) y anualizado (TNA). Precios en vivo.
+          </p>
+        </div>
+        <button onClick={downloadCsv} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>↓ Exportar CSV</button>
+      </div>
+
+      {loading && !groups.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando cartera…</div>
+      ) : !groups.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin posiciones abiertas de contado.</div>
+      ) : (
+        <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+            <thead>
+              <tr>
+                <th style={{ ...th, textAlign: "left" }}>Ticker</th>
+                <th style={{ ...th, textAlign: "right" }}>Cant.</th>
+                <th style={{ ...th, textAlign: "right" }}>PPC</th>
+                <th style={{ ...th, textAlign: "right" }}>P. actual</th>
+                <th style={{ ...th, textAlign: "right" }}>V. inicial</th>
+                <th style={{ ...th, textAlign: "right" }}>V. actual</th>
+                <th style={{ ...th, textAlign: "right" }}>Rdo.</th>
+                <th style={{ ...th, textAlign: "right" }}>% R.</th>
+                <th style={{ ...th, textAlign: "right" }}>DPT</th>
+                <th style={{ ...th, textAlign: "right" }}>TNA</th>
+                <th style={{ ...th, textAlign: "right" }}>% Cart.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.flatMap((g) => [
+                <tr key={g.type + "_hdr"} style={{ background: C.deep }}>
+                  <td colSpan={4} style={{ ...td, fontFamily: "inherit", fontWeight: 700, color: C.text }}>{g.label} <span style={{ color: C.dim, fontWeight: 400 }}>({g.items.length})</span></td>
+                  <td style={{ ...num, fontWeight: 700 }}>{fM(g.subIni)}</td>
+                  <td style={{ ...num, fontWeight: 700 }}>{fM(g.subAct)}</td>
+                  <td style={{ ...num, fontWeight: 700, color: colRend(g.subRend) }}>{fM(g.subRend)}</td>
+                  <td colSpan={4} style={num}></td>
+                </tr>,
+                ...g.items.map((r) => (
+                  <tr key={r.type + "|" + r.ticker}>
+                    <td style={{ ...td, fontWeight: 600, color: "#f59e0b" }}>{r.ticker}</td>
+                    <td style={num}>{fQ(r.cant)}</td>
+                    <td style={num}>{fP(r.ppc)}</td>
+                    <td style={num}>{fP(r.precio)}</td>
+                    <td style={num}>{fM(r.vIni)}</td>
+                    <td style={num}>{fM(r.vAct)}</td>
+                    <td style={{ ...num, color: colRend(r.rend) }}>{fM(r.rend)}</td>
+                    <td style={{ ...num, color: colRend(r.rend) }}>{fPct(r.rendPct)}</td>
+                    <td style={num}>{r.dias ?? "—"}</td>
+                    <td style={{ ...num, color: colRend(r.tna) }}>{fPct(r.tna)}</td>
+                    <td style={num}>{totActual > 0 ? ((r.vAct / totActual) * 100).toFixed(1) + "%" : "—"}</td>
+                  </tr>
+                )),
+              ])}
+              <tr style={{ background: C.deep, borderTop: `2px solid ${C.border}` }}>
+                <td colSpan={4} style={{ ...td, fontFamily: "inherit", fontWeight: 700 }}>TOTAL</td>
+                <td style={{ ...num, fontWeight: 700 }}>{fM(totInicial)}</td>
+                <td style={{ ...num, fontWeight: 700 }}>{fM(totActual)}</td>
+                <td style={{ ...num, fontWeight: 700, color: colRend(totRend) }}>{fM(totRend)}</td>
+                <td style={{ ...num, fontWeight: 700, color: colRend(totRend) }}>{totInicial > 0 ? fPct((totRend / totInicial) * 100) : "—"}</td>
+                <td colSpan={3} style={num}></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, maxWidth: 900 }}>
+        Solo posiciones de contado abiertas (bonos, ONs, acciones, CEDEARs, FCI); futuros y cauciones están en P&L por Instrumento. Un ticker en Cocos + IOL se muestra combinado. DPT = días desde la primera compra; TNA = rendimiento total anualizado (% R. × 365 / DPT); % Cart. sobre el valor a mercado total.
+      </p>
+    </div>
+  );
+}
 
 function PnlPorInstrumentoModule() {
   const { positions, loading, error } = useUserPositions();
