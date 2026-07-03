@@ -26754,6 +26754,7 @@ function PaperCedearsModule() {
   const [tick, setTick] = useState(0);
   const [sel, setSel] = useState("m21");
   const [px, setPx] = useState({ ced: {}, usa: {} });
+  const [btRange, setBtRange] = useState(1);   // rango del gráfico backtest: 1/3/5/10 años
 
   useEffect(() => {
     let mounted = true;
@@ -26765,14 +26766,19 @@ function PaperCedearsModule() {
           if (error || !d || !d.length) break;
           eqAll = eqAll.concat(d); if (d.length < 1000) break; from += 1000;
         }
-        const [h, tr, stt] = await Promise.all([
+        let btAll = [], bfrom = 0;
+        for (;;) {
+          const { data: d, error } = await supabase.from("paper_cedear_backtest").select("d,variant,equity,bh_equity").order("d", { ascending: true }).range(bfrom, bfrom + 999);
+          if (error || !d || !d.length) break;
+          btAll = btAll.concat(d); if (d.length < 1000) break; bfrom += 1000;
+        }
+        const [h, stt] = await Promise.all([
           supabase.from("paper_cedear_holdings").select("*"),
-          supabase.from("paper_cedear_trades").select("*").order("d", { ascending: false }).limit(300),
           supabase.from("paper_cedear_state").select("id,last_date,last_rebal"),
         ]);
         if (!mounted) return;
-        setData({ eq: eqAll, holdings: h.data || [], tr: tr.data || [], state: stt.data || [] });
-      } catch { if (mounted) setData({ eq: [], holdings: [], tr: [], state: [] }); }
+        setData({ eq: eqAll, holdings: h.data || [], state: stt.data || [], backtest: btAll });
+      } catch { if (mounted) setData({ eq: [], holdings: [], state: [], backtest: [] }); }
     })();
     return () => { mounted = false; };
   }, [tick]);
@@ -26874,7 +26880,36 @@ function PaperCedearsModule() {
 
   const selVar = perVar.find((p) => p.id === sel) || perVar[perVar.length - 1];
   const selHoldings = data.holdings.filter((h) => (h.variant || "m21") === sel);
-  const selTrades = data.tr.filter((t) => (t.variant || "m21") === sel).slice(0, 25);
+
+  // Backtest 10 años (tabla paper_cedear_backtest): curva por variante, filtrada
+  // por rango (1/3/5/10 años) y rebasada a 1000 al inicio de la ventana.
+  const VMETA = Object.fromEntries(CEDEAR_VARIANTS.map((v) => [v.id, v]));
+  const btByVar = {};
+  for (const r of data.backtest || []) (btByVar[r.variant] = btByVar[r.variant] || []).push(r);
+  for (const k in btByVar) btByVar[k].sort((a, b) => (a.d < b.d ? -1 : 1));
+  const btRef = btByVar.m21 || btByVar.iol21 || Object.values(btByVar)[0] || [];
+  const btLastD = btRef.length ? btRef[btRef.length - 1].d : null;
+  const btFromD = btLastD ? new Date(new Date(btLastD + "T00:00:00").getTime() - btRange * 365.25 * 86400000).toISOString().slice(0, 10) : null;
+  const btLines = [], btRet = {};
+  if (btFromD) {
+    for (const v of ["w5", "w10", "m21", "iol21"]) {
+      const rows = (btByVar[v] || []).filter((r) => r.d >= btFromD);
+      if (rows.length < 2) continue;
+      const base = Number(rows[0].equity) || 1;
+      btLines.push({ label: VMETA[v]?.label || v, color: VMETA[v]?.color || C.accent, data: rows.map((r) => ({ fecha: r.d, valor: (Number(r.equity) / base) * 1000 })) });
+      btRet[v] = Number(rows[rows.length - 1].equity) / base - 1;
+    }
+    const bhRows = (btByVar.m21 || []).filter((r) => r.d >= btFromD);
+    if (bhRows.length >= 2) { const b0 = Number(bhRows[0].bh_equity) || 1; btLines.push({ label: "Comprar y holdear", color: C.dim, data: bhRows.map((r) => ({ fecha: r.d, valor: (Number(r.bh_equity) / b0) * 1000 })) }); btRet.bh = Number(bhRows[bhRows.length - 1].bh_equity) / b0 - 1; }
+  }
+  // CAGR de ~9 años (iol21) para las proyecciones — mucho más defendible que el ritmo de 13 meses.
+  const btCagr = (() => {
+    const rows = btByVar.iol21 || [];
+    if (rows.length < 250) return null;
+    const first = Number(rows[0].equity) || 1000, last = Number(rows[rows.length - 1].equity);
+    const yrs = (new Date(rows[rows.length - 1].d) - new Date(rows[0].d)) / (365.25 * 86400000);
+    return yrs > 0 ? (Math.pow(last / first, 1 / yrs) - 1) * 100 : null;
+  })();
 
   // Picks actuales del momentum (variante iol21, que es la que LP replica en real).
   const paperPicks = new Set((data.holdings || []).filter((h) => (h.variant || "m21") === "iol21").map((h) => (h.ticker || "").toUpperCase()));
@@ -26910,6 +26945,7 @@ function PaperCedearsModule() {
   const iolVar = perVar.find((p) => p.id === "iol21");
   const rateMon = iolVar && iolVar.days ? iolVar.monPct : null;
   const rateAnn = iolVar && iolVar.days ? iolVar.annPct : null;
+  const momRate = btCagr != null ? btCagr : rateAnn;   // ritmo del momentum: CAGR del backtest 10 años si hay, si no el de 13 meses
   // Estado del momentum: última rotación y próxima (~21 ruedas ≈ 30 días) — para que no parezca viejo.
   const iolState = (data.state || []).find((s) => s.id === "iol21");
   const lastRebal = iolState?.last_rebal || null;
@@ -27031,10 +27067,10 @@ function PaperCedearsModule() {
                     );
                   })}
                 </div>
-                {usdTotal > 0 && (rateAnn != null || retAnn != null) && (
+                {usdTotal > 0 && (momRate != null || retAnn != null) && (
                   <div style={{ fontSize: 10.5, color: C.dim, marginTop: 7 }}>
                     Proyección a 1 año sobre {fUsd(usdTotal)}:
-                    {rateAnn != null && <> teórico (ritmo momentum {fPct(rateAnn)}/año) <strong style={{ color: rateAnn >= 0 ? "#34d399" : "#f87171" }}>{rateAnn >= 0 ? "+" : "−"}{fUsd(Math.abs(usdTotal * rateAnn / 100))}</strong></>}
+                    {momRate != null && <> teórico (momentum {fPct(momRate)}/año) <strong style={{ color: momRate >= 0 ? "#34d399" : "#f87171" }}>{momRate >= 0 ? "+" : "−"}{fUsd(Math.abs(usdTotal * momRate / 100))}</strong></>}
                     {retAnn != null && <> · real (tu ritmo {fPct(retAnn)}/año) <strong style={{ color: retAnn >= 0 ? "#34d399" : "#f87171" }}>{retAnn >= 0 ? "+" : "−"}{fUsd(Math.abs(usdTotal * retAnn / 100))}</strong></>}
                   </div>
                 )}
@@ -27053,15 +27089,15 @@ function PaperCedearsModule() {
       )}
 
       {/* Proyección a 10 años siguiendo momentum: US$ 1.000, tu Cocos y tu IOL */}
-      {rateAnn != null && proj10Scenarios.length > 0 && (
+      {momRate != null && proj10Scenarios.length > 0 && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Proyección a 10 años · siguiendo momentum</h3>
-            <span style={{ fontSize: 10, color: C.dim }}>capitaliza el ritmo del momentum ({fPct(rateAnn)}/año) 10 años</span>
+            <span style={{ fontSize: 10, color: C.dim }}>capitaliza {btCagr != null ? "el CAGR del backtest" : "el ritmo del paper"} ({fPct(momRate)}/año) 10 años</span>
           </div>
           <div className="flex" style={{ gap: 12, flexWrap: "wrap", marginTop: 8 }}>
             {proj10Scenarios.map((s) => {
-              const end = proj10(s.start, rateAnn);
+              const end = proj10(s.start, momRate);
               const endReal = proj10(s.start, 15);
               return (
                 <div key={s.label} style={{ flex: "1 1 220px", minWidth: 200, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
@@ -27069,53 +27105,50 @@ function PaperCedearsModule() {
                   <div style={{ fontSize: 11, color: C.muted }}>hoy {fUsd(s.start)}</div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: "#34d399", fontVariantNumeric: "tabular-nums", marginTop: 4 }}>{fUsd(end)}</div>
                   <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>×{Math.round(end / s.start).toLocaleString("es-AR")} en 10 años</div>
-                  <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>a ~15%/año realista: {fUsd(endReal)}</div>
+                  <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>a ~15%/año conservador: {fUsd(endReal)}</div>
                 </div>
               );
             })}
           </div>
           <div style={{ fontSize: 10, color: C.dim, marginTop: 10, lineHeight: 1.5, maxWidth: 820 }}>
-            Extrapolación teórica: capitaliza el ritmo histórico del paper (~{fPct(rateAnn)}/año) por 10 años. <strong style={{ color: "#fbbf24" }}>Insostenible a esa tasa</strong> — ningún activo rinde ~85%/año una década. El número <strong style={{ color: C.muted }}>a ~15%/año</strong> (ritmo realista de largo plazo para momentum) es la referencia sobria. No es garantía ni recomendación.
+            Capitaliza {btCagr != null ? `el CAGR del backtest de ~9 años (${fPct(momRate)}/año)` : "el ritmo del paper"} por 10 años. <strong style={{ color: "#fbbf24" }}>Ojo:</strong> ese backtest cae en una década muy alcista de las tecnológicas y con sesgo de supervivencia del universo — es optimista. El número <strong style={{ color: C.muted }}>a ~15%/año</strong> (más conservador) es la cota prudente. No es garantía ni recomendación.
           </div>
         </div>
       )}
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Evolución del capital · las 3 cadencias</h3>
-          <span style={{ fontSize: 10, color: C.dim }}>{Math.max(0, ...perVar.map((p) => p.days))} días</span>
-        </div>
-        <BcraMultiLine lines={lines} height={240} fmtY={fUsd} />
-      </div>
-
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: "0 0 8px 0" }}>Últimos movimientos · {selVar.label}</h3>
-        {selTrades.length === 0 ? <div style={{ color: C.dim, fontSize: 12 }}>Sin movimientos todavía.</div> : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left" }}>
-                <th style={{ padding: "7px 10px", fontWeight: 600 }}>Fecha</th>
-                <th style={{ padding: "7px 10px", fontWeight: 600 }}>Acción</th>
-                <th style={{ padding: "7px 10px", fontWeight: 600 }}>Movimiento</th>
-                <th style={{ padding: "7px 10px", fontWeight: 600, textAlign: "right" }}>Precio</th>
-              </tr></thead>
-              <tbody>
-                {selTrades.map((t) => (
-                  <tr key={t.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <td style={{ padding: "6px 10px", color: C.muted }}>{fmtD(t.d)}</td>
-                    <td style={{ padding: "6px 10px", color: C.text, fontWeight: 600 }}>{t.ticker}</td>
-                    <td style={{ padding: "6px 10px", color: t.side === "buy" ? "#34d399" : "#f87171", fontWeight: 600 }}>{t.side === "buy" ? "ENTRA" : "SALE"}</td>
-                    <td style={{ padding: "6px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.muted }}>US$ {Number(t.price).toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Backtest histórico · US$ 1.000 → hoy</h3>
+            <span style={{ fontSize: 10, color: C.dim }}>momentum vs comprar y holdear, rebasado a 1.000 al inicio de la ventana</span>
           </div>
+          <div className="flex items-center" style={{ gap: 4 }}>
+            {[1, 3, 5, 10].map((y) => (
+              <button key={y} onClick={() => setBtRange(y)}
+                style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${btRange === y ? C.accent : C.border}`, background: btRange === y ? "rgba(124,156,255,0.12)" : "transparent", color: btRange === y ? C.accent : C.muted, borderRadius: 6 }}>
+                {y}A
+              </button>
+            ))}
+          </div>
+        </div>
+        {btLines.length ? (
+          <>
+            <div className="flex" style={{ gap: 14, flexWrap: "wrap", marginBottom: 6, fontSize: 11 }}>
+              {["m21", "iol21", "w10", "w5", "bh"].filter((k) => btRet[k] != null).map((k) => (
+                <span key={k} style={{ color: k === "bh" ? C.dim : (VMETA[k]?.color || C.muted), fontWeight: 600 }}>
+                  {k === "bh" ? "Hold" : (VMETA[k]?.label || k)} {btRet[k] >= 0 ? "+" : ""}{(btRet[k] * 100).toFixed(0)}%
+                </span>
+              ))}
+            </div>
+            <BcraMultiLine lines={btLines} height={260} fmtY={fUsd} />
+          </>
+        ) : (
+          <div style={{ padding: 30, textAlign: "center", color: C.dim, fontSize: 12 }}>Sin datos de backtest todavía.</div>
         )}
       </div>
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
-        La hipótesis a validar: rotar más seguido (semanal) capta antes los giros pero paga más fee; rotar más lento (mensual) gasta menos pero reacciona tarde. El paper deja que el dinero teórico decida. Validado en backtest a cadencia mensual (bate a holdear con Sharpe ~1,7) pero sobre un período alcista; el momentum sufre en mercados sin tendencia. Histórico retrospectivo; en vivo el worker rota cuando le toca a cada variante. No opera plata real.
+        El backtest de 10 años corre el mismo motor de momentum sobre precios reales (Yahoo, 30 acciones USA). Bate a comprar y holdear, pero cae en una década muy alcista de las tecnológicas y con sesgo de supervivencia del universo — el momentum sufre en mercados laterales o bajistas. Las tarjetas de arriba son el forward-test EN VIVO (~13 meses desde el 15/06); el gráfico es el histórico. Simulación, no opera plata real ni es recomendación.
       </p>
     </div>
   );
