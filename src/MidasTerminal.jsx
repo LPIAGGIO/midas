@@ -26762,13 +26762,14 @@ function PaperCedearsModule() {
           if (error || !d || !d.length) break;
           eqAll = eqAll.concat(d); if (d.length < 1000) break; from += 1000;
         }
-        const [h, tr] = await Promise.all([
+        const [h, tr, stt] = await Promise.all([
           supabase.from("paper_cedear_holdings").select("*"),
           supabase.from("paper_cedear_trades").select("*").order("d", { ascending: false }).limit(300),
+          supabase.from("paper_cedear_state").select("id,last_date,last_rebal"),
         ]);
         if (!mounted) return;
-        setData({ eq: eqAll, holdings: h.data || [], tr: tr.data || [] });
-      } catch { if (mounted) setData({ eq: [], holdings: [], tr: [] }); }
+        setData({ eq: eqAll, holdings: h.data || [], tr: tr.data || [], state: stt.data || [] });
+      } catch { if (mounted) setData({ eq: [], holdings: [], tr: [], state: [] }); }
     })();
     return () => { mounted = false; };
   }, [tick]);
@@ -26777,17 +26778,23 @@ function PaperCedearsModule() {
   // Sirve para comparar lo que tenés de verdad contra los picks del momentum.
   const { positions } = useUserPositions();
   const realByBroker = useMemo(() => {
-    const map = {};
+    const map = {}; // broker -> ticker -> { qty, buyVal, buyQty, first }
     for (const p of positions || []) {
       if (p.instrument_type !== "cedear" || !p.ticker) continue;
       const br = p.broker || "manual";
       const tk = p.ticker.toUpperCase();
-      const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
-      (map[br] = map[br] || {})[tk] = (map[br][tk] || 0) + q;
+      const q = Number(p.quantity) || 0;
+      const price = Number(p.entry_price) || 0;
+      const e = ((map[br] = map[br] || {})[tk] = map[br][tk] || { qty: 0, buyVal: 0, buyQty: 0, first: null });
+      if (p.operation_type === "sell") e.qty -= q;
+      else { e.qty += q; e.buyVal += q * price; e.buyQty += q; }
+      if (p.entry_date && (!e.first || p.entry_date < e.first)) e.first = p.entry_date;
     }
     const out = [];
     for (const [br, m] of Object.entries(map)) {
-      const items = Object.entries(m).filter(([, q]) => q > 1e-9).map(([ticker, qty]) => ({ ticker, qty })).sort((a, b) => (a.ticker < b.ticker ? -1 : 1));
+      const items = Object.entries(m).filter(([, e]) => e.qty > 1e-9)
+        .map(([ticker, e]) => ({ ticker, qty: e.qty, avgCost: e.buyQty > 0 ? e.buyVal / e.buyQty : 0, first: e.first }))
+        .sort((a, b) => (a.ticker < b.ticker ? -1 : 1));
       if (items.length) out.push({ broker: br, items });
     }
     const order = { cocos: 0, iol: 1, manual: 2 };
@@ -26870,22 +26877,40 @@ function PaperCedearsModule() {
   const paperPicks = new Set((data.holdings || []).filter((h) => (h.variant || "m21") === "iol21").map((h) => (h.ticker || "").toUpperCase()));
   const BROKER_LABEL = { cocos: "Cocos", iol: "IOL", manual: "Manual" };
 
-  // Dolarizar cada tenencia: valor US$ = qty × precio ARS del CEDEAR ÷ CCL de referencia.
-  const usdOf = (tk, qty) => {
-    const c = px.ced[(tk || "").toUpperCase()]; if (!c || !cclRef) return null;
+  // Precio ARS mid del CEDEAR (data912) para valuar y calcular el rendimiento real.
+  const arsMidOf = (tk) => {
+    const c = px.ced[(tk || "").toUpperCase()]; if (!c) return null;
     const b = Number(c.px_bid), a = Number(c.px_ask), last = Number(c.c);
-    const m = (b > 0 && a > 0) ? (a + b) / 2 : (last > 0 ? last : null);
-    return m ? (qty * m) / cclRef : null;
+    return (b > 0 && a > 0) ? (a + b) / 2 : (last > 0 ? last : null);
   };
+  const daysSince = (iso) => (iso ? Math.max(1, Math.round((Date.now() - new Date(iso + "T00:00:00").getTime()) / 86400000)) : null);
   const realEnriched = realByBroker.map((g) => {
-    const items = g.items.map((it) => ({ ...it, usd: usdOf(it.ticker, it.qty) }));
-    return { ...g, items, usdTotal: items.reduce((s, it) => s + (it.usd || 0), 0) };
+    const items = g.items.map((it) => {
+      const mid = arsMidOf(it.ticker);
+      const marketArs = mid ? it.qty * mid : null;
+      const costArs = it.qty * it.avgCost;
+      const usd = (marketArs != null && cclRef) ? marketArs / cclRef : null;
+      const retPct = (marketArs != null && costArs > 0) ? (marketArs / costArs - 1) * 100 : null;
+      return { ...it, usd, marketArs, costArs, retPct };
+    });
+    const mSum = items.reduce((s, it) => s + (it.marketArs || 0), 0);
+    const cSum = items.reduce((s, it) => s + (it.costArs || 0), 0);
+    const usdTotal = (cclRef && mSum) ? mSum / cclRef : 0;
+    const retPct = cSum > 0 ? (mSum / cSum - 1) * 100 : null;   // rendimiento real de esa cartera (en pesos)
+    const wDays = cSum > 0 ? items.reduce((s, it) => s + (it.costArs || 0) * (daysSince(it.first) || 0), 0) / cSum : null;
+    // anualizar solo con ≥7 días de tenencia (anualizar 1-2 días daría un número absurdo)
+    const retAnn = (retPct != null && wDays >= 7) ? (retPct * 365) / wDays : null;
+    return { ...g, items, usdTotal, retPct, retAnn };
   });
   const usdGrand = realEnriched.reduce((s, g) => s + g.usdTotal, 0);
-  // Ritmo del momentum que replicás (iol21) para proyectar cuánto rendiría lo que tenés.
+  // Ritmo TEÓRICO = el del paper que replicás (iol21). Para proyectar teórico vs real.
   const iolVar = perVar.find((p) => p.id === "iol21");
   const rateMon = iolVar && iolVar.days ? iolVar.monPct : null;
   const rateAnn = iolVar && iolVar.days ? iolVar.annPct : null;
+  // Estado del momentum: última rotación y próxima (~21 ruedas ≈ 30 días) — para que no parezca viejo.
+  const iolState = (data.state || []).find((s) => s.id === "iol21");
+  const lastRebal = iolState?.last_rebal || null;
+  const nextRebalApprox = lastRebal ? new Date(new Date(lastRebal + "T00:00:00").getTime() + 30 * 86400000).toISOString().slice(0, 10) : null;
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
@@ -26936,7 +26961,17 @@ function PaperCedearsModule() {
         {selHoldings.length === 0 ? <span style={{ color: C.dim }}>en cash</span> : selHoldings.map((h) => (
           <span key={h.ticker} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: C.text, background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.25)" }}>{h.ticker}</span>
         ))}
-        {selVar.liveStart && <span style={{ marginLeft: "auto", fontSize: 10, color: C.dim }}>en vivo desde {fmtD(selVar.liveStart)} · histórico simulado antes</span>}
+        {(() => {
+          const ss = (data.state || []).find((s) => s.id === sel);
+          const nx = ss?.last_rebal ? new Date(new Date(ss.last_rebal + "T00:00:00").getTime() + 30 * 86400000).toISOString().slice(0, 10) : null;
+          if (!ss?.last_rebal && !selVar.liveStart) return null;
+          return (
+            <span style={{ marginLeft: "auto", fontSize: 10, color: C.dim }}>
+              {ss?.last_rebal ? `rebalanceado ${fmtD(ss.last_rebal)} · próximo ~${fmtD(nx)}` : ""}
+              {selVar.liveStart ? `${ss?.last_rebal ? " · " : ""}en vivo desde ${fmtD(selVar.liveStart)}` : ""}
+            </span>
+          );
+        })()}
       </div>
 
       {/* Tenencia REAL de CEDEARs, por broker — para comparar contra los picks del momentum */}
@@ -26962,13 +26997,14 @@ function PaperCedearsModule() {
               ? <span style={{ fontSize: 11, color: C.muted }}>total <strong style={{ color: C.text }}>{fUsd(usdGrand)}</strong></span>
               : (paperPicks.size > 0 && <span style={{ fontSize: 10, color: C.dim }}>verde = está en el pick actual del momentum (iol21)</span>)}
           </div>
-          {realEnriched.map(({ broker, items, usdTotal }) => {
+          {realEnriched.map(({ broker, items, usdTotal, retPct, retAnn }) => {
             const nMatch = items.filter((it) => paperPicks.has(it.ticker)).length;
             return (
-              <div key={broker} style={{ marginTop: 10 }}>
+              <div key={broker} style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                 <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 6 }}>
                   {BROKER_LABEL[broker] || broker}
-                  <span style={{ color: C.dim, fontWeight: 400 }}> · {items.length} {items.length === 1 ? "papel" : "papeles"}{usdTotal > 0 ? ` · ${fUsd(usdTotal)}` : ""}{paperPicks.size ? ` · ${nMatch}/${items.length} en el momentum` : ""}</span>
+                  <span style={{ color: C.dim, fontWeight: 400 }}> · {items.length} {items.length === 1 ? "papel" : "papeles"}{usdTotal > 0 ? ` · ${fUsd(usdTotal)}` : ""}{paperPicks.size ? ` · ${nMatch}/${items.length} en momentum` : ""}</span>
+                  {retPct != null && <span style={{ color: retPct >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}> · real {fPct(retPct)}{retAnn != null ? ` (${fPct(retAnn)}/año)` : ""}</span>}
                 </div>
                 <div className="flex" style={{ gap: 6, flexWrap: "wrap" }}>
                   {items.map((it) => {
@@ -26977,39 +27013,25 @@ function PaperCedearsModule() {
                       <span key={it.ticker} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: hit ? "#34d399" : C.text, background: hit ? "rgba(52,211,153,0.10)" : "rgba(255,255,255,0.03)", border: `1px solid ${hit ? "rgba(52,211,153,0.28)" : C.border}` }}>
                         {it.ticker} <span style={{ color: C.dim, fontWeight: 400 }}>×{Math.round(it.qty).toLocaleString("es-AR")}</span>
                         {it.usd != null && <span style={{ color: C.dim, fontWeight: 400 }}> · {fUsd(it.usd)}</span>}
+                        {it.retPct != null && <span style={{ color: it.retPct >= 0 ? "#34d399" : "#f87171", fontWeight: 400 }}> · {fPct(it.retPct)}</span>}
                       </span>
                     );
                   })}
                 </div>
+                {usdTotal > 0 && (rateAnn != null || retAnn != null) && (
+                  <div style={{ fontSize: 10.5, color: C.dim, marginTop: 7 }}>
+                    Proyección a 1 año sobre {fUsd(usdTotal)}:
+                    {rateAnn != null && <> teórico (ritmo momentum {fPct(rateAnn)}/año) <strong style={{ color: rateAnn >= 0 ? "#34d399" : "#f87171" }}>{rateAnn >= 0 ? "+" : "−"}{fUsd(Math.abs(usdTotal * rateAnn / 100))}</strong></>}
+                    {retAnn != null && <> · real (tu ritmo {fPct(retAnn)}/año) <strong style={{ color: retAnn >= 0 ? "#34d399" : "#f87171" }}>{retAnn >= 0 ? "+" : "−"}{fUsd(Math.abs(usdTotal * retAnn / 100))}</strong></>}
+                  </div>
+                )}
               </div>
             );
           })}
 
-          {/* Proyección: cuánto rendiría lo que tenés si el momentum mantiene su ritmo */}
-          {usdGrand > 0 && rateMon != null && (
-            <div style={{ marginTop: 12, border: `1px solid ${C.border}`, borderRadius: 6, background: "rgba(255,255,255,0.02)", padding: "10px 12px" }}>
-              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.55 }}>
-                Si el momentum (<strong style={{ color: "#f59e0b" }}>iol21</strong>) mantiene su ritmo de <strong style={{ color: rateMon >= 0 ? "#34d399" : "#f87171" }}>{fPct(rateMon)}/mes</strong> ({fPct(rateAnn)}/año), tus <strong style={{ color: C.text }}>{fUsd(usdGrand)}</strong> en CEDEARs rendirían:
-              </div>
-              <div className="flex" style={{ gap: 18, marginTop: 8, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em" }}>En 1 mes</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: rateMon >= 0 ? "#34d399" : "#f87171", fontVariantNumeric: "tabular-nums" }}>{rateMon >= 0 ? "+" : "−"}{fUsd(Math.abs(usdGrand * rateMon / 100))}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em" }}>En 1 año</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: rateAnn >= 0 ? "#34d399" : "#f87171", fontVariantNumeric: "tabular-nums" }}>{rateAnn >= 0 ? "+" : "−"}{fUsd(Math.abs(usdGrand * rateAnn / 100))}</div>
-                </div>
-                <div style={{ alignSelf: "center", fontSize: 10, color: C.dim, maxWidth: 320 }}>
-                  Proyección lineal al ritmo histórico del paper — no es garantía. Rendimiento pasado no asegura el futuro.
-                </div>
-              </div>
-            </div>
-          )}
-
           {paperPicks.size > 0 && (
-            <div style={{ fontSize: 10.5, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>
-              La variante que replicás en real es <strong style={{ color: "#f59e0b" }}>iol21</strong> (mensual vía IOL). Picks actuales del momentum: {[...paperPicks].sort().join(", ") || "—"}. Los papeles que no están en verde ya salieron del Top-8 — candidatos a rotar en el próximo rebalanceo. Valores en US$ al CCL de referencia{cclRef ? ` (${Math.round(cclRef).toLocaleString("es-AR")})` : ""}.
+            <div style={{ fontSize: 10.5, color: C.dim, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}`, lineHeight: 1.5 }}>
+              <strong style={{ color: "#f59e0b" }}>Momentum actual (iol21)</strong>: {[...paperPicks].sort().join(", ") || "en cash"}{lastRebal ? ` · rebalanceado ${fmtD(lastRebal)}, próximo ~${fmtD(nextRebalApprox)}` : ""}. El Top-8 no cambió desde entonces (tendencia persistente), por eso el último movimiento es más viejo — la estrategia igual se re-evalúa cada 21 ruedas. Los papeles que no están en verde ya salieron del Top-8. <strong style={{ color: C.text }}>Teórico</strong> = ritmo histórico del paper; <strong style={{ color: C.text }}>real</strong> = rendimiento de tu propia cartera (en pesos), ambos anualizados y solo como proyección (no garantía). Valores en US$ al CCL de referencia{cclRef ? ` (${Math.round(cclRef).toLocaleString("es-AR")})` : ""}.
             </div>
           )}
           </>
