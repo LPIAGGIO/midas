@@ -27003,8 +27003,9 @@ function PaperCedearsModule() {
               <div key={broker} style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                 <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 6 }}>
                   {BROKER_LABEL[broker] || broker}
-                  <span style={{ color: C.dim, fontWeight: 400 }}> · {items.length} {items.length === 1 ? "papel" : "papeles"}{usdTotal > 0 ? ` · ${fUsd(usdTotal)}` : ""}{paperPicks.size ? ` · ${nMatch}/${items.length} en momentum` : ""}</span>
+                  <span style={{ color: C.dim, fontWeight: 400 }}> · {items.length} {items.length === 1 ? "papel" : "papeles"}{paperPicks.size ? ` · ${nMatch}/${items.length} en momentum` : ""}</span>
                   {retPct != null && <span style={{ color: retPct >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}> · real {fPct(retPct)}{retAnn != null ? ` (${fPct(retAnn)}/año)` : ""}</span>}
+                  {usdTotal > 0 && <span style={{ color: C.text, fontWeight: 700 }}> · {fUsd(usdTotal)}</span>}
                 </div>
                 <div className="flex" style={{ gap: 6, flexWrap: "wrap" }}>
                   {items.map((it) => {
