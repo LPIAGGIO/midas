@@ -24411,12 +24411,20 @@ function RemTcModule() {
   const [show, setShow] = useState({ real: true, rem: true, fut: true, corr: true, dlr: true });
   const chartSeries = useMemo(() => {
     if (!model) return null;
+    // Empalmar la curva de futuros DLR al último dato real, igual que las
+    // proyecciones REM (fut/corr) — sin esto la curva de futuros arranca
+    // flotando en el primer contrato y queda un hueco contra el real.
+    let dlr = show.dlr ? dlrSeries : [];
+    if (dlr.length && model.tv.real?.length) {
+      const lastReal = model.tv.real[model.tv.real.length - 1];
+      if (lastReal && dlr[0].time > lastReal.time) dlr = [lastReal, ...dlr];
+    }
     return {
       real: show.real ? model.tv.real : [],
       rem: show.rem ? model.tv.rem : [],
       fut: show.fut ? model.tv.fut : [],
       corr: show.corr ? model.tv.corr : [],
-      dlr: show.dlr ? dlrSeries : [],
+      dlr,
       remLabel: model.tv.remLabel,
     };
   }, [model, show, dlrSeries]);
