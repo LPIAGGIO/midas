@@ -26940,8 +26940,22 @@ function PaperCedearsModule() {
       </div>
 
       {/* Tenencia REAL de CEDEARs, por broker — para comparar contra los picks del momentum */}
-      {realByBroker.length > 0 && (
+      {(realByBroker.length > 0 || paperPicks.size > 0) && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
+          {realByBroker.length === 0 ? (
+            <>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Momentum ideal · lo que tendrías siguiendo el paper</h3>
+              <div style={{ fontSize: 11, color: C.muted, margin: "6px 0 10px", lineHeight: 1.5 }}>
+                Todavía no tenés CEDEARs cargados en tu cartera. Esta es la canasta que sugiere el momentum hoy (variante <strong style={{ color: "#f59e0b" }}>iol21</strong>, mensual vía IOL). Cargá tus posiciones para comparar contra lo tuyo y verlo dolarizado.
+              </div>
+              <div className="flex" style={{ gap: 6, flexWrap: "wrap" }}>
+                {[...paperPicks].sort().map((tk) => (
+                  <span key={tk} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: "#34d399", background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.28)" }}>{tk}</span>
+                ))}
+              </div>
+            </>
+          ) : (
+          <>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Tu tenencia real de CEDEARs · por broker</h3>
             {usdGrand > 0
@@ -26997,6 +27011,8 @@ function PaperCedearsModule() {
             <div style={{ fontSize: 10.5, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>
               La variante que replicás en real es <strong style={{ color: "#f59e0b" }}>iol21</strong> (mensual vía IOL). Picks actuales del momentum: {[...paperPicks].sort().join(", ") || "—"}. Los papeles que no están en verde ya salieron del Top-8 — candidatos a rotar en el próximo rebalanceo. Valores en US$ al CCL de referencia{cclRef ? ` (${Math.round(cclRef).toLocaleString("es-AR")})` : ""}.
             </div>
+          )}
+          </>
           )}
         </div>
       )}
