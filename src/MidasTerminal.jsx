@@ -26914,6 +26914,15 @@ function PaperCedearsModule() {
   const iolState = (data.state || []).find((s) => s.id === "iol21");
   const lastRebal = iolState?.last_rebal || null;
   const nextRebalApprox = lastRebal ? new Date(new Date(lastRebal + "T00:00:00").getTime() + 30 * 86400000).toISOString().slice(0, 10) : null;
+  // Proyección a 10 años siguiendo momentum: capital inicial × (1 + ritmo)^10.
+  const cocosUSD = realEnriched.find((g) => g.broker === "cocos")?.usdTotal || 0;
+  const iolUSD = realEnriched.find((g) => g.broker === "iol")?.usdTotal || 0;
+  const proj10 = (start, r) => (r != null && start > 0 ? start * Math.pow(1 + r / 100, 10) : null);
+  const proj10Scenarios = [
+    { label: "Momentum · entrada US$ 1.000", start: 1000 },
+    { label: "Como tu cartera de Cocos", start: cocosUSD },
+    { label: "Como tu cartera de IOL", start: iolUSD },
+  ].filter((s) => s.start > 0);
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
@@ -26960,7 +26969,7 @@ function PaperCedearsModule() {
       </div>
 
       <div className="flex items-center" style={{ gap: 8, margin: "14px 2px 0", flexWrap: "wrap", fontSize: 12 }}>
-        <span style={{ color: C.dim }}>Cartera {selVar.label} ({selHoldings.length}):</span>
+        <span style={{ color: C.dim }}>Cartera actual momentum <span style={{ color: C.muted }}>· {selVar.label}</span> ({selHoldings.length}):</span>
         {selHoldings.length === 0 ? <span style={{ color: C.dim }}>en cash</span> : selHoldings.map((h) => (
           <span key={h.ticker} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: C.text, background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.25)" }}>{h.ticker}</span>
         ))}
@@ -27040,6 +27049,34 @@ function PaperCedearsModule() {
           )}
           </>
           )}
+        </div>
+      )}
+
+      {/* Proyección a 10 años siguiendo momentum: US$ 1.000, tu Cocos y tu IOL */}
+      {rateAnn != null && proj10Scenarios.length > 0 && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Proyección a 10 años · siguiendo momentum</h3>
+            <span style={{ fontSize: 10, color: C.dim }}>capitaliza el ritmo del momentum ({fPct(rateAnn)}/año) 10 años</span>
+          </div>
+          <div className="flex" style={{ gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+            {proj10Scenarios.map((s) => {
+              const end = proj10(s.start, rateAnn);
+              const endReal = proj10(s.start, 15);
+              return (
+                <div key={s.label} style={{ flex: "1 1 220px", minWidth: 200, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 4 }}>{s.label}</div>
+                  <div style={{ fontSize: 11, color: C.muted }}>hoy {fUsd(s.start)}</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: "#34d399", fontVariantNumeric: "tabular-nums", marginTop: 4 }}>{fUsd(end)}</div>
+                  <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>×{Math.round(end / s.start).toLocaleString("es-AR")} en 10 años</div>
+                  <div style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>a ~15%/año realista: {fUsd(endReal)}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 10, lineHeight: 1.5, maxWidth: 820 }}>
+            Extrapolación teórica: capitaliza el ritmo histórico del paper (~{fPct(rateAnn)}/año) por 10 años. <strong style={{ color: "#fbbf24" }}>Insostenible a esa tasa</strong> — ningún activo rinde ~85%/año una década. El número <strong style={{ color: C.muted }}>a ~15%/año</strong> (ritmo realista de largo plazo para momentum) es la referencia sobria. No es garantía ni recomendación.
+          </div>
         </div>
       )}
 
