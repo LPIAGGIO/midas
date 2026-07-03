@@ -27307,6 +27307,15 @@ function DividendosModule() {
   const fUsd = (n, d = 2) => (n == null || !isFinite(n) ? "—" : `US$ ${Number(n).toLocaleString("es-AR", { minimumFractionDigits: d, maximumFractionDigits: d })}`);
   const fPct = (n) => (n == null || !isFinite(n) ? "—" : `${(n * 100).toFixed(2)}%`);
   const fDate = (unix) => { if (!unix) return null; const d = new Date(unix * 1000); return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCFullYear()).slice(2)}`; };
+  // Yahoo suele dar la fecha del ÚLTIMO ciclo; si ya pasó, la proyectamos al
+  // próximo trimestre (~91 días) para estimar la próxima, marcada con "~".
+  const nowSec = Date.now() / 1000;
+  const fNext = (unix) => {
+    if (!unix) return "—";
+    let t = unix, proj = false;
+    while (t < nowSec) { t += 91 * 86400; proj = true; }
+    return (proj ? "~" : "") + fDate(t);
+  };
 
   const enriched = useMemo(() => byBroker.map((g) => {
     const items = g.items.map((it) => {
@@ -27369,8 +27378,8 @@ function DividendosModule() {
                     <td style={num}>{it.paga ? fUsd(it.divPerCedear, 4) : "no paga"}</td>
                     <td style={{ ...num, color: it.paga ? "#34d399" : C.dim, fontWeight: it.paga ? 700 : 400 }}>{it.annual != null && it.annual > 0 ? fUsd(it.annual, 2) : "—"}</td>
                     <td style={num}>{it.divYield != null && it.divYield > 0 ? fPct(it.divYield) : "—"}</td>
-                    <td style={num}>{fDate(it.exDiv) || "—"}</td>
-                    <td style={num}>{fDate(it.payDate) || "—"}</td>
+                    <td style={num}>{it.paga ? fNext(it.exDiv) : "—"}</td>
+                    <td style={num}>{it.paga ? fNext(it.payDate) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -27380,7 +27389,7 @@ function DividendosModule() {
       ))}
 
       <p style={{ fontSize: 10.5, color: C.dim, marginTop: 4, lineHeight: 1.5, maxWidth: 900 }}>
-        El dividendo suele pagarse <strong style={{ color: C.muted }}>trimestral</strong> (≈ 1/4 del anual por pago); ASML es semestral. Cobrás el <strong style={{ color: C.muted }}>ex-date</strong> si tenías el papel antes de esa fecha. Montos estimados sobre el dividendo anual reportado por el subyacente (Yahoo), en <strong style={{ color: C.muted }}>bruto</strong>: EE.UU. retiene ~30% a no residentes, y el CEDEAR lo acredita neto en tu cuenta. Bonos y FCI no pagan dividendo (renta/cupón va en Flujo de posiciones). No es asesoramiento impositivo.
+El dividendo suele pagarse <strong style={{ color: C.muted }}>trimestral</strong> (≈ 1/4 del anual por pago); ASML es semestral. Cobrás el <strong style={{ color: C.muted }}>ex-date</strong> si tenías el papel antes de esa fecha. Las fechas con <strong style={{ color: C.muted }}>~</strong> son estimadas (proyectadas del último ciclo, porque Yahoo suele dar la fecha pasada). Montos estimados sobre el dividendo anual reportado por el subyacente (Yahoo), en <strong style={{ color: C.muted }}>bruto</strong>: EE.UU. retiene ~30% a no residentes, y el CEDEAR lo acredita neto en tu cuenta. Bonos y FCI no pagan dividendo (renta/cupón va en Flujo de posiciones). No es asesoramiento impositivo.
       </p>
     </div>
   );
