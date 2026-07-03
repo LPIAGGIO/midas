@@ -26928,12 +26928,21 @@ function ReporteCarteraModule() {
 
   const CONTADO = ["bond_ars", "bond_usd", "on", "stock", "cedear", "fci"];
   const TYPE_LABEL = { bond_ars: "Bonos", bond_usd: "Bonos USD", on: "Obligaciones Negociables", stock: "Acciones", cedear: "CEDEARs", fci: "FCI" };
+  const BROKER_LABEL = { cocos: "Cocos", iol: "IOL", manual: "Manual", balanz: "Balanz" };
+
+  const [brokerFilter, setBrokerFilter] = useState("all");
+  const brokers = useMemo(() => {
+    const s = new Set();
+    for (const p of positions || []) { if (CONTADO.includes(p.instrument_type)) s.add(p.broker || "manual"); }
+    return Array.from(s).sort();
+  }, [positions]);
 
   const { groups, totActual, totInicial } = useMemo(() => {
     const empty = { groups: [], totActual: 0, totInicial: 0 };
     if (!positions?.length) return empty;
     let cons = [];
-    try { cons = consolidatePositions(positions.filter((p) => p.instrument_type !== "caucion"), bondPrices, futurePrices, fciPrices, stockPrices) || []; }
+    const src = positions.filter((p) => p.instrument_type !== "caucion" && (brokerFilter === "all" || (p.broker || "manual") === brokerFilter));
+    try { cons = consolidatePositions(src, bondPrices, futurePrices, fciPrices, stockPrices) || []; }
     catch (e) { console.warn("[ReporteCartera] consolidate:", e); return empty; }
     const rows = [];
     for (const g of cons) {
@@ -26956,7 +26965,7 @@ function ReporteCarteraModule() {
       return { type: t, label: TYPE_LABEL[t] || t, items, subAct: items.reduce((s, r) => s + r.vAct, 0), subIni: items.reduce((s, r) => s + r.vIni, 0), subRend: items.reduce((s, r) => s + r.rend, 0) };
     });
     return { groups, totActual, totInicial };
-  }, [positions, bondPrices, futurePrices, fciPrices, stockPrices]);
+  }, [positions, bondPrices, futurePrices, fciPrices, stockPrices, brokerFilter]);
 
   const totRend = totActual - totInicial;
   const fM = (n) => (n == null || !Number.isFinite(n) ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
@@ -26991,6 +27000,18 @@ function ReporteCarteraModule() {
         <button onClick={downloadCsv} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>↓ Exportar CSV</button>
       </div>
 
+      {brokers.length > 1 && (
+        <div className="flex items-center" style={{ gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginRight: 4 }}>Broker</span>
+          {["all", ...brokers].map((b) => (
+            <button key={b} onClick={() => setBrokerFilter(b)}
+              style={{ padding: "4px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${brokerFilter === b ? C.accent : C.border}`, background: brokerFilter === b ? "rgba(124,156,255,0.12)" : "transparent", color: brokerFilter === b ? C.accent : C.muted, borderRadius: 6 }}>
+              {b === "all" ? "Todos" : (BROKER_LABEL[b] || b)}
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading && !groups.length ? (
         <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando cartera…</div>
       ) : !groups.length ? (
@@ -27016,11 +27037,7 @@ function ReporteCarteraModule() {
             <tbody>
               {groups.flatMap((g) => [
                 <tr key={g.type + "_hdr"} style={{ background: C.deep }}>
-                  <td colSpan={4} style={{ ...td, fontFamily: "inherit", fontWeight: 700, color: C.text }}>{g.label} <span style={{ color: C.dim, fontWeight: 400 }}>({g.items.length})</span></td>
-                  <td style={{ ...num, fontWeight: 700 }}>{fM(g.subIni)}</td>
-                  <td style={{ ...num, fontWeight: 700 }}>{fM(g.subAct)}</td>
-                  <td style={{ ...num, fontWeight: 700, color: colRend(g.subRend) }}>{fM(g.subRend)}</td>
-                  <td colSpan={4} style={num}></td>
+                  <td colSpan={11} style={{ ...td, fontFamily: "inherit", fontWeight: 700, color: C.text }}>{g.label} <span style={{ color: C.dim, fontWeight: 400 }}>({g.items.length})</span></td>
                 </tr>,
                 ...g.items.map((r) => (
                   <tr key={r.type + "|" + r.ticker}>
@@ -27037,6 +27054,15 @@ function ReporteCarteraModule() {
                     <td style={num}>{totActual > 0 ? ((r.vAct / totActual) * 100).toFixed(1) + "%" : "—"}</td>
                   </tr>
                 )),
+                <tr key={g.type + "_sub"} style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <td colSpan={4} style={{ ...td, fontFamily: "inherit", fontWeight: 600, color: C.muted }}>Subtotal · {g.label}</td>
+                  <td style={{ ...num, fontWeight: 700 }}>{fM(g.subIni)}</td>
+                  <td style={{ ...num, fontWeight: 700 }}>{fM(g.subAct)}</td>
+                  <td style={{ ...num, fontWeight: 700, color: colRend(g.subRend) }}>{fM(g.subRend)}</td>
+                  <td style={{ ...num, fontWeight: 700, color: colRend(g.subRend) }}>{g.subIni > 0 ? fPct((g.subRend / g.subIni) * 100) : "—"}</td>
+                  <td colSpan={2} style={num}></td>
+                  <td style={{ ...num, fontWeight: 600, color: C.muted }}>{totActual > 0 ? ((g.subAct / totActual) * 100).toFixed(1) + "%" : "—"}</td>
+                </tr>,
               ])}
               <tr style={{ background: C.deep, borderTop: `2px solid ${C.border}` }}>
                 <td colSpan={4} style={{ ...td, fontFamily: "inherit", fontWeight: 700 }}>TOTAL</td>
@@ -27051,7 +27077,7 @@ function ReporteCarteraModule() {
         </div>
       )}
       <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, maxWidth: 900 }}>
-        Solo posiciones de contado abiertas (bonos, ONs, acciones, CEDEARs, FCI); futuros y cauciones están en P&L por Instrumento. Un ticker en Cocos + IOL se muestra combinado. DPT = días desde la primera compra; TNA = rendimiento total anualizado (% R. × 365 / DPT); % Cart. sobre el valor a mercado total.
+        Solo posiciones de contado abiertas (bonos, ONs, acciones, CEDEARs, FCI); futuros y cauciones están en P&L por Instrumento. En «Todos» un ticker que tenés en Cocos + IOL se muestra combinado; filtrá por broker para verlo separado. DPT = días desde la primera compra; TNA = rendimiento total anualizado (% R. × 365 / DPT); % Cart. sobre el valor a mercado total del filtro.
       </p>
     </div>
   );
