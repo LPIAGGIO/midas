@@ -26230,14 +26230,17 @@ function FundamentalsModule() {
   const [cedearSet, setCedearSet] = useState(null);
   const [sortKey, setSortKey] = useState("total");
   const [sortDir, setSortDir] = useState(-1);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [showGlossary, setShowGlossary] = useState(false);
+  const [fetchedAt, setFetchedAt] = useState(null);
 
   useEffect(() => {
     let alive = true; setData(null);
-    fetch(`/api/fundamentals?tickers=${encodeURIComponent(tickers)}`)
-      .then((r) => r.json()).then((j) => { if (alive) setData(j.data || []); })
+    fetch(`/api/fundamentals?tickers=${encodeURIComponent(tickers)}${refreshTick ? `&_=${refreshTick}` : ""}`)
+      .then((r) => r.json()).then((j) => { if (alive) { setData(j.data || []); setFetchedAt(new Date()); } })
       .catch(() => { if (alive) setData([]); });
     return () => { alive = false; };
-  }, [tickers]);
+  }, [tickers, refreshTick]);
 
   useEffect(() => {
     fetch(`/api/data912?type=cedears`).then((r) => r.json())
@@ -26309,12 +26312,62 @@ function FundamentalsModule() {
         </div>
       </div>
 
+      {/* Glosario expandible: qué es cada columna y cómo se calcula el Score */}
+      <div style={{ marginBottom: 14 }}>
+        <button onClick={() => setShowGlossary((v) => !v)} style={{ fontSize: 12, fontWeight: 600, cursor: "pointer", background: "transparent", border: "none", color: C.accent, padding: 0 }}>
+          {showGlossary ? "▾ ocultar glosario" : "▸ ¿Qué significa cada columna y cómo se calcula el Score?"}
+        </button>
+        {showGlossary && (
+          <div style={{ marginTop: 10, border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "14px 16px", fontSize: 11.5, lineHeight: 1.6, color: C.muted, maxWidth: 900 }}>
+            {[
+              { h: "Cómo se arma el Score (0–100)", rows: [
+                ["Método", "A cada acción se le asigna un percentil dentro de la lista para cada métrica (0 = peor del grupo, 100 = mejor), orientado según convenga: margen alto = bueno, P/E bajo = bueno. Se promedian en dos ejes y se combinan mitad y mitad."],
+                ["Score", "50% Calidad + 50% Valuación. Es un ranking RELATIVO a la lista que consultás: un 90 significa «de los mejores de este grupo», no «barato en absoluto». Colores: verde ≥66, ámbar 45–65, rojo <45."],
+                ["Castigo", "Empresas en pérdida (P/E o EV/EBITDA negativos) reciben un valor centinela alto → quedan «caras» en Valuación, no se premian por tener el ratio negativo."],
+              ] },
+              { h: "Calidad — qué tan buena es la empresa", rows: [
+                ["Mrg neto", "Ganancia neta ÷ ventas. Cuánto queda de cada dólar vendido tras todos los costos e impuestos. Más alto, mejor."],
+                ["ROE", "Ganancia neta ÷ patrimonio. Rentabilidad sobre el capital propio de los accionistas."],
+                ["Crec.", "Crecimiento de ventas interanual (últimos 12 meses vs los 12 previos)."],
+                ["Mrg bruto", "(Ventas − costo de ventas) ÷ ventas. Entra en el Score de Calidad aunque no siempre esté como columna visible."],
+                ["FCF yield", "Free cash flow ÷ market cap. Caja libre que genera por cada dólar que vale la empresa. Más alto = más caja por peso invertido."],
+                ["D/E", "Deuda total ÷ patrimonio (%). Apalancamiento; más alto = más riesgo financiero. En el Score va invertida (menos deuda puntúa más). ≥200% se marca en rojo."],
+              ] },
+              { h: "Valuación — qué tan cara o barata está", rows: [
+                ["P/E fwd", "Precio ÷ ganancia esperada por acción (próximos 12 meses). Los «años de ganancias» que pagás. Menor = más barato. «neg» = se espera pérdida."],
+                ["P/S", "Precio ÷ ventas por acción. Útil cuando todavía no hay ganancias. Menor = más barato."],
+                ["EV/EBITDA", "Valor de empresa (market cap + deuda − caja) ÷ EBITDA. Valuación independiente de cómo se financia la empresa. Menor = más barato."],
+              ] },
+              { h: "Otras columnas", rows: [
+                ["#", "Puesto en el ranking por Score (1 = el mejor de la lista consultada)."],
+                ["Tema / Sector", "Sector o tema del negocio (curado; si no hay, el sector que reporta Yahoo)."],
+                ["CEDEAR", "✓ si el papel cotiza como CEDEAR en BYMA (lo podés operar localmente en pesos). Se chequea contra data912."],
+                ["Cap.", "Market cap = precio × acciones en circulación. M / B / T = millones / miles de millones / billones de USD."],
+                ["Rank Cap.", "Puesto por tamaño (market cap) dentro de la lista (#1 = la más grande)."],
+              ] },
+            ].map((sec) => (
+              <div key={sec.h} style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.text, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>{sec.h}</div>
+                {sec.rows.map(([t, d]) => (
+                  <div key={t} style={{ marginBottom: 4 }}><strong style={{ color: C.text }}>{t}</strong> — {d}</div>
+                ))}
+              </div>
+            ))}
+            <div style={{ fontSize: 10.5, color: C.dim, marginTop: 4 }}>
+              Datos del subyacente en USA en dólares (fuente Yahoo Finance); el CEDEAR replica esto con su ratio de conversión. Clic en cualquier encabezado para reordenar. Es análisis de contexto, no recomendación de inversión.
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center" style={{ gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <input value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") setTickers(input); }}
           style={{ flex: "1 1 480px", minWidth: 280, padding: "8px 11px", fontSize: 12, background: "transparent", color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, outline: "none", fontVariantNumeric: "tabular-nums" }} />
         <button onClick={() => setTickers(input)} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.accent}`, background: "transparent", color: C.accent, borderRadius: 6 }}>Consultar</button>
         <button onClick={() => { setInput(FUND_UNIVERSE); setTickers(FUND_UNIVERSE); }} style={{ padding: "8px 12px", fontSize: 11, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6 }}>Reset</button>
+        <button onClick={() => setRefreshTick((t) => t + 1)} disabled={!data} title="Volver a traer los datos de Yahoo" style={{ padding: "8px 12px", fontSize: 11, fontWeight: 600, cursor: data ? "pointer" : "default", border: `1px solid ${C.border}`, background: "transparent", color: data ? C.muted : C.dim, borderRadius: 6, whiteSpace: "nowrap" }}>↻ Actualizar</button>
+        {fetchedAt && <span style={{ fontSize: 10.5, color: C.dim, whiteSpace: "nowrap" }}>datos {fetchedAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</span>}
       </div>
 
       {!data ? (
