@@ -7,10 +7,11 @@
 //
 // Devuelve { data: [{ticker, price, mcap, trailPE, fwdPE, ps, pb, evEbitda,
 //   evRev, netMrg, grossMrg, opMrg, revGrw, earnGrw, roe, de, cash, debt,
-//   fcf, rec}], errors:[...] }. Cache 6h (los fundamentals cambian por trimestre).
+//   fcf, rec, divRate, divYield, exDiv, payDate}], errors:[...] }. divRate=US$/acción
+//   anual, exDiv/payDate=unix(s). Cache 6h (los fundamentals cambian por trimestre).
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
-const MODULES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile";
+const MODULES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile,calendarEvents";
 
 async function getAuth() {
   const r = await fetch("https://fc.yahoo.com", { headers: { "User-Agent": UA } });
@@ -34,7 +35,7 @@ async function fetchOne(t, auth) {
   const j = await r.json();
   const res = j?.quoteSummary?.result?.[0];
   if (!res) return null;
-  const sd = res.summaryDetail || {}, ks = res.defaultKeyStatistics || {}, fd = res.financialData || {}, ap = res.assetProfile || {};
+  const sd = res.summaryDetail || {}, ks = res.defaultKeyStatistics || {}, fd = res.financialData || {}, ap = res.assetProfile || {}, ce = res.calendarEvents || {};
   return {
     ticker: t,
     sector: ap.sector || null, industry: ap.industry || null,
@@ -47,6 +48,11 @@ async function fetchOne(t, auth) {
     roe: raw(fd.returnOnEquity), de: raw(fd.debtToEquity),
     cash: raw(fd.totalCash), debt: raw(fd.totalDebt), fcf: raw(fd.freeCashflow),
     rec: fd.recommendationKey || null,
+    // Dividendos: divRate = US$/acción anual; divYield = fracción; exDiv/payDate = unix (s).
+    divRate: raw(sd.dividendRate) ?? raw(sd.trailingAnnualDividendRate),
+    divYield: raw(sd.dividendYield) ?? raw(sd.trailingAnnualDividendYield),
+    exDiv: raw(ce.exDividendDate) ?? raw(sd.exDividendDate),
+    payDate: raw(ce.dividendDate),
   };
 }
 

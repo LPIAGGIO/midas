@@ -252,6 +252,7 @@ const NAV = [
       { id: "libro-operaciones", label: "Libro de operaciones", icon: BookOpen },
       { id: "pnl-instrumento", label: "P&L por Instrumento", icon: BarChart3 },
       { id: "reporte-cartera", label: "Reporte de cartera", icon: FileText },
+      { id: "dividendos", label: "Dividendos", icon: Coins },
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
       { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
     ],
@@ -1147,6 +1148,8 @@ function MidasApp() {
               <PnlPorInstrumentoModule key={active} />
             ) : active === "reporte-cartera" ? (
               <ReporteCarteraModule key={active} />
+            ) : active === "dividendos" ? (
+              <DividendosModule key={active} />
             ) : active === "ejecucion-cedear" ? (
               <EjecucionInteligenteModule key={active} />
             ) : active === "calc-cedear-fv" ? (
@@ -27257,6 +27260,127 @@ function ReporteCarteraModule() {
       )}
       <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, maxWidth: 900 }}>
         Solo posiciones de contado abiertas (bonos, ONs, acciones, CEDEARs, FCI); futuros y cauciones están en P&L por Instrumento. En «Todos» un ticker que tenés en Cocos + IOL se muestra combinado; filtrá por broker para verlo separado. DPT = días desde la primera compra; TNA = rendimiento total anualizado (% R. × 365 / DPT); % Cart. sobre el valor a mercado total del filtro.
+      </p>
+    </div>
+  );
+}
+
+/* ─────────────── Dividendos / Próximos pagos (Reportes) ───────────────
+ * Por broker, los CEDEARs que pagan dividendo con el próximo ex-date y pago,
+ * el dividendo por CEDEAR (= div/acción USA ÷ ratio) y el estimado anual sobre
+ * tu tenencia. Data del subyacente USA vía Yahoo (/api/fundamentals, campos
+ * divRate/divYield/exDiv/payDate). Bruto — EE.UU. retiene ~30% a no residentes.
+ */
+function DividendosModule() {
+  const { positions } = useUserPositions();
+  const [fund, setFund] = useState(null);
+
+  const byBroker = useMemo(() => {
+    const map = {};
+    for (const p of positions || []) {
+      if (p.instrument_type !== "cedear" || !p.ticker) continue;
+      const br = p.broker || "manual";
+      const tk = p.ticker.toUpperCase();
+      const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+      (map[br] = map[br] || {})[tk] = (map[br][tk] || 0) + q;
+    }
+    const order = { cocos: 0, iol: 1, manual: 2 };
+    return Object.entries(map)
+      .map(([broker, m]) => ({ broker, items: Object.entries(m).filter(([, q]) => q > 1e-9).map(([ticker, qty]) => ({ ticker, qty })) }))
+      .filter((g) => g.items.length)
+      .sort((a, b) => (order[a.broker] ?? 9) - (order[b.broker] ?? 9));
+  }, [positions]);
+
+  const allTickers = useMemo(() => Array.from(new Set(byBroker.flatMap((g) => g.items.map((it) => it.ticker)))), [byBroker]);
+  const tickersKey = allTickers.join(",");
+
+  useEffect(() => {
+    if (!allTickers.length) { setFund({}); return; }
+    let m = true; setFund(null);
+    fetch(`/api/fundamentals?tickers=${encodeURIComponent(tickersKey)}`)
+      .then((r) => r.json()).then((j) => { if (!m) return; const map = {}; for (const d of j.data || []) map[(d.ticker || "").toUpperCase()] = d; setFund(map); })
+      .catch(() => { if (m) setFund({}); });
+    return () => { m = false; };
+  }, [tickersKey]);
+
+  const BROKER_LABEL = { cocos: "Cocos", iol: "IOL", manual: "Manual" };
+  const fUsd = (n, d = 2) => (n == null || !isFinite(n) ? "—" : `US$ ${Number(n).toLocaleString("es-AR", { minimumFractionDigits: d, maximumFractionDigits: d })}`);
+  const fPct = (n) => (n == null || !isFinite(n) ? "—" : `${(n * 100).toFixed(2)}%`);
+  const fDate = (unix) => { if (!unix) return null; const d = new Date(unix * 1000); return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCFullYear()).slice(2)}`; };
+
+  const enriched = useMemo(() => byBroker.map((g) => {
+    const items = g.items.map((it) => {
+      const f = (fund && fund[it.ticker]) || {};
+      const ratio = CEDEAR_CAT[it.ticker]?.r ?? null;
+      const divRate = Number(f.divRate) || 0;                       // US$/acción anual
+      const divPerCedear = (divRate && ratio) ? divRate / ratio : null;   // US$/CEDEAR anual
+      const annual = divPerCedear != null ? it.qty * divPerCedear : null; // US$ anual estimado
+      return { ...it, ratio, name: CEDEAR_CAT[it.ticker]?.n || it.ticker, divRate, divYield: f.divYield ?? null, divPerCedear, annual, exDiv: f.exDiv || null, payDate: f.payDate || null, paga: divRate > 0 };
+    }).sort((a, b) => (a.paga !== b.paga ? (a.paga ? -1 : 1) : (a.exDiv || 9e14) - (b.exDiv || 9e14)));
+    return { ...g, items, subAnnual: items.reduce((s, it) => s + (it.annual || 0), 0), nPagan: items.filter((it) => it.paga).length };
+  }), [byBroker, fund]);
+  const totalAnnual = enriched.reduce((s, g) => s + g.subAnnual, 0);
+  const loading = fund == null;
+
+  const th = { padding: "6px 9px", fontSize: 10, fontWeight: 600, color: C.dim, textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" };
+  const td = { padding: "5px 9px", fontSize: 11.5, color: C.text, borderBottom: `1px solid ${C.border}`, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+  const num = { ...td, textAlign: "right" };
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1180, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Dividendos · próximos pagos</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 820 }}>
+            Tus CEDEARs por broker que pagan dividendo, con el próximo ex-date y fecha de pago. El dividendo por CEDEAR = dividendo del papel USA ÷ ratio; el estimado anual es sobre tu tenencia. <strong style={{ color: C.muted }}>Bruto</strong> — EE.UU. retiene ~30% a no residentes.
+          </p>
+        </div>
+        {totalAnnual > 0 && <span style={{ fontSize: 11, color: C.muted, whiteSpace: "nowrap" }}>estimado anual <strong style={{ color: "#34d399" }}>{fUsd(totalAnnual, 0)}</strong></span>}
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando dividendos…</div>
+      ) : !enriched.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>No tenés CEDEARs cargados en tu cartera.</div>
+      ) : enriched.map((g) => (
+        <div key={g.broker} style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 6 }}>
+            {BROKER_LABEL[g.broker] || g.broker}
+            <span style={{ color: C.dim, fontWeight: 400 }}> · {g.nPagan}/{g.items.length} pagan · estimado anual {fUsd(g.subAnnual, 0)}</span>
+          </div>
+          <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...th, textAlign: "left" }}>Ticker</th>
+                  <th style={{ ...th, textAlign: "right" }}>Cant.</th>
+                  <th style={{ ...th, textAlign: "right" }}>Div/CEDEAR año</th>
+                  <th style={{ ...th, textAlign: "right" }}>Estimado año</th>
+                  <th style={{ ...th, textAlign: "right" }}>Yield</th>
+                  <th style={{ ...th, textAlign: "right" }}>Próx. ex-date</th>
+                  <th style={{ ...th, textAlign: "right" }}>Próx. pago</th>
+                </tr>
+              </thead>
+              <tbody>
+                {g.items.map((it) => (
+                  <tr key={it.ticker} style={{ opacity: it.paga ? 1 : 0.55 }}>
+                    <td style={{ ...td, fontWeight: 600, color: it.paga ? "#34d399" : C.muted }}>{it.ticker}</td>
+                    <td style={num}>{Math.round(it.qty).toLocaleString("es-AR")}</td>
+                    <td style={num}>{it.paga ? fUsd(it.divPerCedear, 4) : "no paga"}</td>
+                    <td style={{ ...num, color: it.paga ? "#34d399" : C.dim, fontWeight: it.paga ? 700 : 400 }}>{it.annual != null && it.annual > 0 ? fUsd(it.annual, 2) : "—"}</td>
+                    <td style={num}>{it.divYield != null && it.divYield > 0 ? fPct(it.divYield) : "—"}</td>
+                    <td style={num}>{fDate(it.exDiv) || "—"}</td>
+                    <td style={num}>{fDate(it.payDate) || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+
+      <p style={{ fontSize: 10.5, color: C.dim, marginTop: 4, lineHeight: 1.5, maxWidth: 900 }}>
+        El dividendo suele pagarse <strong style={{ color: C.muted }}>trimestral</strong> (≈ 1/4 del anual por pago); ASML es semestral. Cobrás el <strong style={{ color: C.muted }}>ex-date</strong> si tenías el papel antes de esa fecha. Montos estimados sobre el dividendo anual reportado por el subyacente (Yahoo), en <strong style={{ color: C.muted }}>bruto</strong>: EE.UU. retiene ~30% a no residentes, y el CEDEAR lo acredita neto en tu cuenta. Bonos y FCI no pagan dividendo (renta/cupón va en Flujo de posiciones). No es asesoramiento impositivo.
       </p>
     </div>
   );
