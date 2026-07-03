@@ -26772,6 +26772,27 @@ function PaperCedearsModule() {
     return () => { mounted = false; };
   }, [tick]);
 
+  // Tenencia REAL de CEDEARs (de la cartera de Midas), neteada por (broker, ticker).
+  // Sirve para comparar lo que tenés de verdad contra los picks del momentum.
+  const { positions } = useUserPositions();
+  const realByBroker = useMemo(() => {
+    const map = {};
+    for (const p of positions || []) {
+      if (p.instrument_type !== "cedear" || !p.ticker) continue;
+      const br = p.broker || "manual";
+      const tk = p.ticker.toUpperCase();
+      const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+      (map[br] = map[br] || {})[tk] = (map[br][tk] || 0) + q;
+    }
+    const out = [];
+    for (const [br, m] of Object.entries(map)) {
+      const items = Object.entries(m).filter(([, q]) => q > 1e-9).map(([ticker, qty]) => ({ ticker, qty })).sort((a, b) => (a.ticker < b.ticker ? -1 : 1));
+      if (items.length) out.push({ broker: br, items });
+    }
+    const order = { cocos: 0, iol: 1, manual: 2 };
+    return out.sort((a, b) => (order[a.broker] ?? 9) - (order[b.broker] ?? 9));
+  }, [positions]);
+
   if (!data) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando paper CEDEARs…</div>;
 
   const fUsd = (n) => (n == null ? "—" : `US$ ${Number(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`);
@@ -26808,6 +26829,10 @@ function PaperCedearsModule() {
   const selVar = perVar.find((p) => p.id === sel) || perVar[perVar.length - 1];
   const selHoldings = data.holdings.filter((h) => (h.variant || "m21") === sel);
   const selTrades = data.tr.filter((t) => (t.variant || "m21") === sel).slice(0, 25);
+
+  // Picks actuales del momentum (variante iol21, que es la que LP replica en real).
+  const paperPicks = new Set((data.holdings || []).filter((h) => (h.variant || "m21") === "iol21").map((h) => (h.ticker || "").toUpperCase()));
+  const BROKER_LABEL = { cocos: "Cocos", iol: "IOL", manual: "Manual" };
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
@@ -26860,6 +26885,42 @@ function PaperCedearsModule() {
         ))}
         {selVar.liveStart && <span style={{ marginLeft: "auto", fontSize: 10, color: C.dim }}>en vivo desde {fmtD(selVar.liveStart)} · histórico simulado antes</span>}
       </div>
+
+      {/* Tenencia REAL de CEDEARs, por broker — para comparar contra los picks del momentum */}
+      {realByBroker.length > 0 && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Tu tenencia real de CEDEARs · por broker</h3>
+            {paperPicks.size > 0 && <span style={{ fontSize: 10, color: C.dim }}>verde = está en el pick actual del momentum (iol21)</span>}
+          </div>
+          {realByBroker.map(({ broker, items }) => {
+            const nMatch = items.filter((it) => paperPicks.has(it.ticker)).length;
+            return (
+              <div key={broker} style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 6 }}>
+                  {BROKER_LABEL[broker] || broker}
+                  <span style={{ color: C.dim, fontWeight: 400 }}> · {items.length} {items.length === 1 ? "papel" : "papeles"}{paperPicks.size ? ` · ${nMatch}/${items.length} en el momentum` : ""}</span>
+                </div>
+                <div className="flex" style={{ gap: 6, flexWrap: "wrap" }}>
+                  {items.map((it) => {
+                    const hit = paperPicks.has(it.ticker);
+                    return (
+                      <span key={it.ticker} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: hit ? "#34d399" : C.text, background: hit ? "rgba(52,211,153,0.10)" : "rgba(255,255,255,0.03)", border: `1px solid ${hit ? "rgba(52,211,153,0.28)" : C.border}` }}>
+                        {it.ticker} <span style={{ color: C.dim, fontWeight: 400 }}>×{Math.round(it.qty).toLocaleString("es-AR")}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          {paperPicks.size > 0 && (
+            <div style={{ fontSize: 10.5, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>
+              La variante que replicás en real es <strong style={{ color: "#f59e0b" }}>iol21</strong> (mensual vía IOL). Picks actuales del momentum: {[...paperPicks].sort().join(", ") || "—"}. Los papeles que no están en verde ya salieron del Top-8 — candidatos a rotar en el próximo rebalanceo.
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
