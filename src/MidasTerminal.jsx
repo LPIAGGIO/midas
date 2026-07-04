@@ -7186,10 +7186,16 @@ function useFciCatalog() {
  * el nombre del fondo. Para cualquier otro ticker (bonos, acciones, etc.)
  * devuelve el valor tal cual — no tienen "|".
  */
+// Símbolo corto por fondo (como lo muestra Cocos), más fácil de identificar que
+// el nombre largo. Ampliable a otros FCI.
+const FCI_SYMBOL = {
+  "Cocos Rendimiento - Clase A": "COCORMA",
+};
 function fciDisplayName(ticker) {
   if (!ticker || typeof ticker !== "string") return ticker;
   const i = ticker.indexOf("|");
-  return i === -1 ? ticker : ticker.slice(0, i);
+  const name = i === -1 ? ticker : ticker.slice(0, i);
+  return FCI_SYMBOL[name] || name;
 }
 
 /* ─────────────── Hook: useFciPrices ───────────────
@@ -27206,7 +27212,7 @@ function ReporteCarteraModule() {
       const rendPct = Math.abs(vIni) > 0 ? (rend / Math.abs(vIni)) * 100 : null;
       const dias = g.firstDate ? Math.max(1, Math.round((Date.now() - new Date(g.firstDate + "T00:00:00").getTime()) / 86400000)) : null;
       const tna = (rendPct != null && dias) ? (rendPct * 365) / dias : null;
-      rows.push({ type: g.instrument_type, ticker: (g.ticker || "").split("|")[0], currency: g.currency || "ARS", cant: g.netQty, ppc: g.ppp, precio: g.currentPrice, vIni, vAct, rend, rendPct, dias, tna });
+      rows.push({ type: g.instrument_type, ticker: fciDisplayName(g.ticker || ""), currency: g.currency || "ARS", cant: g.netQty, ppc: g.ppp, precio: g.currentPrice, vIni, vAct, rend, rendPct, dias, tna });
     }
     const totActual = rows.reduce((s, r) => s + r.vAct, 0);
     const totInicial = rows.reduce((s, r) => s + r.vIni, 0);
@@ -27591,7 +27597,7 @@ function PnlPorInstrumentoModule() {
   const fmtFecha = (iso) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "");
   const fmtM = (n) => `${n >= 0 ? "+$" : "−$"}${Math.abs(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
   const TYPE_LABEL = { future: "Futuro", bond_ars: "Bono ARS", bond_usd: "Bono USD", on: "ON", stock: "Acción", cedear: "CEDEAR", fci: "FCI", usd: "USD", crypto: "Crypto", option: "Opción" };
-  const tickerLabel = (r) => r.type === "fci" ? r.ticker.split("|")[0] : r.ticker;
+  const tickerLabel = (r) => r.type === "fci" ? fciDisplayName(r.ticker) : r.ticker;
 
   const downloadCsv = () => {
     const head = "tipo;ticker;moneda;ops;desde;hasta;qty_comprada;ppp_compra;qty_vendida;ppp_venta;abierto;realizado;no_realizado;total";
