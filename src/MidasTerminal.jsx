@@ -27090,8 +27090,8 @@ function PaperCedearsModule() {
                   <div style={{ fontSize: 10.5, color: C.dim }}>Con tu capital de <strong style={{ color: C.muted }}>{BROKER_LABEL[g.broker] || g.broker}</strong> ({fUsd(g.usdCost)} invertidos)</div>
                   {withMom != null ? (
                     <>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: momR >= 0 ? "#34d399" : "#f87171", fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{fUsd(withMom)}</div>
-                      <div style={{ fontSize: 10, color: C.dim }}>siguiendo el momentum ({fPct(momR)} en {Math.round(g.wDays)}d)</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{fUsd(withMom)}</div>
+                      <div style={{ fontSize: 10, color: C.dim }}>siguiendo el momentum (el paper hizo <strong style={{ color: momR >= 0 ? "#34d399" : "#f87171" }}>{fPct(momR)}</strong> en {Math.round(g.wDays)}d)</div>
                     </>
                   ) : <div style={{ fontSize: 12, color: C.dim, marginTop: 4 }}>ventana corta</div>}
                 </div>
