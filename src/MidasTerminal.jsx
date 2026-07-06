@@ -27211,7 +27211,9 @@ function ReporteCarteraModule() {
       const rend = vAct - vIni;
       const rendPct = Math.abs(vIni) > 0 ? (rend / Math.abs(vIni)) * 100 : null;
       const dias = g.firstDate ? Math.max(1, Math.round((Date.now() - new Date(g.firstDate + "T00:00:00").getTime()) / 86400000)) : null;
-      const tna = (rendPct != null && dias) ? (rendPct * 365) / dias : null;
+      // TNA solo con >=30 días de tenencia: anualizar un retorno de pocos días
+      // (ej. +10% en 4 días ×91) da un número sin sentido económico.
+      const tna = (rendPct != null && dias && dias >= 30) ? (rendPct * 365) / dias : null;
       rows.push({ type: g.instrument_type, ticker: fciDisplayName(g.ticker || ""), currency: g.currency || "ARS", cant: g.netQty, ppc: g.ppp, precio: g.currentPrice, vIni, vAct, rend, rendPct, dias, tna });
     }
     const totActual = rows.reduce((s, r) => s + r.vAct, 0);
@@ -27335,7 +27337,7 @@ function ReporteCarteraModule() {
         </div>
       )}
       <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, maxWidth: 900 }}>
-        Solo posiciones de contado abiertas (bonos, ONs, acciones, CEDEARs, FCI); futuros y cauciones están en P&L por Instrumento. En «Todos» un ticker que tenés en Cocos + IOL se muestra combinado; filtrá por broker para verlo separado. DPT = días desde la primera compra; TNA = rendimiento total anualizado (% R. × 365 / DPT); % Cart. sobre el valor a mercado total del filtro.
+        Solo posiciones de contado abiertas (bonos, ONs, acciones, CEDEARs, FCI); futuros y cauciones están en P&L por Instrumento. En «Todos» un ticker que tenés en Cocos + IOL se muestra combinado; filtrá por broker para verlo separado. DPT = días desde la primera compra; TNA = rendimiento total anualizado (% R. × 365 / DPT), se muestra solo con ≥30 días de tenencia (anualizar pocos días no tiene sentido); % Cart. sobre el valor a mercado total del filtro.
       </p>
     </div>
   );
