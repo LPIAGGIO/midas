@@ -26761,6 +26761,7 @@ function PaperCedearsModule() {
   const [sel, setSel] = useState("m21");
   const [px, setPx] = useState({ ced: {}, usa: {} });
   const [btRange, setBtRange] = useState(1);   // rango del gráfico backtest: 1/3/5/10 años
+  const [tab, setTab] = useState("paper");     // secciones: paper | cartera | proyecciones
 
   useEffect(() => {
     let mounted = true;
@@ -26995,6 +26996,17 @@ function PaperCedearsModule() {
         <button onClick={() => setTick((t) => t + 1)} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>Actualizar</button>
       </div>
 
+      {/* Secciones */}
+      <div className="flex items-center" style={{ gap: 6, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.border}`, paddingBottom: 12 }}>
+        {[["paper", "Rendimiento del paper"], ["cartera", "Tu cartera vs momentum"], ["proyecciones", "Proyecciones"]].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)}
+            style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${tab === id ? C.accent : C.border}`, background: tab === id ? "rgba(124,156,255,0.12)" : "transparent", color: tab === id ? C.accent : C.muted, borderRadius: 6 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "paper" && (<>
       {/* Tarjetas comparativas por variante (click = ver su cartera/movimientos) */}
       <div className="flex" style={{ gap: 10, flexWrap: "wrap" }}>
         {perVar.map((p) => (
@@ -27041,9 +27053,9 @@ function PaperCedearsModule() {
           );
         })()}
       </div>
+      </>)}
 
-      {/* Tenencia REAL de CEDEARs, por broker — para comparar contra los picks del momentum */}
-      {(realByBroker.length > 0 || paperPicks.size > 0) && (
+      {tab === "cartera" && (realByBroker.length > 0 || paperPicks.size > 0) && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
           {realByBroker.length === 0 ? (
             <>
@@ -27106,13 +27118,6 @@ function PaperCedearsModule() {
                     </div>
                   );
                 })()}
-                {usdTotal > 0 && (momRate != null || retAnn != null) && (
-                  <div style={{ fontSize: 10.5, color: C.dim, marginTop: 7 }}>
-                    Proyección a 1 año sobre {fUsd(usdTotal)}:
-                    {momRate != null && <> teórico (momentum {fPct(momRate)}/año) <strong style={{ color: momRate >= 0 ? "#34d399" : "#f87171" }}>{momRate >= 0 ? "+" : "−"}{fUsd(Math.abs(usdTotal * momRate / 100))}</strong></>}
-                    {retAnn != null && <> · real (tu ritmo {fPct(retAnn)}/año) <strong style={{ color: retAnn >= 0 ? "#34d399" : "#f87171" }}>{retAnn >= 0 ? "+" : "−"}{fUsd(Math.abs(usdTotal * retAnn / 100))}</strong></>}
-                  </div>
-                )}
               </div>
             );
           })}
@@ -27127,8 +27132,23 @@ function PaperCedearsModule() {
         </div>
       )}
 
+      {/* Proyección a 1 año por broker (teórico momentum vs tu ritmo real) */}
+      {tab === "proyecciones" && realEnriched.some((g) => g.usdTotal > 0) && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: "0 0 2px 0" }}>Proyección a 1 año · por broker</h3>
+          <div style={{ fontSize: 10, color: C.dim, marginBottom: 8 }}>teórico = al ritmo del momentum{momRate != null ? ` (${fPct(momRate)}/año)` : ""} · real = a tu propio ritmo anualizado (solo con ≥7 días de tenencia)</div>
+          {realEnriched.filter((g) => g.usdTotal > 0).map((g) => (
+            <div key={g.broker} style={{ fontSize: 11.5, color: C.muted, marginTop: 6 }}>
+              <strong style={{ color: C.text }}>{BROKER_LABEL[g.broker] || g.broker}</strong> · {fUsd(g.usdTotal)}:
+              {momRate != null && <> teórico <strong style={{ color: momRate >= 0 ? "#34d399" : "#f87171" }}>{momRate >= 0 ? "+" : "−"}{fUsd(Math.abs(g.usdTotal * momRate / 100))}</strong></>}
+              {g.retAnn != null && <> · real (tu ritmo {fPct(g.retAnn)}/año) <strong style={{ color: g.retAnn >= 0 ? "#34d399" : "#f87171" }}>{g.retAnn >= 0 ? "+" : "−"}{fUsd(Math.abs(g.usdTotal * g.retAnn / 100))}</strong></>}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Proyección a 10 años siguiendo momentum: US$ 1.000, tu Cocos y tu IOL */}
-      {momRate != null && proj10Scenarios.length > 0 && (
+      {tab === "proyecciones" && momRate != null && proj10Scenarios.length > 0 && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Proyección a 10 años · siguiendo momentum</h3>
@@ -27155,6 +27175,7 @@ function PaperCedearsModule() {
         </div>
       )}
 
+      {tab === "paper" && (<>
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
           <div>
@@ -27189,6 +27210,7 @@ function PaperCedearsModule() {
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
         El backtest de 10 años corre el mismo motor de momentum sobre precios reales (Yahoo, 30 acciones USA). Bate a comprar y holdear, pero cae en una década muy alcista de las tecnológicas y con sesgo de supervivencia del universo — el momentum sufre en mercados laterales o bajistas. Las tarjetas de arriba son el forward-test EN VIVO (~13 meses desde el 15/06); el gráfico es el histórico. Simulación, no opera plata real ni es recomendación.
       </p>
+      </>)}
     </div>
   );
 }
