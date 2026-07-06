@@ -27071,60 +27071,79 @@ function PaperCedearsModule() {
             </>
           ) : (
           <>
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Tu tenencia real de CEDEARs · por broker</h3>
-            {usdGrand > 0
-              ? <span style={{ fontSize: 11, color: C.muted }}>total <strong style={{ color: C.text }}>{fUsd(usdGrand)}</strong></span>
-              : (paperPicks.size > 0 && <span style={{ fontSize: 10, color: C.dim }}>verde = está en el pick actual del momentum (iol21)</span>)}
+          {/* NIVEL 1 — Momentum de ahora (teórico del paper) aplicado a tu capital por broker */}
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Momentum de ahora <span style={{ color: C.dim, fontWeight: 400 }}>· teórico del paper (iol21)</span></h3>
+            {usdGrand > 0 && <span style={{ fontSize: 11, color: C.muted }}>tu total <strong style={{ color: C.text }}>{fUsd(usdGrand)}</strong></span>}
           </div>
-          {realEnriched.map(({ broker, items, usdTotal, usdCost, retPct, retAnn, wDays }) => {
-            const nMatch = items.filter((it) => paperPicks.has(it.ticker)).length;
-            return (
-              <div key={broker} style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 6 }}>
-                  {BROKER_LABEL[broker] || broker}
-                  <span style={{ color: C.dim, fontWeight: 400 }}> · {items.length} {items.length === 1 ? "papel" : "papeles"}{paperPicks.size ? ` · ${nMatch}/${items.length} en momentum` : ""}</span>
-                  {retPct != null && <span style={{ color: retPct >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}> · real {fPct(retPct)}{retAnn != null ? ` (${fPct(retAnn)}/año)` : ""}</span>}
-                  {usdTotal > 0 && <span style={{ color: C.text, fontWeight: 700 }}> · {fUsd(usdTotal)}</span>}
+          <div className="flex" style={{ gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+            {[...paperPicks].sort().map((tk) => (
+              <span key={tk} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: "#34d399", background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.28)" }}>{tk}</span>
+            ))}
+          </div>
+          <div className="flex" style={{ gap: 10, flexWrap: "wrap" }}>
+            {realEnriched.filter((g) => g.usdTotal > 0).map((g) => {
+              const momR = momRetSince(g.wDays);
+              const withMom = momR != null ? g.usdCost * (1 + momR / 100) : null;
+              return (
+                <div key={g.broker} style={{ flex: "1 1 220px", minWidth: 200, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10.5, color: C.dim }}>Con tu capital de <strong style={{ color: C.muted }}>{BROKER_LABEL[g.broker] || g.broker}</strong> ({fUsd(g.usdCost)} invertidos)</div>
+                  {withMom != null ? (
+                    <>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: momR >= 0 ? "#34d399" : "#f87171", fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{fUsd(withMom)}</div>
+                      <div style={{ fontSize: 10, color: C.dim }}>siguiendo el momentum ({fPct(momR)} en {Math.round(g.wDays)}d)</div>
+                    </>
+                  ) : <div style={{ fontSize: 12, color: C.dim, marginTop: 4 }}>ventana corta</div>}
                 </div>
-                <div className="flex" style={{ gap: 6, flexWrap: "wrap" }}>
-                  {items.map((it) => {
-                    const hit = paperPicks.has(it.ticker);
-                    return (
-                      <span key={it.ticker} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: hit ? "#34d399" : C.text, background: hit ? "rgba(52,211,153,0.10)" : "rgba(255,255,255,0.03)", border: `1px solid ${hit ? "rgba(52,211,153,0.28)" : C.border}` }}>
-                        {it.ticker} <span style={{ color: C.dim, fontWeight: 400 }}>×{Math.round(it.qty).toLocaleString("es-AR")}</span>
-                        {it.usd != null && <span style={{ color: C.dim, fontWeight: 400 }}> · {fUsd(it.usd)}</span>}
-                        {it.retPct != null && <span style={{ color: it.retPct >= 0 ? "#34d399" : "#f87171", fontWeight: 400 }}> · {fPct(it.retPct)}</span>}
-                      </span>
-                    );
-                  })}
-                </div>
-                {/* Comparativa: tu cartera vs. si hubieras seguido el momentum, mismo período */}
-                {usdCost > 0 && retPct != null && wDays != null && (() => {
-                  const momR = momRetSince(wDays);
-                  if (momR == null) return null;
-                  const withMom = usdCost * (1 + momR / 100);
-                  const beat = usdTotal >= withMom;
-                  return (
-                    <div style={{ fontSize: 10.5, marginTop: 7, padding: "6px 9px", borderRadius: 6, background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, lineHeight: 1.5 }}>
-                      <span style={{ color: C.dim }}>Últimos {Math.round(wDays)} días — </span>
-                      <span style={{ color: C.muted }}>siguiendo el momentum: </span>
-                      <strong style={{ color: momR >= 0 ? "#34d399" : "#f87171" }}>{fPct(momR)}</strong>
-                      <span style={{ color: C.muted }}> → {fUsd(withMom)}</span>
-                      <span style={{ color: C.dim }}>  ·  vos: </span>
-                      <strong style={{ color: retPct >= 0 ? "#34d399" : "#f87171" }}>{fPct(retPct)}</strong>
-                      <span style={{ color: C.muted }}> → {fUsd(usdTotal)}</span>
-                      <strong style={{ color: beat ? "#34d399" : "#f87171" }}> · {beat ? "le ganás" : "va detrás"} {fUsd(Math.abs(usdTotal - withMom))}</strong>
+              );
+            })}
+          </div>
+
+          {/* NIVEL 2 — Tu cartera real vs el momentum, por broker */}
+          <div style={{ marginTop: 14, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: "0 0 2px 0" }}>Tu cartera real vs el momentum</h3>
+            <div style={{ fontSize: 10, color: C.dim, marginBottom: 4 }}>lo que tenés hoy y cuánto te separa del momentum, por broker</div>
+            {realEnriched.map(({ broker, items, usdTotal, usdCost, retPct, wDays }) => {
+              const nMatch = items.filter((it) => paperPicks.has(it.ticker)).length;
+              const momR = momRetSince(wDays);
+              const withMom = momR != null ? usdCost * (1 + momR / 100) : null;
+              const diff = withMom != null ? usdTotal - withMom : null;
+              const diffPct = (withMom != null && withMom > 0) ? (usdTotal / withMom - 1) * 100 : null;
+              const above = diff != null && diff >= 0;
+              return (
+                <div key={broker} style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 6 }}>
+                    {BROKER_LABEL[broker] || broker}
+                    <span style={{ color: C.dim, fontWeight: 400 }}> · {items.length} {items.length === 1 ? "papel" : "papeles"}{paperPicks.size ? ` · ${nMatch}/${items.length} en momentum` : ""}</span>
+                    {usdTotal > 0 && <span style={{ color: C.text, fontWeight: 700 }}> · {fUsd(usdTotal)}</span>}
+                    {retPct != null && <span style={{ color: retPct >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}> (real {fPct(retPct)})</span>}
+                  </div>
+                  {diff != null && (
+                    <div style={{ fontSize: 11, marginBottom: 6, padding: "6px 9px", borderRadius: 6, background: above ? "rgba(52,211,153,0.06)" : "rgba(248,113,113,0.06)", border: `1px solid ${above ? "rgba(52,211,153,0.25)" : "rgba(248,113,113,0.25)"}` }}>
+                      <span style={{ color: C.muted }}>vs momentum ({fUsd(withMom)}): </span>
+                      <strong style={{ color: above ? "#34d399" : "#f87171" }}>{above ? "por encima" : "por debajo"} {above ? "+" : "−"}{fUsd(Math.abs(diff))}{diffPct != null ? ` (${diffPct >= 0 ? "+" : "−"}${Math.abs(diffPct).toFixed(1)}%)` : ""}</strong>
                     </div>
-                  );
-                })()}
-              </div>
-            );
-          })}
+                  )}
+                  <div className="flex" style={{ gap: 6, flexWrap: "wrap" }}>
+                    {items.map((it) => {
+                      const hit = paperPicks.has(it.ticker);
+                      return (
+                        <span key={it.ticker} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: hit ? "#34d399" : C.text, background: hit ? "rgba(52,211,153,0.10)" : "rgba(255,255,255,0.03)", border: `1px solid ${hit ? "rgba(52,211,153,0.28)" : C.border}` }}>
+                          {it.ticker} <span style={{ color: C.dim, fontWeight: 400 }}>×{Math.round(it.qty).toLocaleString("es-AR")}</span>
+                          {it.usd != null && <span style={{ color: C.dim, fontWeight: 400 }}> · {fUsd(it.usd)}</span>}
+                          {it.retPct != null && <span style={{ color: it.retPct >= 0 ? "#34d399" : "#f87171", fontWeight: 400 }}> · {fPct(it.retPct)}</span>}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
           {paperPicks.size > 0 && (
             <div style={{ fontSize: 10.5, color: C.dim, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}`, lineHeight: 1.5 }}>
-              <strong style={{ color: "#f59e0b" }}>Momentum actual (iol21)</strong>: {[...paperPicks].sort().join(", ") || "en cash"}{lastRebal ? ` · rebalanceado ${fmtD(lastRebal)}, próximo ~${fmtD(nextRebalApprox)}` : ""}. El Top-8 no cambió desde entonces (tendencia persistente), por eso el último movimiento es más viejo — la estrategia igual se re-evalúa cada 21 ruedas. Los papeles que no están en verde ya salieron del Top-8. <strong style={{ color: C.text }}>Teórico</strong> = ritmo histórico del paper; <strong style={{ color: C.text }}>real</strong> = rendimiento de tu propia cartera (en pesos), ambos anualizados y solo como proyección (no garantía). Valores en US$ al CCL de referencia{cclRef ? ` (${Math.round(cclRef).toLocaleString("es-AR")})` : ""}.
+              <strong style={{ color: "#f59e0b" }}>Momentum actual (iol21)</strong>: {[...paperPicks].sort().join(", ") || "en cash"}{lastRebal ? ` · rebalanceado ${fmtD(lastRebal)}, próximo ~${fmtD(nextRebalApprox)}` : ""}. «Con tu capital siguiendo el momentum» = tu costo crecido al ritmo del paper en esa ventana; el paper es en US$ y tu real en pesos, comparable a grandes rasgos en ventanas cortas. Verde = está en el Top-8 actual. Valores en US$ al CCL de referencia{cclRef ? ` (${Math.round(cclRef).toLocaleString("es-AR")})` : ""}. No es garantía.
             </div>
           )}
           </>
