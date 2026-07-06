@@ -26944,7 +26944,8 @@ function PaperCedearsModule() {
     const wDays = cSum > 0 ? items.reduce((s, it) => s + (it.costArs || 0) * (daysSince(it.first) || 0), 0) / cSum : null;
     // anualizar solo con ≥7 días de tenencia (anualizar 1-2 días daría un número absurdo)
     const retAnn = (retPct != null && wDays >= 7) ? (retPct * 365) / wDays : null;
-    return { ...g, items, usdTotal, retPct, retAnn };
+    const usdCost = (cclRef && cSum) ? cSum / cclRef : 0;
+    return { ...g, items, usdTotal, usdCost, retPct, retAnn, wDays };
   });
   const usdGrand = realEnriched.reduce((s, g) => s + g.usdTotal, 0);
   // Ritmo TEÓRICO = el del paper que replicás (iol21). Para proyectar teórico vs real.
@@ -26952,6 +26953,19 @@ function PaperCedearsModule() {
   const rateMon = iolVar && iolVar.days ? iolVar.monPct : null;
   const rateAnn = iolVar && iolVar.days ? iolVar.annPct : null;
   const momRate = btCagr != null ? btCagr : rateAnn;   // ritmo del momentum: CAGR del backtest 10 años si hay, si no el de 13 meses
+  // Rendimiento del momentum (paper iol21) en la MISMA ventana que tu tenencia,
+  // para la comparativa "vos vs. si hubieras seguido el momentum".
+  const momRetSince = (days) => {
+    const rows = iolVar?.rows || [];
+    if (rows.length < 2 || !days) return null;
+    const lastD = rows[rows.length - 1].d;
+    const fromD = new Date(new Date(lastD + "T00:00:00").getTime() - days * 86400000).toISOString().slice(0, 10);
+    let base = null;
+    for (const r of rows) { if (r.d <= fromD) base = Number(r.equity); else break; }
+    if (base == null) base = Number(rows[0].equity);
+    const now = Number(rows[rows.length - 1].equity);
+    return base > 0 ? (now / base - 1) * 100 : null;
+  };
   // Estado del momentum: última rotación y próxima (~21 ruedas ≈ 30 días) — para que no parezca viejo.
   const iolState = (data.state || []).find((s) => s.id === "iol21");
   const lastRebal = iolState?.last_rebal || null;
@@ -27051,7 +27065,7 @@ function PaperCedearsModule() {
               ? <span style={{ fontSize: 11, color: C.muted }}>total <strong style={{ color: C.text }}>{fUsd(usdGrand)}</strong></span>
               : (paperPicks.size > 0 && <span style={{ fontSize: 10, color: C.dim }}>verde = está en el pick actual del momentum (iol21)</span>)}
           </div>
-          {realEnriched.map(({ broker, items, usdTotal, retPct, retAnn }) => {
+          {realEnriched.map(({ broker, items, usdTotal, usdCost, retPct, retAnn, wDays }) => {
             const nMatch = items.filter((it) => paperPicks.has(it.ticker)).length;
             return (
               <div key={broker} style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
@@ -27073,6 +27087,25 @@ function PaperCedearsModule() {
                     );
                   })}
                 </div>
+                {/* Comparativa: tu cartera vs. si hubieras seguido el momentum, mismo período */}
+                {usdCost > 0 && retPct != null && wDays != null && (() => {
+                  const momR = momRetSince(wDays);
+                  if (momR == null) return null;
+                  const withMom = usdCost * (1 + momR / 100);
+                  const beat = usdTotal >= withMom;
+                  return (
+                    <div style={{ fontSize: 10.5, marginTop: 7, padding: "6px 9px", borderRadius: 6, background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, lineHeight: 1.5 }}>
+                      <span style={{ color: C.dim }}>Últimos {Math.round(wDays)} días — </span>
+                      <span style={{ color: C.muted }}>siguiendo el momentum: </span>
+                      <strong style={{ color: momR >= 0 ? "#34d399" : "#f87171" }}>{fPct(momR)}</strong>
+                      <span style={{ color: C.muted }}> → {fUsd(withMom)}</span>
+                      <span style={{ color: C.dim }}>  ·  vos: </span>
+                      <strong style={{ color: retPct >= 0 ? "#34d399" : "#f87171" }}>{fPct(retPct)}</strong>
+                      <span style={{ color: C.muted }}> → {fUsd(usdTotal)}</span>
+                      <strong style={{ color: beat ? "#34d399" : "#f87171" }}> · {beat ? "le ganás" : "va detrás"} {fUsd(Math.abs(usdTotal - withMom))}</strong>
+                    </div>
+                  );
+                })()}
                 {usdTotal > 0 && (momRate != null || retAnn != null) && (
                   <div style={{ fontSize: 10.5, color: C.dim, marginTop: 7 }}>
                     Proyección a 1 año sobre {fUsd(usdTotal)}:
