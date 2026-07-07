@@ -302,19 +302,6 @@ function maskAmount(formattedStr, hidden) {
   return "●●●●●";
 }
 
-// Módulos top-level del menú (para permisos por usuario). null en allowed_modules
-// = ve todos. Enforcement en Fase C (la app oculta lo que no esté acá).
-const ADMIN_MODULES = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "portfolio-ia", label: "Portfolio" },
-  { id: "bot-trading", label: "Bot Trading" },
-  { id: "bcra", label: "Estadísticas BCRA" },
-  { id: "mercado", label: "Mercado" },
-  { id: "analizadores", label: "Analizadores" },
-  { id: "calculadoras", label: "Calculadoras" },
-  { id: "reportes", label: "Reportes" },
-];
-
 /* Detalle de un usuario: permisos, estado y su data (cartera/caja/libro) con
  * borrar. Lee y escribe con el cliente Supabase normal — el override de admin
  * (RLS) autoriza el acceso a filas de cualquier user_id. */
@@ -347,13 +334,23 @@ function AdminUserDetail({ user, onBack, onChanged }) {
     else { setMsg("Guardado ✓"); onChanged?.(); }
   };
   const toggleStatus = () => { const n = status === "active" ? "suspended" : "active"; setStatus(n); savePatch({ status: n }); };
-  const toggleModule = (id) => {
-    const base = allowed == null ? ADMIN_MODULES.map((m) => m.id) : [...allowed];
-    const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
-    setAllowed(next); savePatch({ allowed_modules: next });
+  // Árbol de permisos: allowed_modules = lista plana de ids de hoja (items de
+  // grupo) + ids de los top-level singles. null = ve todo. El grupo se prende/
+  // apaga tildando todos sus hijos.
+  const allLeafIds = NAV.flatMap((it) => it.children ? it.children.map((c) => c.id) : [it.id]);
+  const allowedSet = allowed == null ? null : new Set(allowed);
+  const isOn = (id) => allowedSet == null || allowedSet.has(id);
+  const setModules = (arr) => { setAllowed(arr); savePatch({ allowed_modules: arr }); };
+  const toggleLeaf = (id) => {
+    const base = allowed == null ? [...allLeafIds] : [...allowed];
+    setModules(base.includes(id) ? base.filter((x) => x !== id) : [...base, id]);
+  };
+  const toggleGroup = (childIds) => {
+    const base = allowed == null ? [...allLeafIds] : [...allowed];
+    const allOn = childIds.every((id) => base.includes(id));
+    setModules(allOn ? base.filter((id) => !childIds.includes(id)) : Array.from(new Set([...base, ...childIds])));
   };
   const resetModules = () => { setAllowed(null); savePatch({ allowed_modules: null }); };
-  const allowedSet = allowed == null ? null : new Set(allowed);
 
   const del = async (table, id, setter, list) => {
     if (!window.confirm("¿Borrar este registro? No se puede deshacer.")) return;
@@ -382,23 +379,52 @@ function AdminUserDetail({ user, onBack, onChanged }) {
         </div>
       </div>
 
-      {/* Permisos de módulos */}
+      {/* Permisos de módulos (árbol: grupo + ítems, se tilda qué ve) */}
       <div style={{ marginTop: 18, padding: "14px 16px", border: `1px solid ${C.border}`, borderRadius: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>Módulos que puede ver</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>Módulos y pantallas que puede ver</span>
           <button onClick={resetModules} style={{ background: "none", border: "none", color: allowed == null ? C.green : C.accent, fontSize: 11, cursor: "pointer" }}>{allowed == null ? "todos (default)" : "restablecer a todos"}</button>
         </div>
-        <div className="flex" style={{ flexWrap: "wrap", gap: 8 }}>
-          {ADMIN_MODULES.map((m) => {
-            const on = allowedSet == null || allowedSet.has(m.id);
-            return (
-              <button key={m.id} onClick={() => toggleModule(m.id)} style={{ padding: "5px 11px", fontSize: 11.5, fontWeight: 600, borderRadius: 4, cursor: "pointer", border: `1px solid ${on ? C.accent : C.border}`, background: on ? "rgba(96,165,250,0.12)" : "transparent", color: on ? C.text : C.dim }}>
-                {on ? "✓ " : ""}{m.label}
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ fontSize: 10, color: C.dim, marginTop: 8 }}>Se aplica cuando el usuario recarga (Fase C). Vos (admin) siempre ves todo.</div>
+        {(() => {
+          const box = (on, some) => (
+            <span style={{ display: "inline-flex", width: 15, height: 15, marginRight: 7, borderRadius: 3, border: `1.5px solid ${on || some ? C.accent : C.dim}`, background: on ? C.accent : "transparent", color: "#0b0e11", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{on ? "✓" : some ? "–" : ""}</span>
+          );
+          return (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "16px 24px" }}>
+              {NAV.map((node) => {
+                if (!node.children) {
+                  const on = isOn(node.id);
+                  return (
+                    <div key={node.id} onClick={() => toggleLeaf(node.id)} style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: 12.5, color: on ? C.text : C.dim, fontWeight: 700 }}>
+                      {box(on)}{node.label}
+                    </div>
+                  );
+                }
+                const childIds = node.children.map((c) => c.id);
+                const onCount = childIds.filter((id) => isOn(id)).length;
+                const gAll = onCount === childIds.length, gSome = onCount > 0 && !gAll;
+                return (
+                  <div key={node.id}>
+                    <div onClick={() => toggleGroup(childIds)} style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: 12.5, color: C.text, fontWeight: 700, marginBottom: 6 }}>
+                      {box(gAll, gSome)}{node.label} <span style={{ color: C.dim, fontWeight: 400, fontSize: 10, marginLeft: 6 }}>{onCount}/{childIds.length}</span>
+                    </div>
+                    <div style={{ paddingLeft: 22, display: "flex", flexDirection: "column", gap: 5 }}>
+                      {node.children.map((c) => {
+                        const on = isOn(c.id);
+                        return (
+                          <div key={c.id} onClick={() => toggleLeaf(c.id)} style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: 11.5, color: on ? C.muted : C.dim }}>
+                            {box(on)}{c.label}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+        <div style={{ fontSize: 10, color: C.dim, marginTop: 12 }}>Tildá lo que puede ver. El título de grupo prende/apaga todos sus ítems. Se aplica cuando el usuario recarga (Fase C). Vos (admin) siempre ves todo.</div>
       </div>
 
       {/* Data del usuario */}
