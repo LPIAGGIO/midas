@@ -27640,6 +27640,30 @@ function PnlPorInstrumentoModule() {
       }
     } catch (err) { console.warn("[PnlPorInstrumento] dual futures falló:", err); }
 
+    // Cauciones: NO son posición (no hay ticker fungible; se liquidan en caja).
+    // Su resultado neto (interés colocadora − tomadora, neto de comisiones) vive
+    // en cash_movements como "Caución resultado neto ...". Lo mostramos como fila
+    // sintética para que el instrumento no falte en el P&L.
+    try {
+      const cauRe = /^Cauci[oó]n resultado/i;
+      let net = 0, ops = 0, first = null, last = null;
+      for (const m of cashMovements || []) {
+        if (!cauRe.test((m.notes || "").trim())) continue;
+        net += (m.movement_type === "deposit" ? 1 : -1) * Number(m.amount || 0);
+        ops++;
+        const d = m.movement_date;
+        if (d) { if (!first || d < first) first = d; if (!last || d > last) last = d; }
+      }
+      if (ops > 0) {
+        acc.set("caucion|CAUCION", {
+          type: "caucion", ticker: "CAUCION", currency: "ARS",
+          buyQty: 0, buyNot: 0, sellQty: 0, sellNot: 0,
+          first, last, realized: net, total: net, hasPnl: true,
+          priceSource: "liquidacion", ops,
+        });
+      }
+    } catch (err) { console.warn("[PnlPorInstrumento] caucion falló:", err); }
+
     return Array.from(acc.values()).map((e) => ({
       ...e,
       pppBuy: e.buyQty > 0 ? e.buyNot / e.buyQty : null,
@@ -27672,7 +27696,7 @@ function PnlPorInstrumentoModule() {
   // (parecía YY/MM/DD invertido).
   const fmtFecha = (iso) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "");
   const fmtM = (n) => `${n >= 0 ? "+$" : "−$"}${Math.abs(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
-  const TYPE_LABEL = { future: "Futuro", bond_ars: "Bono ARS", bond_usd: "Bono USD", on: "ON", stock: "Acción", cedear: "CEDEAR", fci: "FCI", usd: "USD", crypto: "Crypto", option: "Opción" };
+  const TYPE_LABEL = { future: "Futuro", bond_ars: "Bono ARS", bond_usd: "Bono USD", on: "ON", stock: "Acción", cedear: "CEDEAR", fci: "FCI", usd: "USD", crypto: "Crypto", option: "Opción", caucion: "Caución" };
   const tickerLabel = (r) => r.type === "fci" ? fciDisplayName(r.ticker) : r.ticker;
 
   const downloadCsv = () => {
