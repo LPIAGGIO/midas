@@ -9729,6 +9729,42 @@ function ValuationToggle({ value, onChange }) {
  *  - Sin cierre de ayer (ticker sin feed): fallback al lifetime (degradación
  *    segura, mejor que 0).
  */
+/* ─────────── P&L del DÍA de contado arrastrado ───────────
+ * Para un ticker de contado que venía con posición ABIERTA de días previos y se
+ * cerró hoy, la "ganancia del día" NO es el realizado punta-a-punta (venta −
+ * costo histórico): las unidades ARRASTRADAS se miden contra el cierre de AYER,
+ * pero las compradas HOY se miden contra su compra de hoy. Forma exacta:
+ *   día = realizado_total − arrastradas × (cierreAyer − costo_arrastrado)
+ * (re-basa SOLO las arrastradas de su costo histórico al cierre de ayer). Sin
+ * esto, comprar barato hoy y vender tras una caída fuerte de ayer mostraba una
+ * pérdida fantasma gigante sobre unidades que ni tenías ayer (bug MU 07/07: daba
+ * −4,4M cuando el día real fue ~+0,41M). preTodayContadoAgg devuelve, por ticker,
+ * el neto arrastrado (qty) y su valor a costo (value) via walk avg-cost. */
+function preTodayContadoAgg(positions, todayStr) {
+  const preOps = (positions || [])
+    .filter((p) => p && p.instrument_type !== "future" && p.ticker && p.entry_date && p.entry_date < todayStr)
+    .sort((a, b) => (a.entry_date || "").localeCompare(b.entry_date || "") || String(a.created_at || "").localeCompare(String(b.created_at || "")));
+  const agg = new Map();
+  for (const p of preOps) {
+    const tk = (p.ticker || "").toUpperCase();
+    const a = agg.get(tk) || { qty: 0, value: 0 };
+    const q = Number(p.quantity) || 0, px = Number(p.entry_price) || 0;
+    if (p.operation_type === "sell") {
+      const avg = a.qty > 0 ? a.value / a.qty : px;
+      a.value -= avg * Math.min(q, Math.max(a.qty, 0));
+      a.qty -= q;
+    } else { a.value += q * px; a.qty += q; }
+    agg.set(tk, a);
+  }
+  return agg;
+}
+function contadoDayPnlCarried(g, prev, carriedQty, carriedCost) {
+  const lifetime = g.realizedPnl ?? 0;
+  if (!(prev > 0) || carriedCost == null || !Number.isFinite(carriedCost)) return lifetime;
+  const adj = applyConventionToValue(g.instrument_type, 1, carriedQty * (prev - carriedCost));
+  return lifetime - adj;
+}
+
 function computeRealizedTodayContado(positions, bondPrices, stockPrices, futurePrices, fciPrices, valuationCurrency, fx) {
   if (!fx || !positions || !isPnlHoyWindow()) return 0;
   const all = consolidatePositions(positions, bondPrices, futurePrices, fciPrices, stockPrices);
@@ -9741,15 +9777,7 @@ function computeRealizedTodayContado(positions, bondPrices, stockPrices, futureP
   // (Antes pedía que TODAS las ops del ticker fueran de hoy; SPCX caía mal porque
   // tenía round-trips viejos YA CERRADOS — 16/06, 23/06 — que lo marcaban "no todo
   // hoy" aunque el round-trip de hoy fuese intradía puro y diera fantasma.)
-  const preTodayNetByTicker = new Map();
-  for (const p of positions || []) {
-    if (!p || p.instrument_type === "future" || !p.ticker) continue;
-    if (p.entry_date === todayAR) continue; // solo días anteriores
-    const t = p.ticker.toUpperCase();
-    const sign = p.operation_type === "sell" ? -1 : 1;
-    preTodayNetByTicker.set(t, (preTodayNetByTicker.get(t) || 0) + sign * (Number(p.quantity) || 0));
-  }
-  const flatAtStartToday = (t) => Math.abs(preTodayNetByTicker.get(t) || 0) < 1e-6;
+  const preAgg = preTodayContadoAgg(positions, todayAR);
   let sum = 0;
   for (const g of closedToday) {
     if (g.instrument_type === "future") continue;
@@ -9761,19 +9789,14 @@ function computeRealizedTodayContado(positions, bondPrices, stockPrices, futureP
       const den = 1 + Number(m.changePct) / 100;
       if (den > 0) prev = Number(m.price) / den;
     }
+    const a = preAgg.get(tk);
+    const carriedQty = a ? a.qty : 0;
     let dayValue;
-    if (flatAtStartToday(tk)) {
+    if (Math.abs(carriedQty) < 1e-6) {
       dayValue = g.realizedPnl ?? 0; // intradía puro: realizado completo (venta − compra)
-    } else if (prev != null && prev > 0) {
-      let dayRaw = 0;
-      for (const pair of (g.operations || [])) {
-        const qty = Number(pair.quantity) || 0;
-        const sell = Number(pair.sell_price) || 0;
-        if (qty > 0 && sell > 0) dayRaw += qty * (sell - prev);
-      }
-      dayValue = applyConventionToValue(g.instrument_type, 1, dayRaw);
     } else {
-      dayValue = g.realizedPnl ?? 0;
+      const carriedCost = a.qty > 1e-6 ? a.value / a.qty : null;
+      dayValue = contadoDayPnlCarried(g, prev, carriedQty, carriedCost);
     }
     const conv = convertValue(dayValue, g.currency || "ARS", valuationCurrency, fx);
     if (conv != null) sum += conv;
@@ -15656,18 +15679,13 @@ function ConsolidatedSection({
   // realizado = día. El lifetime se conserva en lifetimePnl (lo ves en el detalle).
   const closed = (() => {
     const todayStr = getTodayStringAR();
-    const preTodayNet = new Map();
-    for (const p of positions || []) {
-      if (!p || p.instrument_type === "future" || !p.ticker) continue;
-      if (p.entry_date === todayStr) continue; // solo lotes de días anteriores
-      const t = p.ticker.toUpperCase();
-      const sign = p.operation_type === "sell" ? -1 : 1;
-      preTodayNet.set(t, (preTodayNet.get(t) || 0) + sign * (Number(p.quantity) || 0));
-    }
+    const preAgg = preTodayContadoAgg(positions, todayStr);
     return closedRaw.map((g) => {
       if (g.instrument_type === "future") return g;
       const tk = (g.ticker || "").toUpperCase();
-      if (Math.abs(preTodayNet.get(tk) || 0) < 1e-6) return g; // intradía puro: realizado = día
+      const a = preAgg.get(tk);
+      const carriedQty = a ? a.qty : 0;
+      if (Math.abs(carriedQty) < 1e-6) return g; // intradía puro: realizado = día
       const isEq = g.instrument_type === "stock" || g.instrument_type === "cedear";
       const m = isEq ? stockPrices?.[tk] : bondPrices?.[tk];
       let prev = m?.previousClose;
@@ -15676,14 +15694,16 @@ function ConsolidatedSection({
         if (den > 0) prev = Number(m.price) / den;
       }
       if (prev == null || !(prev > 0)) return g; // sin cierre de ayer: dejamos el realizado
-      let dayRaw = 0, baseRaw = 0;
+      const carriedCost = a.qty > 1e-6 ? a.value / a.qty : null;
+      const dayPnl = contadoDayPnlCarried(g, prev, carriedQty, carriedCost);
+      // % sobre el costo de lo vendido hoy (a PPP de los pares).
+      let costRaw = 0;
       for (const pair of (g.operations || [])) {
-        const qty = Number(pair.quantity) || 0;
-        const sell = Number(pair.sell_price) || 0;
-        if (qty > 0 && sell > 0) { dayRaw += qty * (sell - prev); baseRaw += qty * prev; }
+        const qty = Number(pair.quantity) || 0, bp = pair.entry_price;
+        if (qty > 0 && bp != null) costRaw += qty * bp;
       }
-      const dayPnl = applyConventionToValue(g.instrument_type, 1, dayRaw);
-      const dayPct = baseRaw > 0 ? (dayRaw / baseRaw) * 100 : g.pnlPct;
+      const costVal = applyConventionToValue(g.instrument_type, 1, costRaw);
+      const dayPct = Math.abs(costVal) > 0 ? (dayPnl / Math.abs(costVal)) * 100 : g.pnlPct;
       // pnl/valueAtMarket → tramo del día; lifetimePnl queda como el realizado
       // total del trade (se ve en la fila expandida como "Histórico del ticker").
       return { ...g, pnl: dayPnl, realizedPnl: dayPnl, valueAtMarket: dayPnl, pnlPct: dayPct };
