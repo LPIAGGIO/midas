@@ -314,6 +314,9 @@ function AdminUserDetail({ user, onBack, onChanged }) {
   const [allowed, setAllowed] = useState(user.allowed_modules);
   const [msg, setMsg] = useState(null);
   const [tab, setTab] = useState("pos");
+  const [expanded, setExpanded] = useState({});
+  const toggleExpand = (id) => setExpanded((e) => ({ ...e, [id]: !e[id] }));
+  const setAllExpanded = (val) => setExpanded(Object.fromEntries(NAV.filter((n) => n.children).map((n) => [n.id, val])));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -381,43 +384,63 @@ function AdminUserDetail({ user, onBack, onChanged }) {
 
       {/* Permisos de módulos (árbol: grupo + ítems, se tilda qué ve) */}
       <div style={{ marginTop: 18, padding: "14px 16px", border: `1px solid ${C.border}`, borderRadius: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>Módulos y pantallas que puede ver</span>
-          <button onClick={resetModules} style={{ background: "none", border: "none", color: allowed == null ? C.green : C.accent, fontSize: 11, cursor: "pointer" }}>{allowed == null ? "todos (default)" : "restablecer a todos"}</button>
+          <div className="flex" style={{ gap: 14 }}>
+            <button onClick={() => setAllExpanded(true)} style={{ background: "none", border: "none", color: C.muted, fontSize: 11, cursor: "pointer" }}>Expandir todo</button>
+            <button onClick={() => setAllExpanded(false)} style={{ background: "none", border: "none", color: C.muted, fontSize: 11, cursor: "pointer" }}>Colapsar</button>
+            <button onClick={resetModules} style={{ background: "none", border: "none", color: allowed == null ? C.green : C.accent, fontSize: 11, cursor: "pointer" }}>{allowed == null ? "todos (default)" : "restablecer a todos"}</button>
+          </div>
         </div>
         {(() => {
           const box = (on, some) => (
-            <span style={{ display: "inline-flex", width: 15, height: 15, marginRight: 7, borderRadius: 3, border: `1.5px solid ${on || some ? C.accent : C.dim}`, background: on ? C.accent : "transparent", color: "#0b0e11", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{on ? "✓" : some ? "–" : ""}</span>
+            <span style={{ display: "inline-flex", width: 15, height: 15, marginRight: 8, borderRadius: 3, border: `1.5px solid ${on || some ? C.accent : C.dim}`, background: on ? C.accent : "transparent", color: "#0b0e11", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{on ? "✓" : some ? "–" : ""}</span>
           );
+          const row = { display: "flex", alignItems: "center", cursor: "pointer", padding: "3px 4px", borderRadius: 4, userSelect: "none" };
           return (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "16px 24px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 1, maxWidth: 560 }}>
               {NAV.map((node) => {
+                const NodeIcon = node.icon;
                 if (!node.children) {
                   const on = isOn(node.id);
                   return (
-                    <div key={node.id} onClick={() => toggleLeaf(node.id)} style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: 12.5, color: on ? C.text : C.dim, fontWeight: 700 }}>
-                      {box(on)}{node.label}
+                    <div key={node.id} onClick={() => toggleLeaf(node.id)} style={{ ...row, fontSize: 12.5, color: on ? C.text : C.dim, fontWeight: 700 }}>
+                      <span style={{ width: 16, flexShrink: 0 }} />
+                      {box(on)}
+                      {NodeIcon && <NodeIcon size={14} style={{ marginRight: 7, opacity: on ? 1 : 0.5, flexShrink: 0 }} />}
+                      {node.label}
                     </div>
                   );
                 }
                 const childIds = node.children.map((c) => c.id);
                 const onCount = childIds.filter((id) => isOn(id)).length;
                 const gAll = onCount === childIds.length, gSome = onCount > 0 && !gAll;
+                const isExp = !!expanded[node.id];
                 return (
                   <div key={node.id}>
-                    <div onClick={() => toggleGroup(childIds)} style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: 12.5, color: C.text, fontWeight: 700, marginBottom: 6 }}>
-                      {box(gAll, gSome)}{node.label} <span style={{ color: C.dim, fontWeight: 400, fontSize: 10, marginLeft: 6 }}>{onCount}/{childIds.length}</span>
+                    <div style={{ ...row, fontSize: 12.5, color: C.text, fontWeight: 700 }}>
+                      <button onClick={() => toggleExpand(node.id)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", width: 16, fontSize: 9, padding: 0, flexShrink: 0 }}>{isExp ? "▼" : "▶"}</button>
+                      <span onClick={() => toggleGroup(childIds)} style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+                        {box(gAll, gSome)}
+                        {NodeIcon && <NodeIcon size={14} style={{ marginRight: 7, color: onCount ? C.accent : C.dim, flexShrink: 0 }} />}
+                        {node.label}
+                        <span style={{ color: C.dim, fontWeight: 400, fontSize: 10, marginLeft: 7 }}>{onCount}/{childIds.length}</span>
+                      </span>
                     </div>
-                    <div style={{ paddingLeft: 22, display: "flex", flexDirection: "column", gap: 5 }}>
-                      {node.children.map((c) => {
-                        const on = isOn(c.id);
-                        return (
-                          <div key={c.id} onClick={() => toggleLeaf(c.id)} style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: 11.5, color: on ? C.muted : C.dim }}>
-                            {box(on)}{c.label}
-                          </div>
-                        );
-                      })}
-                    </div>
+                    {isExp && (
+                      <div style={{ marginLeft: 9, paddingLeft: 16, borderLeft: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 1, marginTop: 1, marginBottom: 3 }}>
+                        {node.children.map((c) => {
+                          const CIcon = c.icon; const on = isOn(c.id);
+                          return (
+                            <div key={c.id} onClick={() => toggleLeaf(c.id)} style={{ ...row, fontSize: 11.5, color: on ? C.muted : C.dim }}>
+                              {box(on)}
+                              {CIcon && <CIcon size={13} style={{ marginRight: 7, opacity: on ? 1 : 0.5, flexShrink: 0 }} />}
+                              {c.label}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
