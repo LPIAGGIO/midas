@@ -3578,6 +3578,334 @@ function IolActivityList({ userId }) {
 }
 
 
+/* ─────────────── Cuenta corriente (Libro fuente de verdad) ───────────────
+ *
+ * Importador + ledger de la CUENTA CORRIENTE completa de Cocos (CSV
+ * movimientos_cuenta): trae TODO con comisión/derecho/IVA por operación.
+ * Dedup por nroComprobante (único por fila). Fase 1: ledger crudo, no toca
+ * posiciones ni caja. Fase 2 (después): derivar posiciones/caja/comisiones.
+ */
+const _numAr = (s) => {
+  if (s == null || s === "") return 0;
+  const v = parseFloat(String(s).replace(/\./g, "").replace(/,/, "."));
+  return Number.isFinite(v) ? v : 0;
+};
+const _isoFromDMY = (s) => {
+  const m = (s || "").trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+};
+const _tickerFromInstrumento = (instr) => {
+  const m = (instr || "").match(/\(([^)]+)\)\s*$/);
+  return m ? m[1].trim().replace(/\//g, "").toUpperCase() : null;
+};
+const _categoriaMov = (tipo, instr) => {
+  const t = (tipo || "").toLowerCase();
+  if (/caucion/.test(t)) return "caucion";
+  if (/arancel/.test(t)) return "arancel";
+  if (/ret\.imp|retencion|imp\.gcias/.test(t)) return "impuesto";
+  if (/fci/.test(t)) return "fci";
+  if (/renta y amort/.test(t)) return "renta";
+  if (/cambio/.test(t)) return "futuro_liq";
+  if (/indice/.test(t)) return "futuro";
+  if (/compra|venta/.test(t)) {
+    if (/CEDEAR/i.test(instr)) return "trade_cedear";
+    if (/BONO|LETRA|LT |ON /i.test(instr)) return "trade_bono";
+    return "trade_otro";
+  }
+  if (/recibo|orden de pago|nota de|dividendos/.test(t)) return "cash";
+  return "otro";
+};
+const CAT_LABEL = {
+  trade_cedear: "CEDEAR", trade_bono: "Bono", trade_otro: "Acción", futuro: "Futuro",
+  futuro_liq: "Fut. cambio", fci: "FCI", caucion: "Caución", arancel: "Arancel",
+  impuesto: "Impuesto", renta: "Renta", cash: "Caja", otro: "Otro",
+};
+
+/** Parsea el CSV movimientos_cuenta (semicolon, formato AR). Marca dup por comprobante. */
+function parseMovimientosCsv(text, existing) {
+  const lines = (text || "").split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return [];
+  const header = lines[0].split(";").map((h) => h.trim());
+  const ix = (n) => header.indexOf(n);
+  const iComp = ix("nroComprobante"), iTk = ix("nroTicket"), iFe = ix("fechaEjecucion"),
+    iFl = ix("fechaLiquidacion"), iTipo = ix("tipoOperacion"), iInstr = ix("instrumento"),
+    iMon = ix("moneda"), iMerc = ix("mercado"), iCant = ix("cantidad"), iPre = ix("precio"),
+    iBruto = ix("montoBruto"), iCom = ix("comision"), iDd = ix("ddmm"), iIva = ix("iva"),
+    iOtros = ix("otros"), iTot = ix("total");
+  if (iComp < 0 || iTipo < 0 || iTot < 0) return null; // formato no reconocido
+  const out = [];
+  const seen = new Set();
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split(";");
+    const comp = (c[iComp] || "").trim();
+    if (!comp || seen.has(comp)) continue;
+    seen.add(comp);
+    const tipo = (c[iTipo] || "").trim();
+    const instr = (c[iInstr] || "").trim();
+    out.push({
+      nro_comprobante: comp,
+      nro_ticket: (c[iTk] || "").trim() || null,
+      fecha_ejecucion: _isoFromDMY(c[iFe]),
+      fecha_liquidacion: _isoFromDMY(c[iFl]),
+      tipo_operacion: tipo,
+      instrumento: instr || null,
+      ticker: _tickerFromInstrumento(instr),
+      moneda: (c[iMon] || "").trim() || null,
+      mercado: (c[iMerc] || "").trim() || null,
+      cantidad: _numAr(c[iCant]),
+      precio: _numAr(c[iPre]),
+      monto_bruto: _numAr(c[iBruto]),
+      comision: _numAr(c[iCom]),
+      ddmm: _numAr(c[iDd]),
+      iva: _numAr(c[iIva]),
+      otros: _numAr(c[iOtros]),
+      total: _numAr(c[iTot]),
+      categoria: _categoriaMov(tipo, instr),
+      status: existing && existing.has(comp) ? "dup" : "new",
+    });
+  }
+  return out;
+}
+
+/** Hook: filas de libro_movimientos del usuario. */
+function useLibroMovimientos() {
+  const { user } = useAuth();
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  const reload = useCallback(() => setTick((t) => t + 1), []);
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      if (!user) { setRows([]); setLoading(false); return; }
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("libro_movimientos")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("fecha_ejecucion", { ascending: false })
+        .order("nro_comprobante", { ascending: false });
+      if (!cancel) { setRows(error ? [] : (data || [])); setLoading(false); }
+    })();
+    return () => { cancel = true; };
+  }, [user, tick]);
+  return { rows, loading, reload };
+}
+
+function ImportCuentaCorrienteModal({ existingComprobantes, onDone, onClose }) {
+  const { user } = useAuth();
+  const [rows, setRows] = useState(null);
+  const [fileName, setFileName] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const onFile = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFileName(f.name); setResult(null);
+    try {
+      const parsed = parseMovimientosCsv(await f.text(), existingComprobantes);
+      if (parsed == null) { setRows([]); setResult({ inserted: 0, errs: ["No reconozco el formato (esperaba el CSV movimientos_cuenta de Cocos, separado por ';')."] }); return; }
+      setRows(parsed);
+    } catch (err) {
+      setRows([]); setResult({ inserted: 0, errs: [`No se pudo leer el archivo: ${err.message}`] });
+    }
+  };
+
+  const newRows = (rows || []).filter((r) => r.status === "new");
+  const dupCount = (rows || []).filter((r) => r.status === "dup").length;
+
+  const doImport = async () => {
+    setImporting(true);
+    let inserted = 0; const errs = [];
+    for (let k = 0; k < newRows.length; k += 300) {
+      const chunk = newRows.slice(k, k + 300).map(({ status, ...r }) => ({ ...r, user_id: user.id }));
+      const { error } = await supabase
+        .from("libro_movimientos")
+        .upsert(chunk, { onConflict: "user_id,nro_comprobante", ignoreDuplicates: true });
+      if (error) { errs.push(error.message); break; }
+      inserted += chunk.length;
+    }
+    setImporting(false);
+    setResult({ inserted, errs });
+    if (!errs.length) onDone?.();
+  };
+
+  const fmtM = (n) => Number(n).toLocaleString("es-AR", { maximumFractionDigits: 2 });
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.55)", backdropFilter: "blur(2px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ backgroundColor: C.panel, border: `1px solid ${C.borderStrong}`, padding: 24, maxWidth: 720, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Importar cuenta corriente (movimientos de Cocos)</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 16 }}>×</button>
+        </div>
+        <div style={{ fontSize: 10.5, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
+          El CSV <b>movimientos_cuenta</b> de Cocos: la cuenta corriente completa (trades, FCI, caución, aranceles, rentas) con <b>comisión + derecho de mercado + IVA por operación</b>. <b style={{ color: C.text }}>Dedup por comprobante — subilo completo o de a poco, las veces que quieras, solo agrega lo nuevo.</b>
+        </div>
+        <label style={{ display: "inline-block", padding: "8px 14px", border: `1px solid ${C.border}`, color: C.text, fontSize: 11, cursor: "pointer", marginBottom: 14, alignSelf: "flex-start" }}>
+          {fileName || "Elegir archivo .csv"}
+          <input type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
+        </label>
+        {rows && rows.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, color: C.text, marginBottom: 8 }}>
+              <b style={{ color: C.green }}>{newRows.length}</b> nuevas · {dupCount} ya cargadas
+            </div>
+            <div style={{ overflowY: "auto", border: `1px solid ${C.border}`, marginBottom: 14, maxHeight: 340 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+                <thead><tr style={{ color: C.dim, textAlign: "left" }}>
+                  <th style={{ padding: "5px 8px" }}>Estado</th><th style={{ padding: "5px 8px" }}>Fecha</th>
+                  <th style={{ padding: "5px 8px" }}>Tipo</th><th style={{ padding: "5px 8px" }}>Ticker</th>
+                  <th style={{ padding: "5px 8px", textAlign: "right" }}>Comis.</th><th style={{ padding: "5px 8px", textAlign: "right" }}>Total</th>
+                </tr></thead>
+                <tbody>
+                  {rows.slice(0, 300).map((r, i) => (
+                    <tr key={r.nro_comprobante + i} style={{ borderTop: `1px solid ${C.border}`, opacity: r.status === "new" ? 1 : 0.5 }}>
+                      <td style={{ padding: "4px 8px", fontSize: 9, fontWeight: 700, color: r.status === "new" ? C.green : C.dim }}>{r.status === "new" ? "NUEVA" : "ya cargada"}</td>
+                      <td style={{ padding: "4px 8px", color: C.muted }}>{r.fecha_ejecucion || "—"}</td>
+                      <td style={{ padding: "4px 8px", color: C.muted }}>{CAT_LABEL[r.categoria] || r.categoria} <span style={{ color: C.dim }}>{r.tipo_operacion}</span></td>
+                      <td style={{ padding: "4px 8px", color: C.text }}>{r.ticker || "—"}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right", color: C.dim }}>{fmtM(Math.abs(r.comision) + Math.abs(r.ddmm) + Math.abs(r.iva)) }</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right", color: r.total >= 0 ? C.green : C.red }}>{fmtM(r.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button onClick={doImport} disabled={importing || newRows.length === 0} style={{ padding: "9px 16px", backgroundColor: newRows.length ? C.accent : C.border, color: newRows.length ? "#0b0e11" : C.dim, border: "none", fontSize: 12, fontWeight: 700, cursor: newRows.length && !importing ? "pointer" : "default", alignSelf: "flex-start" }}>
+              {importing ? "Importando…" : `Importar ${newRows.length} nuevas`}
+            </button>
+          </>
+        )}
+        {result && (
+          <div style={{ marginTop: 12, fontSize: 11, color: result.errs.length ? C.red : C.green }}>
+            {result.errs.length ? result.errs.join(" · ") : `✓ ${result.inserted} movimientos importados.`}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Ledger de la cuenta corriente: tabla cruda con comisiones + totales por período. */
+function CuentaCorrienteView() {
+  const { rows, loading, reload } = useLibroMovimientos();
+  const [importOpen, setImportOpen] = useState(false);
+  const [period, setPeriod] = useState("all");   // all | mes | mesant | anio
+  const [catFilter, setCatFilter] = useState("all");
+  const [confirmWipe, setConfirmWipe] = useState(false);
+  const { user } = useAuth();
+
+  const existingComprobantes = useMemo(() => new Set(rows.map((r) => r.nro_comprobante)), [rows]);
+
+  const inPeriod = (iso) => {
+    if (!iso || period === "all") return true;
+    const now = new Date();
+    const y = now.getFullYear(), mo = now.getMonth();
+    const d = new Date(iso + "T00:00:00");
+    if (period === "anio") return d.getFullYear() === y;
+    if (period === "mes") return d.getFullYear() === y && d.getMonth() === mo;
+    if (period === "mesant") { const pm = mo === 0 ? 11 : mo - 1; const py = mo === 0 ? y - 1 : y; return d.getFullYear() === py && d.getMonth() === pm; }
+    return true;
+  };
+
+  const shown = useMemo(() => rows.filter((r) => inPeriod(r.fecha_ejecucion) && (catFilter === "all" || r.categoria === catFilter)), [rows, period, catFilter]);
+  const cats = useMemo(() => Array.from(new Set(rows.map((r) => r.categoria))), [rows]);
+  const totComis = shown.reduce((s, r) => s + Math.abs(r.comision) + Math.abs(r.ddmm) + Math.abs(r.iva), 0);
+  const totNeto = shown.reduce((s, r) => s + (Number(r.total) || 0), 0);
+
+  const wipeAll = async () => {
+    if (!user) return;
+    await supabase.from("libro_movimientos").delete().eq("user_id", user.id);
+    setConfirmWipe(false); reload();
+  };
+
+  const fmtM = (n) => `${n < 0 ? "−$" : "$"}${Math.abs(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
+  const fmtN = (n) => Number(n).toLocaleString("es-AR", { maximumFractionDigits: 2 });
+  const PERIODS = [["all", "Todo"], ["mes", "Este mes"], ["mesant", "Mes anterior"], ["anio", "Año"]];
+
+  return (
+    <div>
+      {importOpen && <ImportCuentaCorrienteModal existingComprobantes={existingComprobantes} onDone={reload} onClose={() => setImportOpen(false)} />}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: C.muted }}>{rows.length} movimientos en el libro{rows.length ? ` · ${cats.length} categorías` : ""}</div>
+        <div className="flex" style={{ gap: 8 }}>
+          <button onClick={() => setImportOpen(true)} style={{ padding: "8px 14px", backgroundColor: C.accent, color: "#0b0e11", border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>↑ Importar cuenta corriente</button>
+          {rows.length > 0 && (confirmWipe
+            ? <button onClick={wipeAll} style={{ padding: "8px 14px", backgroundColor: C.red, color: "#fff", border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>¿Seguro? Borrar todo</button>
+            : <button onClick={() => setConfirmWipe(true)} style={{ padding: "8px 14px", backgroundColor: "transparent", color: C.muted, border: `1px solid ${C.border}`, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Borrar todo</button>)}
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center" }}><Loader2 size={24} color={C.muted} className="eco-spin" /></div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding: "28px 20px", border: `1px dashed ${C.border}`, textAlign: "center", color: C.muted, fontSize: 12, lineHeight: 1.6 }}>
+          Tu libro está vacío. Importá el CSV <b>movimientos_cuenta</b> de Cocos y vas a ver acá cada operación con su comisión, derecho de mercado e IVA. Dedup por comprobante: subilo cuando quieras, no duplica.
+        </div>
+      ) : (
+        <>
+          {/* Comisiones acumuladas — destacado arriba */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 12, background: "rgba(255,255,255,0.02)" }}>
+            <span style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Comisiones acumuladas <span style={{ fontSize: 10, color: C.dim, fontWeight: 400 }}>· derecho de mercado + IVA + aranceles{period !== "all" ? ` · ${PERIODS.find((p) => p[0] === period)?.[1]}` : ""}</span></span>
+            <span style={{ fontSize: 16, fontWeight: 700, color: C.red, fontVariantNumeric: "tabular-nums" }}>−${totComis.toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>
+          </div>
+
+          <div className="flex" style={{ gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+            {PERIODS.map(([k, l]) => (
+              <button key={k} onClick={() => setPeriod(k)} style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", border: `1px solid ${period === k ? C.accent : C.border}`, background: period === k ? C.accent : "transparent", color: period === k ? "#0b0e11" : C.muted }}>{l}</button>
+            ))}
+            <span style={{ width: 12 }} />
+            <button onClick={() => setCatFilter("all")} style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", border: `1px solid ${catFilter === "all" ? C.text : C.border}`, background: "transparent", color: catFilter === "all" ? C.text : C.dim }}>Todas</button>
+            {cats.map((k) => (
+              <button key={k} onClick={() => setCatFilter(k)} style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: "pointer", border: `1px solid ${catFilter === k ? C.text : C.border}`, background: "transparent", color: catFilter === k ? C.text : C.dim }}>{CAT_LABEL[k] || k}</button>
+            ))}
+          </div>
+
+          <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead><tr style={{ color: C.dim, textAlign: "left", borderBottom: `1px solid ${C.border}` }}>
+                <th style={{ padding: "8px 10px" }}>Fecha</th><th style={{ padding: "8px 10px" }}>Tipo</th>
+                <th style={{ padding: "8px 10px" }}>Ticker</th>
+                <th style={{ padding: "8px 10px", textAlign: "right" }}>Cant.</th><th style={{ padding: "8px 10px", textAlign: "right" }}>Precio</th>
+                <th style={{ padding: "8px 10px", textAlign: "right" }}>Der.+IVA</th><th style={{ padding: "8px 10px", textAlign: "right" }}>Comis.</th>
+                <th style={{ padding: "8px 10px", textAlign: "right" }}>Total (ARS)</th>
+              </tr></thead>
+              <tbody>
+                {shown.slice(0, 400).map((r) => {
+                  const der = Math.abs(r.ddmm) + Math.abs(r.iva);
+                  return (
+                    <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <td style={{ padding: "7px 10px", color: C.muted, whiteSpace: "nowrap" }}>{r.fecha_ejecucion || "—"}</td>
+                      <td style={{ padding: "7px 10px", color: C.muted, whiteSpace: "nowrap" }}><span style={{ color: C.text, fontWeight: 600 }}>{CAT_LABEL[r.categoria] || r.categoria}</span> <span style={{ color: C.dim, fontSize: 10 }}>{r.tipo_operacion}</span></td>
+                      <td style={{ padding: "7px 10px", color: C.text, fontWeight: 600 }}>{r.ticker || "—"}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{r.cantidad ? fmtN(r.cantidad) : "—"}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{r.precio ? fmtN(r.precio) : "—"}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: der ? C.red : C.dim, fontVariantNumeric: "tabular-nums" }}>{der ? `−${fmtN(der)}` : "—"}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: r.comision ? C.red : C.dim, fontVariantNumeric: "tabular-nums" }}>{r.comision ? `−${fmtN(Math.abs(r.comision))}` : "—"}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: r.total >= 0 ? C.green : C.red, fontVariantNumeric: "tabular-nums", fontWeight: 600, whiteSpace: "nowrap" }}>{fmtM(r.total)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot><tr style={{ borderTop: `2px solid ${C.border}` }}>
+                <td colSpan={5} style={{ padding: "8px 10px", fontSize: 11, color: C.muted, fontWeight: 600 }}>{shown.length} movimientos{shown.length > 400 ? " (mostrando 400)" : ""} · impacto neto en caja</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", color: C.red, fontWeight: 700, whiteSpace: "nowrap" }}>−{fmtN(totComis)}</td>
+                <td />
+                <td style={{ padding: "8px 10px", textAlign: "right", color: totNeto >= 0 ? C.green : C.red, fontWeight: 700, whiteSpace: "nowrap" }}>{fmtM(totNeto)}</td>
+              </tr></tfoot>
+            </table>
+          </div>
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 8, lineHeight: 1.5 }}>
+            Fase 1: ledger crudo de tu cuenta corriente (no toca todavía posiciones ni caja). <b style={{ color: C.muted }}>Der.+IVA</b> = derecho de mercado + IVA por operación; <b style={{ color: C.muted }}>Comis.</b> = arancel del broker (en Cocos es plan fijo → suele ser $0). El <b style={{ color: C.muted }}>Total</b> es el impacto neto en la caja de esa fila.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ─────────────── LibroOperacionesModule ───────────────
  *
  * Pantalla "Libro de operaciones" — el registro completo de TODOS los
@@ -3595,6 +3923,7 @@ function IolActivityList({ userId }) {
  */
 function LibroOperacionesModule() {
   const { user, loading } = useAuth();
+  const [tab, setTab] = useState("cuenta"); // "cuenta" (fuente de verdad) | "cartera"
 
   if (loading) {
     return (
@@ -3606,10 +3935,36 @@ function LibroOperacionesModule() {
 
   if (!user) return <PortfolioAuthWall />;
 
-  return <LibroOperacionesView />;
+  const tabBtn = (k, label) => (
+    <button onClick={() => setTab(k)} style={{
+      padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+      border: `1px solid ${tab === k ? C.accent : C.border}`,
+      background: tab === k ? C.accent : "transparent",
+      color: tab === k ? "#0b0e11" : C.muted,
+    }}>{label}</button>
+  );
+
+  return (
+    <div style={{ padding: "32px 36px 80px", maxWidth: 1400, margin: "0 auto" }}>
+      <div style={{ marginBottom: 8 }}>
+        <span style={{ fontSize: 9, letterSpacing: "0.22em", color: C.dim, textTransform: "uppercase", fontWeight: 600 }}>Reportes · Beta</span>
+      </div>
+      <h1 style={{ fontFamily: "'Raleway', sans-serif", fontWeight: 700, fontSize: 32, color: C.text, margin: 0, marginBottom: 6 }}>Libro de operaciones</h1>
+      <p style={{ fontSize: 13, color: C.muted, marginTop: 0, marginBottom: 18 }}>
+        {tab === "cuenta"
+          ? "La cuenta corriente completa de Cocos — cada operación con su comisión, derecho de mercado e IVA. Fuente de verdad."
+          : "Tu cartera cargada (posiciones + movimientos de efectivo)."}
+      </p>
+      <div className="flex" style={{ gap: 8, marginBottom: 22 }}>
+        {tabBtn("cuenta", "Cuenta corriente")}
+        {tabBtn("cartera", "Cartera (posiciones)")}
+      </div>
+      {tab === "cuenta" ? <CuentaCorrienteView /> : <LibroOperacionesView embedded />}
+    </div>
+  );
 }
 
-function LibroOperacionesView() {
+function LibroOperacionesView({ embedded = false }) {
   const { positions, loading, error, updatePosition, deletePosition } = useUserPositions();
   const bondPricesState = useBondPrices();
   // Hook de cash: necesario para mostrar y editar/borrar movements manuales
@@ -3763,37 +4118,22 @@ function LibroOperacionesView() {
   }
 
   return (
-    <div style={{ padding: "32px 36px 80px", maxWidth: 1400, margin: "0 auto" }}>
-      {/* Header */}
-      <div style={{ marginBottom: 8 }}>
-        <span style={{
-          fontSize: 9,
-          letterSpacing: "0.22em",
-          color: C.dim,
-          textTransform: "uppercase",
-          fontWeight: 600,
-        }}>
-          Reportes · Beta
-        </span>
-      </div>
-      <h1 style={{
-        fontFamily: "'Raleway', sans-serif",
-        fontWeight: 700,
-        fontSize: 32,
-        color: C.text,
-        margin: 0,
-        marginBottom: 6,
-      }}>
-        Libro de operaciones
-      </h1>
-      <p style={{ fontSize: 13, color: C.muted, marginTop: 0, marginBottom: 24 }}>
-        Registro completo de todos tus movimientos — {(positions?.length || 0) + manualMovements.length} en total
-        {manualMovements.length > 0 && (
-          <span style={{ color: C.dim }}>
-            {" "}({positions?.length || 0} operaciones · {manualMovements.length} movimientos de efectivo)
-          </span>
-        )}.
-      </p>
+    <div style={{ padding: embedded ? 0 : "32px 36px 80px", maxWidth: 1400, margin: "0 auto" }}>
+      {!embedded && (
+        <>
+          {/* Header */}
+          <div style={{ marginBottom: 8 }}>
+            <span style={{ fontSize: 9, letterSpacing: "0.22em", color: C.dim, textTransform: "uppercase", fontWeight: 600 }}>Reportes · Beta</span>
+          </div>
+          <h1 style={{ fontFamily: "'Raleway', sans-serif", fontWeight: 700, fontSize: 32, color: C.text, margin: 0, marginBottom: 6 }}>Libro de operaciones</h1>
+          <p style={{ fontSize: 13, color: C.muted, marginTop: 0, marginBottom: 24 }}>
+            Registro completo de todos tus movimientos — {(positions?.length || 0) + manualMovements.length} en total
+            {manualMovements.length > 0 && (
+              <span style={{ color: C.dim }}>{" "}({positions?.length || 0} operaciones · {manualMovements.length} movimientos de efectivo)</span>
+            )}.
+          </p>
+        </>
+      )}
 
       {/* Filtros */}
       <div style={{
