@@ -13550,14 +13550,20 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
   const ix = (name) => header.indexOf(name);
   const iOrder = ix("order_id"), iAcct = ix("account"), iSec = ix("security_id"),
     iSym = ix("symbol"), iTime = ix("transact_time"), iSide = ix("side"),
-    iAvg = ix("avg_price"), iCum = ix("cum_qty");
+    iAvg = ix("avg_price"), iCum = ix("cum_qty"), iEvent = ix("event_subtype");
   if (iOrder < 0 || iSym < 0 || iCum < 0) return []; // formato no reconocido
   // Agrupar por order_id, quedarse con la fila de mayor cum_qty (estado final).
+  // Cada orden puede venir en varios fills parciales (una fila por fill, con el
+  // cum_qty acumulándose) y a veces una fila final event_subtype="cancel" que
+  // repite el cum del último fill (lo NO ejecutado se cancela). Salteamos esas
+  // filas cancel: no aportan cantidad y solo confunden. El cum_qty final de la
+  // orden = el mayor de sus fills ejecutados = lo realmente operado.
   const byOrder = new Map();
   for (let li = 1; li < lines.length; li++) {
     const c = lines[li].split(",");
     const oid = (c[iOrder] || "").trim();
     if (!oid) continue;
+    if (iEvent >= 0 && (c[iEvent] || "").trim().toLowerCase() === "cancel") continue;
     const cum = Number(c[iCum]) || 0;
     const prev = byOrder.get(oid);
     if (!prev || cum >= prev.cum) byOrder.set(oid, { cols: c, cum });
@@ -13810,11 +13816,11 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
         }}
       >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Importar CSV de Matriz</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Importar CSV de operaciones (Cocos/Matriz)</span>
           <button onClick={onClose} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 16 }}>×</button>
         </div>
         <div style={{ fontSize: 10.5, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
-          Reporte de operaciones de Cocos/Matriz. Importa <b>futuros DLR</b> (posición) y bonos. Los <b>soberanos hard-dollar</b> (AL/GD/AE/GE) se toman como <b>canje</b>: comprar/vender AL30↔AL30D es convertir moneda, no deja posición — entran como movimiento de caja (pesos↔USD), así no aparecen shorts. Los bonos en pesos/CER entran como posición. Agrupa fills parciales y normaliza el precio (Matriz cotiza ×100). Las cauciones se ignoran. Dedup por order_id — no duplica al re-importar.
+          Reporte de operaciones de Cocos/Matriz. Importa en una sola pasada <b>futuros DLR, CEDEARs, acciones y bonos</b>: agrupa los fills parciales por orden (saltea los cancelados) y toma la cantidad y el precio promedio finales — así una venta grande que salió en fills de a 100 entra como una sola operación por su neto. Los <b>soberanos hard-dollar</b> (AL/GD/AE/GE) se toman como <b>canje</b> (conversión de moneda, no deja posición → sin shorts fantasma). Las <b>cauciones</b> se ignoran (se cargan a mano). <b style={{ color: C.text }}>Dedup por orden: subí el archivo completo o de a poco, las veces que quieras — solo agrega lo nuevo, nunca duplica.</b>
         </div>
 
         <label style={{
@@ -15437,7 +15443,7 @@ function ConsolidatedSection({
             <button
               onClick={onImportCsv}
               className="flex items-center gap-2"
-              title="Importar operaciones desde el CSV de Cocos/Matriz (solo futuros)"
+              title="Importar operaciones desde el CSV de Cocos/Matriz (futuros, CEDEARs, acciones y bonos) — dedup por orden, nunca duplica"
               style={{
                 backgroundColor: "transparent",
                 color: C.muted,
