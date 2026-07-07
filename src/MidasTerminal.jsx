@@ -302,6 +302,138 @@ function maskAmount(formattedStr, hidden) {
   return "●●●●●";
 }
 
+// Módulos top-level del menú (para permisos por usuario). null en allowed_modules
+// = ve todos. Enforcement en Fase C (la app oculta lo que no esté acá).
+const ADMIN_MODULES = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "portfolio-ia", label: "Portfolio" },
+  { id: "bot-trading", label: "Bot Trading" },
+  { id: "bcra", label: "Estadísticas BCRA" },
+  { id: "mercado", label: "Mercado" },
+  { id: "analizadores", label: "Analizadores" },
+  { id: "calculadoras", label: "Calculadoras" },
+  { id: "reportes", label: "Reportes" },
+];
+
+/* Detalle de un usuario: permisos, estado y su data (cartera/caja/libro) con
+ * borrar. Lee y escribe con el cliente Supabase normal — el override de admin
+ * (RLS) autoriza el acceso a filas de cualquier user_id. */
+function AdminUserDetail({ user, onBack, onChanged }) {
+  const [pos, setPos] = useState([]);
+  const [cash, setCash] = useState([]);
+  const [libro, setLibro] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState(user.status || "active");
+  const [allowed, setAllowed] = useState(user.allowed_modules);
+  const [msg, setMsg] = useState(null);
+  const [tab, setTab] = useState("pos");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [p, c, l] = await Promise.all([
+      supabase.from("positions").select("id,ticker,instrument_type,operation_type,quantity,entry_price,entry_date,broker").eq("user_id", user.id).order("entry_date", { ascending: false }).limit(1000),
+      supabase.from("cash_movements").select("id,movement_date,movement_type,currency,amount,notes").eq("user_id", user.id).order("movement_date", { ascending: false }).limit(1000),
+      supabase.from("libro_movimientos").select("id,fecha_ejecucion,tipo_operacion,ticker,comision,ddmm,iva,total").eq("user_id", user.id).order("fecha_ejecucion", { ascending: false }).limit(1000),
+    ]);
+    setPos(p.data || []); setCash(c.data || []); setLibro(l.data || []);
+    setLoading(false);
+  }, [user.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const savePatch = async (patch) => {
+    setMsg(null);
+    const { error } = await supabase.from("profiles").update(patch).eq("id", user.id);
+    if (error) setMsg("Error: " + error.message);
+    else { setMsg("Guardado ✓"); onChanged?.(); }
+  };
+  const toggleStatus = () => { const n = status === "active" ? "suspended" : "active"; setStatus(n); savePatch({ status: n }); };
+  const toggleModule = (id) => {
+    const base = allowed == null ? ADMIN_MODULES.map((m) => m.id) : [...allowed];
+    const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
+    setAllowed(next); savePatch({ allowed_modules: next });
+  };
+  const resetModules = () => { setAllowed(null); savePatch({ allowed_modules: null }); };
+  const allowedSet = allowed == null ? null : new Set(allowed);
+
+  const del = async (table, id, setter, list) => {
+    if (!window.confirm("¿Borrar este registro? No se puede deshacer.")) return;
+    const { error } = await supabase.from(table).delete().eq("id", id);
+    if (error) { alert("Error: " + error.message); return; }
+    setter(list.filter((r) => r.id !== id)); onChanged?.();
+  };
+
+  const fmtN = (n) => n == null ? "—" : Number(n).toLocaleString("es-AR", { maximumFractionDigits: 2 });
+  const th = { padding: "7px 10px", color: C.dim, textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" };
+  const td = { padding: "6px 10px", color: C.muted, whiteSpace: "nowrap" };
+  const delBtn = (fn) => <button onClick={fn} title="Borrar" style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 13, fontWeight: 700, padding: "0 4px" }}>×</button>;
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#0F1B2B", color: C.text, fontFamily: "'Roboto', system-ui, sans-serif", padding: "28px 32px 80px", maxWidth: 1300, margin: "0 auto" }}>
+      <button onClick={onBack} style={{ background: "none", border: `1px solid ${C.border}`, color: C.muted, padding: "6px 12px", fontSize: 12, cursor: "pointer", marginBottom: 16 }}>← Volver a la lista</button>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Raleway', sans-serif", fontWeight: 700, fontSize: 24, margin: 0 }}>{user.display_name || user.email}</h1>
+          <div style={{ color: C.dim, fontSize: 12 }}>{user.email} · {user.id}</div>
+        </div>
+        <div className="flex" style={{ gap: 8, alignItems: "center" }}>
+          {msg && <span style={{ fontSize: 11, color: msg.startsWith("Error") ? C.red : C.green }}>{msg}</span>}
+          <span style={{ fontSize: 12, color: status === "active" ? C.green : C.red, fontWeight: 700 }}>{status}</span>
+          <button onClick={toggleStatus} style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", border: "none", background: status === "active" ? C.red : C.green, color: "#0b0e11" }}>{status === "active" ? "Suspender" : "Activar"}</button>
+        </div>
+      </div>
+
+      {/* Permisos de módulos */}
+      <div style={{ marginTop: 18, padding: "14px 16px", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>Módulos que puede ver</span>
+          <button onClick={resetModules} style={{ background: "none", border: "none", color: allowed == null ? C.green : C.accent, fontSize: 11, cursor: "pointer" }}>{allowed == null ? "todos (default)" : "restablecer a todos"}</button>
+        </div>
+        <div className="flex" style={{ flexWrap: "wrap", gap: 8 }}>
+          {ADMIN_MODULES.map((m) => {
+            const on = allowedSet == null || allowedSet.has(m.id);
+            return (
+              <button key={m.id} onClick={() => toggleModule(m.id)} style={{ padding: "5px 11px", fontSize: 11.5, fontWeight: 600, borderRadius: 4, cursor: "pointer", border: `1px solid ${on ? C.accent : C.border}`, background: on ? "rgba(96,165,250,0.12)" : "transparent", color: on ? C.text : C.dim }}>
+                {on ? "✓ " : ""}{m.label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 10, color: C.dim, marginTop: 8 }}>Se aplica cuando el usuario recarga (Fase C). Vos (admin) siempre ves todo.</div>
+      </div>
+
+      {/* Data del usuario */}
+      <div className="flex" style={{ gap: 8, marginTop: 20, marginBottom: 12 }}>
+        {[["pos", `Posiciones (${pos.length})`], ["cash", `Caja (${cash.length})`], ["libro", `Libro (${libro.length})`]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ padding: "6px 13px", fontSize: 12, fontWeight: 700, cursor: "pointer", border: `1px solid ${tab === k ? C.accent : C.border}`, background: tab === k ? C.accent : "transparent", color: tab === k ? "#0b0e11" : C.muted }}>{l}</button>
+        ))}
+      </div>
+
+      {loading ? <div style={{ padding: 30 }}><Loader2 size={22} className="eco-spin" color={C.muted} /></div> : (
+        <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+          {tab === "pos" && (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+              <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}><th style={th}>Fecha</th><th style={th}>Ticker</th><th style={th}>Tipo</th><th style={th}>Op</th><th style={{ ...th, textAlign: "right" }}>Cant.</th><th style={{ ...th, textAlign: "right" }}>Precio</th><th style={th}>Broker</th><th style={th}></th></tr></thead>
+              <tbody>{pos.map((r) => (<tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}><td style={td}>{r.entry_date}</td><td style={{ ...td, color: C.text, fontWeight: 600 }}>{r.ticker}</td><td style={td}>{r.instrument_type}</td><td style={{ ...td, color: r.operation_type === "sell" ? C.red : C.green }}>{r.operation_type}</td><td style={{ ...td, textAlign: "right" }}>{fmtN(r.quantity)}</td><td style={{ ...td, textAlign: "right" }}>{fmtN(r.entry_price)}</td><td style={td}>{r.broker}</td><td style={{ ...td, textAlign: "center" }}>{delBtn(() => del("positions", r.id, setPos, pos))}</td></tr>))}</tbody>
+            </table>
+          )}
+          {tab === "cash" && (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+              <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}><th style={th}>Fecha</th><th style={th}>Tipo</th><th style={th}>Moneda</th><th style={{ ...th, textAlign: "right" }}>Monto</th><th style={th}>Nota</th><th style={th}></th></tr></thead>
+              <tbody>{cash.map((r) => (<tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}><td style={td}>{r.movement_date}</td><td style={{ ...td, color: r.movement_type === "withdrawal" ? C.red : C.green }}>{r.movement_type}</td><td style={td}>{r.currency}</td><td style={{ ...td, textAlign: "right" }}>{fmtN(r.amount)}</td><td style={{ ...td, whiteSpace: "normal", maxWidth: 380, color: C.dim, fontSize: 10.5 }}>{r.notes}</td><td style={{ ...td, textAlign: "center" }}>{delBtn(() => del("cash_movements", r.id, setCash, cash))}</td></tr>))}</tbody>
+            </table>
+          )}
+          {tab === "libro" && (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+              <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}><th style={th}>Fecha</th><th style={th}>Tipo</th><th style={th}>Ticker</th><th style={{ ...th, textAlign: "right" }}>Comis.+Der.+IVA</th><th style={{ ...th, textAlign: "right" }}>Total</th><th style={th}></th></tr></thead>
+              <tbody>{libro.map((r) => (<tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}><td style={td}>{r.fecha_ejecucion}</td><td style={td}>{r.tipo_operacion}</td><td style={{ ...td, color: C.text }}>{r.ticker || "—"}</td><td style={{ ...td, textAlign: "right", color: C.dim }}>{fmtN((Math.abs(r.comision||0)+Math.abs(r.ddmm||0)+Math.abs(r.iva||0)))}</td><td style={{ ...td, textAlign: "right", color: (r.total||0) >= 0 ? C.green : C.red }}>{fmtN(r.total)}</td><td style={{ ...td, textAlign: "center" }}>{delBtn(() => del("libro_movimientos", r.id, setLibro, libro))}</td></tr>))}</tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─────────────── AdminPanel (/admin) ───────────────
  *
  * Panel de administración. Gate REAL en la DB: is_admin() (RLS) + admin_list_users()
@@ -315,6 +447,8 @@ function AdminPanel() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancel = false;
@@ -332,7 +466,7 @@ function AdminPanel() {
       if (!cancel) setLoading(false);
     })();
     return () => { cancel = true; };
-  }, [user]);
+  }, [user, refreshKey]);
 
   const bg = { minHeight: "100vh", background: "#0F1B2B", color: C.text, fontFamily: "'Roboto', system-ui, sans-serif" };
   const fmtDate = (s) => s ? new Date(s).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
@@ -349,6 +483,9 @@ function AdminPanel() {
         <a href="/" style={{ marginTop: 8, color: C.accent, fontSize: 13, textDecoration: "none" }}>← Volver a Midas</a>
       </div>
     );
+  }
+  if (selected) {
+    return <AdminUserDetail user={selected} onBack={() => setSelected(null)} onChanged={() => setRefreshKey((k) => k + 1)} />;
   }
   return (
     <div style={{ ...bg, padding: "28px 32px 80px", maxWidth: 1300, margin: "0 auto" }}>
@@ -374,7 +511,9 @@ function AdminPanel() {
           </tr></thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+              <tr key={u.id} onClick={() => setSelected(u)} style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
                 <td style={{ padding: "9px 12px" }}>
                   <div style={{ color: C.text, fontWeight: 600 }}>{u.display_name || u.email}{u.is_admin && <span style={{ fontSize: 9, color: C.accent, border: `1px solid ${C.accent}`, padding: "1px 5px", borderRadius: 3, marginLeft: 6 }}>ADMIN</span>}</div>
                   <div style={{ color: C.dim, fontSize: 10 }}>{u.email}</div>
@@ -391,7 +530,7 @@ function AdminPanel() {
         </table>
       </div>
       <div style={{ fontSize: 10, color: C.dim, marginTop: 12, lineHeight: 1.5 }}>
-        Fase B en construcción — próximo: drilldown por usuario (cartera/caja/libro), permisos de módulos, suspender y borrar movimientos. El acceso está <b style={{ color: C.muted }}>enforced por RLS</b> en la base (<code>is_admin()</code>), no solo en el front.
+        Tocá un usuario para ver su detalle: permisos de módulos, suspender, y su cartera/caja/libro con opción de borrar. El acceso está <b style={{ color: C.muted }}>enforced por RLS</b> en la base (<code>is_admin()</code>), no solo en el front.
       </div>
     </div>
   );
