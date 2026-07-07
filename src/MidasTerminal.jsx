@@ -302,6 +302,101 @@ function maskAmount(formattedStr, hidden) {
   return "●●●●●";
 }
 
+/* ─────────────── AdminPanel (/admin) ───────────────
+ *
+ * Panel de administración. Gate REAL en la DB: is_admin() (RLS) + admin_list_users()
+ * (SECURITY DEFINER con gate adentro). El frontend solo refleja lo que la base
+ * autoriza; un no-admin no obtiene data aunque fuerce la ruta. Fase B — slice 1:
+ * lista de usuarios. Próximo: drilldown, permisos de módulos, suspender, borrar.
+ */
+function AdminPanel() {
+  const { user } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      setLoading(true); setErr(null);
+      const { data: adm, error: e1 } = await supabase.rpc("is_admin");
+      if (cancel) return;
+      if (e1) { setErr(e1.message); setIsAdmin(false); setLoading(false); return; }
+      setIsAdmin(!!adm);
+      if (adm) {
+        const { data, error } = await supabase.rpc("admin_list_users");
+        if (!cancel && error) setErr(error.message);
+        else if (!cancel) setUsers(data || []);
+      }
+      if (!cancel) setLoading(false);
+    })();
+    return () => { cancel = true; };
+  }, [user]);
+
+  const bg = { minHeight: "100vh", background: "#0F1B2B", color: C.text, fontFamily: "'Roboto', system-ui, sans-serif" };
+  const fmtDate = (s) => s ? new Date(s).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
+
+  if (loading || isAdmin === null) {
+    return <div style={{ ...bg, display: "flex", alignItems: "center", justifyContent: "center" }}><Loader2 size={26} className="eco-spin" color={C.muted} strokeWidth={1.5} /></div>;
+  }
+  if (!isAdmin) {
+    return (
+      <div style={{ ...bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 24, textAlign: "center" }}>
+        <div style={{ fontSize: 40 }}>🔒</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>Sin acceso</div>
+        <div style={{ fontSize: 13, color: C.muted, maxWidth: 440 }}>Este panel es solo para administradores. Estás logueado como <b style={{ color: C.text }}>{user?.email}</b>.</div>
+        <a href="/" style={{ marginTop: 8, color: C.accent, fontSize: 13, textDecoration: "none" }}>← Volver a Midas</a>
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...bg, padding: "28px 32px 80px", maxWidth: 1300, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 9, letterSpacing: "0.22em", color: C.dim, textTransform: "uppercase", fontWeight: 600 }}>Midas · Administración</div>
+          <h1 style={{ fontFamily: "'Raleway', sans-serif", fontWeight: 700, fontSize: 30, margin: "4px 0 0" }}>Panel de administración</h1>
+        </div>
+        <a href="/" style={{ color: C.muted, fontSize: 12, border: `1px solid ${C.border}`, padding: "7px 12px", textDecoration: "none" }}>← Volver a Midas</a>
+      </div>
+      <p style={{ fontSize: 13, color: C.muted, marginTop: 8, marginBottom: 20 }}>{users.length} usuarios · acceso restringido a tu cuenta (<b style={{ color: C.text }}>{user?.email}</b>).</p>
+      {err && <div style={{ color: C.red, fontSize: 12, marginBottom: 12 }}>Error: {err}</div>}
+      <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead><tr style={{ color: C.dim, textAlign: "left", borderBottom: `1px solid ${C.border}` }}>
+            <th style={{ padding: "9px 12px" }}>Usuario</th>
+            <th style={{ padding: "9px 12px" }}>Alta</th>
+            <th style={{ padding: "9px 12px" }}>Último login</th>
+            <th style={{ padding: "9px 12px" }}>Estado</th>
+            <th style={{ padding: "9px 12px", textAlign: "right" }}>Posiciones</th>
+            <th style={{ padding: "9px 12px", textAlign: "right" }}>Caja</th>
+            <th style={{ padding: "9px 12px", textAlign: "right" }}>Libro</th>
+          </tr></thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "9px 12px" }}>
+                  <div style={{ color: C.text, fontWeight: 600 }}>{u.display_name || u.email}{u.is_admin && <span style={{ fontSize: 9, color: C.accent, border: `1px solid ${C.accent}`, padding: "1px 5px", borderRadius: 3, marginLeft: 6 }}>ADMIN</span>}</div>
+                  <div style={{ color: C.dim, fontSize: 10 }}>{u.email}</div>
+                </td>
+                <td style={{ padding: "9px 12px", color: C.muted }}>{fmtDate(u.created_at)}</td>
+                <td style={{ padding: "9px 12px", color: C.muted }}>{fmtDate(u.last_sign_in)}</td>
+                <td style={{ padding: "9px 12px" }}><span style={{ color: u.status === "active" ? C.green : C.red }}>{u.status}</span></td>
+                <td style={{ padding: "9px 12px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{u.n_positions}</td>
+                <td style={{ padding: "9px 12px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{u.n_cash}</td>
+                <td style={{ padding: "9px 12px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{u.n_libro}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 10, color: C.dim, marginTop: 12, lineHeight: 1.5 }}>
+        Fase B en construcción — próximo: drilldown por usuario (cartera/caja/libro), permisos de módulos, suspender y borrar movimientos. El acceso está <b style={{ color: C.muted }}>enforced por RLS</b> en la base (<code>is_admin()</code>), no solo en el front.
+      </div>
+    </div>
+  );
+}
+
 export default function MidasTerminal() {
   // Gate global: sin login no se entra a ninguna pantalla. El usuario sin sesión
   // ve la Landing (pública, explica el sistema + login con Google). Mantener el
@@ -318,6 +413,11 @@ export default function MidasTerminal() {
   }
   if (!gateUser) {
     return <Landing onLogin={gateSignIn} />;
+  }
+  // Panel de administración: ruta /admin. El gate REAL está en la DB (is_admin()
+  // vía RLS); acá solo desviamos el render. Un no-admin ve "Sin acceso".
+  if (typeof window !== "undefined" && window.location.pathname.replace(/\/+$/, "") === "/admin") {
+    return <AdminPanel />;
   }
   // Modo pop-out: ventana chiquita con SOLO la calculadora (sin sidebar/header),
   // para tenerla en paralelo con Matriz/Cocos. Se abre con ?view=cedear-fv.
