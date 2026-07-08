@@ -20587,6 +20587,30 @@ function BcraResumenWidget() {
 
 function BcraIndicatorsWidget({ expanded }) {
   const { data, loading, error } = useMacroIndicators();
+  // BCRA: reservas totales (var 1) y compras/ventas netas diarias en el MULC
+  // (var 78) — fetch propio a /api/bcra, igual criterio que BcraResumenWidget.
+  const [bcra, setBcra] = useState(null);
+  useEffect(() => {
+    let mounted = true;
+    const iso = (dt) => dt.toISOString().slice(0, 10);
+    const today = new Date();
+    const hasta = iso(today), desde = iso(new Date(today.getTime() - 25 * 86400000));
+    const get = async (id) => {
+      try {
+        const r = await fetch(`/api/bcra?var=${id}&desde=${desde}&hasta=${hasta}`);
+        const j = r.ok ? await r.json() : null;
+        const det = j?.results?.[0]?.detalle || [];
+        return det.map((x) => ({ fecha: x.fecha, valor: Number(x.valor) })).filter((x) => x.fecha && Number.isFinite(x.valor)).sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+      } catch { return []; }
+    };
+    (async () => {
+      const [res, compras] = await Promise.all([get(1), get(78)]);
+      if (mounted) setBcra({ res, compras });
+    })();
+    return () => { mounted = false; };
+  }, []);
+  const resLast = bcra?.res?.length ? bcra.res[bcra.res.length - 1] : null;
+  const comprasLast = bcra?.compras?.length ? bcra.compras[bcra.compras.length - 1] : null;
 
   // Helper: formato de fecha YYYY-MM-DD → DD/MM/YY o YYYY-MM → MMM YY
   const fmtFecha = (iso) => {
@@ -20686,6 +20710,34 @@ function BcraIndicatorsWidget({ expanded }) {
         </div>
       </div>
 
+      {/* BCRA · compras/ventas del último día en el MULC */}
+      <div style={{ marginBottom: expanded ? 16 : 12, paddingTop: expanded ? 14 : 12, borderTop: `1px solid ${C.border}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
+          <span style={{ fontSize: 10, color: C.dim, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 600 }}>BCRA · Compras (últ. día)</span>
+          <span style={{ fontSize: 9.5, color: C.dim }}>{fmtFecha(comprasLast?.fecha)}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{ fontSize: expanded ? 24 : 20, color: comprasLast == null ? C.dim : comprasLast.valor >= 0 ? C.green : C.red, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+            {comprasLast == null ? "—" : `${comprasLast.valor >= 0 ? "+" : "−"}US$ ${Math.abs(Math.round(comprasLast.valor)).toLocaleString("es-AR")}`}
+          </span>
+          <span style={{ fontSize: 11, color: C.muted, fontWeight: 500 }}>M</span>
+        </div>
+      </div>
+
+      {/* Reservas internacionales totales */}
+      <div style={{ paddingTop: expanded ? 12 : 10, borderTop: `1px solid ${C.border}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
+          <span style={{ fontSize: 10, color: C.dim, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 600 }}>Reservas · Total</span>
+          <span style={{ fontSize: 9.5, color: C.dim }}>{fmtFecha(resLast?.fecha)}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{ fontSize: expanded ? 24 : 20, color: "#60a5fa", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+            {resLast == null ? "—" : `US$ ${Math.round(resLast.valor).toLocaleString("es-AR")}`}
+          </span>
+          <span style={{ fontSize: 11, color: C.muted, fontWeight: 500 }}>M</span>
+        </div>
+      </div>
+
       {/* Notas de items pendientes — solo en expanded */}
       {expanded && (
         <div style={{
@@ -20700,7 +20752,6 @@ function BcraIndicatorsWidget({ expanded }) {
             Próximamente
           </div>
           <ul style={{ margin: 0, paddingLeft: 16 }}>
-            <li>Reservas internacionales BCRA (USD millones)</li>
             <li>Tasa de política monetaria (TNA)</li>
             <li>Base monetaria</li>
           </ul>
