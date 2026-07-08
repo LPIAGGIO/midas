@@ -13285,8 +13285,23 @@ function getPositionMaturity(p) {
  * @param {Object} bondPrices  Mapa ticker → { price } de useBondPrices
  * @returns {Array} grupos consolidados, ordenados por valor de mercado desc
  */
+// Vencimiento embebido en el ticker de Lecap/Boncap: (S|T) + DD + letra-mes +
+// dígito-año. Letras de mes BYMA: E F M A Y J L G S O N D = ene..dic (Y=mayo,
+// L=julio, G=agosto — se saltean M/J/A para evitar ambigüedad). Ej: S29Y6 =
+// 29/05/2026, T30J7 = 30/06/2027. Devuelve "YYYY-MM-DD" o null si no matchea.
+const LETRA_MES = { E: 1, F: 2, M: 3, A: 4, Y: 5, J: 6, L: 7, G: 8, S: 9, O: 10, N: 11, D: 12 };
+function parseLetraMaturity(ticker) {
+  const mm = /^([ST])(\d{2})([EFMAYJLGSOND])(\d)$/.exec((ticker || "").toUpperCase().trim());
+  if (!mm) return null;
+  const dd = +mm[2], mon = LETRA_MES[mm[3]], yr = 2020 + (+mm[4]);
+  if (!mon || dd < 1 || dd > 31) return null;
+  return `${yr}-${String(mon).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+}
+
 function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, stockPrices) {
   if (!positions?.length) return [];
+  // Hoy (para descartar letras/boncaps ya vencidas de la tenencia).
+  const _todayISO = new Date().toISOString().slice(0, 10);
 
   // Tipos donde NO consolidamos: cada operación queda individual.
   // Son instrumentos donde el "ticker" no identifica unívocamente un
@@ -13540,6 +13555,16 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
     const ticker = (p.ticker || "").trim().toUpperCase();
     const cur = p.entry_currency || "ARS";
     const t = p.instrument_type;
+
+    // Letra/Boncap YA VENCIDA (amortizó) → no es tenencia. El vencimiento viene
+    // en el CSV como "Renta y Amortización" (caja, sin ticker), no como venta,
+    // así que sin esto la letra queda como posición fantasma sin precio. Su plata
+    // ya está en el efectivo. El vto se lee del propio ticker (no del feed, que
+    // deja de listarla al vencer).
+    if (t === "bond_ars" || t === "bond_usd") {
+      const mat = parseLetraMaturity(ticker);
+      if (mat && mat < _todayISO) continue;
+    }
 
     // Si es no-consolidable, le damos un groupKey único por id
     const groupKey = NO_CONSOLIDATE.has(t)
