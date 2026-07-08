@@ -312,6 +312,9 @@ function AdminUserDetail({ user, onBack, onChanged }) {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(user.status || "active");
   const [allowed, setAllowed] = useState(user.allowed_modules);
+  const [origStatus, setOrigStatus] = useState(user.status || "active");
+  const [origAllowed, setOrigAllowed] = useState(user.allowed_modules);
+  const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const [tab, setTab] = useState("pos");
   const [expanded, setExpanded] = useState({});
@@ -330,30 +333,44 @@ function AdminUserDetail({ user, onBack, onChanged }) {
   }, [user.id]);
   useEffect(() => { load(); }, [load]);
 
-  const savePatch = async (patch) => {
-    setMsg(null);
-    const { error } = await supabase.from("profiles").update(patch).eq("id", user.id);
-    if (error) setMsg("Error: " + error.message);
-    else setMsg("Guardado ✓"); // la lista se refresca al volver (onBack)
-  };
-  const toggleStatus = () => { const n = status === "active" ? "suspended" : "active"; setStatus(n); savePatch({ status: n }); };
-  // Árbol de permisos: allowed_modules = lista plana de ids de hoja (items de
-  // grupo) + ids de los top-level singles. null = ve todo. El grupo se prende/
-  // apaga tildando todos sus hijos.
+  // Todos los cambios (módulos + estado) son BORRADOR hasta apretar Guardar.
+  // allowed_modules = lista plana de ids de hoja + singles top-level. null = ve todo.
   const allLeafIds = NAV.flatMap((it) => it.children ? it.children.map((c) => c.id) : [it.id]);
   const allowedSet = allowed == null ? null : new Set(allowed);
   const isOn = (id) => allowedSet == null || allowedSet.has(id);
-  const setModules = (arr) => { setAllowed(arr); savePatch({ allowed_modules: arr }); };
   const toggleLeaf = (id) => {
     const base = allowed == null ? [...allLeafIds] : [...allowed];
-    setModules(base.includes(id) ? base.filter((x) => x !== id) : [...base, id]);
+    setAllowed(base.includes(id) ? base.filter((x) => x !== id) : [...base, id]);
   };
   const toggleGroup = (childIds) => {
     const base = allowed == null ? [...allLeafIds] : [...allowed];
     const allOn = childIds.every((id) => base.includes(id));
-    setModules(allOn ? base.filter((id) => !childIds.includes(id)) : Array.from(new Set([...base, ...childIds])));
+    setAllowed(allOn ? base.filter((id) => !childIds.includes(id)) : Array.from(new Set([...base, ...childIds])));
   };
-  const resetModules = () => { setAllowed(null); savePatch({ allowed_modules: null }); };
+  const resetModules = () => setAllowed(null);
+  const toggleStatus = () => setStatus((s) => (s === "active" ? "suspended" : "active"));
+
+  // Diff borrador vs guardado (habilita el botón y arma el resumen).
+  const labelById = {};
+  NAV.forEach((n) => { if (n.children) n.children.forEach((c) => (labelById[c.id] = c.label)); else labelById[n.id] = n.label; });
+  const normSet = (a) => (a == null ? new Set(allLeafIds) : new Set(a));
+  const oSet = normSet(origAllowed), dSet = normSet(allowed);
+  const added = allLeafIds.filter((id) => !oSet.has(id) && dSet.has(id));
+  const removed = allLeafIds.filter((id) => oSet.has(id) && !dSet.has(id));
+  const statusChanged = status !== origStatus;
+  const dirty = added.length > 0 || removed.length > 0 || statusChanged;
+
+  const save = async () => {
+    setSaving(true); setMsg(null);
+    const isAll = allowed != null && allowed.length === allLeafIds.length && allLeafIds.every((id) => allowed.includes(id));
+    const toStore = isAll ? null : allowed;
+    const { error } = await supabase.from("profiles").update({ status, allowed_modules: toStore }).eq("id", user.id);
+    setSaving(false);
+    if (error) { setMsg("Error: " + error.message); return; }
+    setAllowed(toStore); setOrigAllowed(toStore); setOrigStatus(status);
+    setMsg("Cambios guardados ✓"); onChanged?.();
+  };
+  const discard = () => { setAllowed(origAllowed); setStatus(origStatus); setMsg(null); };
 
   const del = async (table, id, setter, list) => {
     if (!window.confirm("¿Borrar este registro? No se puede deshacer.")) return;
@@ -376,8 +393,7 @@ function AdminUserDetail({ user, onBack, onChanged }) {
           <div style={{ color: C.dim, fontSize: 12 }}>{user.email} · {user.id}</div>
         </div>
         <div className="flex" style={{ gap: 8, alignItems: "center" }}>
-          {msg && <span style={{ fontSize: 11, color: msg.startsWith("Error") ? C.red : C.green }}>{msg}</span>}
-          <span style={{ fontSize: 12, color: status === "active" ? C.green : C.red, fontWeight: 700 }}>{status}</span>
+          <span style={{ fontSize: 12, color: status === "active" ? C.green : C.red, fontWeight: 700 }}>{status}{statusChanged ? " · sin guardar" : ""}</span>
           <button onClick={toggleStatus} style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", border: "none", background: status === "active" ? C.red : C.green, color: "#0b0e11" }}>{status === "active" ? "Suspender" : "Activar"}</button>
         </div>
       </div>
@@ -447,7 +463,27 @@ function AdminUserDetail({ user, onBack, onChanged }) {
             </div>
           );
         })()}
-        <div style={{ fontSize: 10, color: C.dim, marginTop: 12 }}>Tildá lo que puede ver. El título de grupo prende/apaga todos sus ítems. Se aplica cuando el usuario recarga (Fase C). Vos (admin) siempre ves todo.</div>
+        <div style={{ fontSize: 10, color: C.dim, marginTop: 12 }}>Tildá lo que puede ver. El título de grupo prende/apaga todos sus ítems. Guardá con el botón de abajo; se aplica cuando el usuario recarga. Vos (admin) siempre ves todo.</div>
+      </div>
+
+      {/* Barra de guardado: activa solo si hay cambios, con resumen de qué se toca */}
+      <div style={{ marginTop: 14, padding: "12px 16px", borderRadius: 8, border: `1px solid ${dirty ? C.accent : C.border}`, background: dirty ? "rgba(96,165,250,0.06)" : "transparent" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 11.5, lineHeight: 1.6, color: dirty ? C.text : C.dim }}>
+            {!dirty ? "No hay cambios sin guardar." : (
+              <>
+                {statusChanged && <div><b style={{ color: status === "suspended" ? C.red : C.green }}>{status === "suspended" ? "Vas a SUSPENDER la cuenta." : "Vas a REACTIVAR la cuenta."}</b></div>}
+                {added.length > 0 && <div><span style={{ color: C.green, fontWeight: 700 }}>+ Habilitás ({added.length}):</span> <span style={{ color: C.muted }}>{added.map((id) => labelById[id] || id).join(", ")}</span></div>}
+                {removed.length > 0 && <div><span style={{ color: C.red, fontWeight: 700 }}>− Deshabilitás ({removed.length}):</span> <span style={{ color: C.muted }}>{removed.map((id) => labelById[id] || id).join(", ")}</span></div>}
+              </>
+            )}
+          </div>
+          <div className="flex" style={{ gap: 8, alignItems: "center", flexShrink: 0 }}>
+            {msg && <span style={{ fontSize: 11, color: msg.startsWith("Error") ? C.red : C.green }}>{msg}</span>}
+            {dirty && <button onClick={discard} disabled={saving} style={{ padding: "7px 13px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>Descartar</button>}
+            <button onClick={save} disabled={!dirty || saving} style={{ padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: dirty && !saving ? "pointer" : "not-allowed", border: "none", background: dirty ? C.accent : C.border, color: dirty ? "#0b0e11" : C.dim, opacity: dirty ? 1 : 0.6 }}>{saving ? "Guardando…" : "Guardar cambios"}</button>
+          </div>
+        </div>
       </div>
 
       {/* Data del usuario */}
