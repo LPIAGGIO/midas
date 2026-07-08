@@ -10707,9 +10707,18 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
     [positions, bondPrices, stockPrices, futurePrices, fciPrices, fx, valuationCurrency]
   );
 
+  // P&L del día desglosado por ticker (estilo "P&L Diario" de Cocos). El banner
+  // "hoy" es la SUMA EXACTA de este desglose, para que header y modal cuadren
+  // siempre. Antes el banner usaba dailyTotals.pnl + realizedToday (que sumaba
+  // las cerradas-hoy por otra vía) y divergía del detalle por ticker.
+  const dailyByTicker = useMemo(
+    () => computeDailyPnlByTicker(positions, bondPrices, futurePrices, stockPrices, futureAdjLookup, fciPrices, fx, valuationCurrency),
+    [positions, bondPrices, futurePrices, stockPrices, futureAdjLookup, fciPrices, fx, valuationCurrency]
+  );
+  const dailyByTickerTotal = useMemo(() => dailyByTicker.reduce((s, r) => s + (r.pnl || 0), 0), [dailyByTicker]);
   const showDaily = dailyTotals.hasAny && dailyTotals.pnl != null;
   const dailyPnlShown = (dailyTotals.pnl != null && !dailyTotals.marketClosed)
-    ? dailyTotals.pnl + realizedToday
+    ? dailyByTickerTotal
     : dailyTotals.pnl;
   const dailyIsPositive = showDaily && dailyPnlShown >= 0;
   const dailyColor = (!showDaily || dailyTotals.marketClosed) ? C.dim : dailyIsPositive ? C.green : C.red;
@@ -10718,12 +10727,7 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
     ? (dailyPnlShown / dailyTotals.base) * 100
     : null;
 
-  // P&L del día desglosado por ticker (estilo "P&L Diario" de Cocos).
   const [dailyDetailOpen, setDailyDetailOpen] = useState(false);
-  const dailyByTicker = useMemo(
-    () => computeDailyPnlByTicker(positions, bondPrices, futurePrices, stockPrices, futureAdjLookup, fciPrices, fx, valuationCurrency),
-    [positions, bondPrices, futurePrices, stockPrices, futureAdjLookup, fciPrices, fx, valuationCurrency]
-  );
 
   // Cash neto en la moneda activa: convertimos el saldo de cada moneda
   // a la valuationCurrency seleccionada y los sumamos. Si el saldo de
@@ -21727,6 +21731,14 @@ function PortfolioSummaryWidget({ expanded }) {
     [positions, bondPricesState.prices, stockPricesState.prices, futurePricesState.prices, fciPricesState.prices, fx, valuationCurrency]
   );
 
+  // Banner "hoy" = suma exacta del P&L por ticker (misma fuente que el modal),
+  // para que no diverja del detalle. Ver TotalCard.
+  const dailyByTickerTotal = useMemo(
+    () => computeDailyPnlByTicker(positions, bondPricesState.prices, futurePricesState.prices, stockPricesState.prices, futureAdjLookup, fciPricesState.prices, fx, valuationCurrency)
+      .reduce((s, r) => s + (r.pnl || 0), 0),
+    [positions, bondPricesState.prices, futurePricesState.prices, stockPricesState.prices, futureAdjLookup, fciPricesState.prices, fx, valuationCurrency]
+  );
+
   // Render
   if (!user) {
     return (
@@ -21744,7 +21756,7 @@ function PortfolioSummaryWidget({ expanded }) {
   }
 
   const dailyPnl = (dailyTotals.pnl != null && !dailyTotals.marketClosed)
-    ? dailyTotals.pnl + realizedToday
+    ? dailyByTickerTotal
     : dailyTotals.pnl;
   const dailyPct = (dailyPnl != null && dailyTotals.base > 0)
     ? (dailyPnl / dailyTotals.base) * 100
