@@ -4343,11 +4343,20 @@ function useImportBatches() {
 // Amortización", no una venta) → por eso hay preview obligatorio.
 const FCI_LEDGER_MAP = { COCORMA: "Cocos Rendimiento - Clase A|rentaMixta" };
 function deriveFromLedger(movs) {
-  const agg = new Map();       // contado (cedear/bono/stock) + fci: neteo a posición
-  const futureLots = [];       // futuros: un LOTE por operación (para su P&L realizado, aunque neteen 0)
-  const cash = {};             // Σtotal por moneda
+  const rows = movs || [];
+  // Tickers con patas MEP (soberanos hard-dollar dolarizados: Dolar Mep /
+  // Operatoria). Esas patas están en USD y su contrapartida deja el bono neto 0;
+  // esos tickers los NETEAMOS (seguro) en vez de armar lotes (que ensuciarían el
+  // PPP con precios USD). El resto va a lotes individuales → P&L realizado.
+  const mepTickers = new Set();
+  for (const m of rows) {
+    if (m.ticker && /dolar mep|operatoria dolar/i.test(m.tipo_operacion || "")) mepTickers.add(m.ticker);
+  }
+  const lots = [];             // lotes individuales: cedear/acción/futuro/bono-sin-MEP
+  const netAgg = new Map();    // neteo: bonos-con-MEP + FCI
+  const cash = {};
   let commAr = 0, commUsd = 0, cauNet = 0;
-  for (const m of movs || []) {
+  for (const m of rows) {
     const cur0 = m.moneda === "USD" ? "USD-MEP" : (m.moneda || "ARS");
     cash[cur0] = (cash[cur0] || 0) + (Number(m.total) || 0);
     const fee = Math.abs(Number(m.comision) || 0) + Math.abs(Number(m.ddmm) || 0) + Math.abs(Number(m.iva) || 0);
@@ -4355,29 +4364,30 @@ function deriveFromLedger(movs) {
     if (m.categoria === "caucion") cauNet += Number(m.total) || 0;
 
     const cat = m.categoria;
-    // Futuros: lote individual (netean 0 al cerrar, pero queremos su P&L realizado).
-    // Las "Credito/Debito Indice" no tienen ticker → van a caja, no a posición.
-    if (cat === "futuro" && m.ticker) {
-      const q = Number(m.cantidad) || 0;
-      if (Math.abs(q) > 1e-9) futureLots.push({ ticker: m.ticker, srcTicker: m.ticker, instrument_type: "future", side: q >= 0 ? "buy" : "sell", quantity: Math.abs(q), entry_price: Number(m.precio) || 0, entry_currency: "ARS", entry_date: m.fecha_ejecucion });
-      continue;
-    }
-    if (!["trade_cedear", "trade_bono", "trade_otro", "fci"].includes(cat) || !m.ticker) continue;
+    if (!["trade_cedear", "trade_bono", "trade_otro", "fci", "futuro"].includes(cat) || !m.ticker) continue;
     let type, cur = "ARS", ticker = m.ticker, scale = 1;
     if (cat === "trade_cedear") type = "cedear";
     else if (cat === "trade_otro") type = "stock";
+    else if (cat === "futuro") type = "future";
     else if (cat === "trade_bono") type = "bond_ars";
     else { type = "fci"; scale = 1 / 1000; ticker = FCI_LEDGER_MAP[m.ticker] || m.ticker; cur = /usd/i.test(m.ticker || "") ? "USD-MEP" : "ARS"; }
-    const key = type + "|" + ticker;
-    const a = agg.get(key) || { type, ticker, cur, srcTicker: m.ticker, netQty: 0, buyVal: 0, buyQty: 0, first: null };
-    const qty = (Number(m.cantidad) || 0) * scale;
-    a.netQty += qty;
-    if (qty > 0) { a.buyQty += qty; a.buyVal += qty * (Number(m.precio) || 0); }
-    if (m.fecha_ejecucion && (!a.first || m.fecha_ejecucion < a.first)) a.first = m.fecha_ejecucion;
-    agg.set(key, a);
+
+    const q = (Number(m.cantidad) || 0) * scale;
+    if (Math.abs(q) < 1e-12) continue;
+    const useNet = cat === "fci" || (cat === "trade_bono" && mepTickers.has(m.ticker));
+    if (useNet) {
+      const key = type + "|" + ticker;
+      const a = netAgg.get(key) || { type, ticker, cur, srcTicker: m.ticker, netQty: 0, buyVal: 0, buyQty: 0, first: null };
+      a.netQty += q;
+      if (q > 0) { a.buyQty += q; a.buyVal += q * (Number(m.precio) || 0); }
+      if (m.fecha_ejecucion && (!a.first || m.fecha_ejecucion < a.first)) a.first = m.fecha_ejecucion;
+      netAgg.set(key, a);
+    } else {
+      lots.push({ ticker, srcTicker: m.ticker, instrument_type: type, side: q >= 0 ? "buy" : "sell", quantity: Math.abs(q), entry_price: Number(m.precio) || 0, entry_currency: cur, entry_date: m.fecha_ejecucion });
+    }
   }
   const positions = [];
-  for (const a of agg.values()) {
+  for (const a of netAgg.values()) {
     if (Math.abs(a.netQty) < 1e-6) continue;
     positions.push({
       ticker: a.ticker, srcTicker: a.srcTicker, instrument_type: a.type,
@@ -4385,8 +4395,7 @@ function deriveFromLedger(movs) {
       entry_price: a.buyQty > 0 ? a.buyVal / a.buyQty : 0, entry_currency: a.cur, entry_date: a.first,
     });
   }
-  positions.sort((x, y) => (x.instrument_type < y.instrument_type ? -1 : x.instrument_type > y.instrument_type ? 1 : (x.ticker < y.ticker ? -1 : 1)));
-  return { positions, futureLots, cash, commAr, commUsd, cauNet };
+  return { positions, lots, cash, commAr, commUsd, cauNet };
 }
 
 function ImportacionesModule() {
