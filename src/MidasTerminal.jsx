@@ -4511,8 +4511,11 @@ function ImportacionesView() {
   // Borrar un lote = borrar sus movimientos (cascade) Y el portfolio derivado.
   const deleteBatch = async (id) => {
     await supabase.from("import_batches").delete().eq("id", id);
-    await supabase.from("positions").delete().eq("user_id", user.id).filter("extra->>source", "eq", "derivado_libro");
-    await supabase.from("cash_movements").delete().eq("user_id", user.id); // toda la caja derivada
+    // Borra TODO lo de Cocos integro: no solo lo derivado del libro, tambien las
+    // posiciones del import del dia (extra.source='csv_matriz'). Todo Cocos usa
+    // broker='cocos'; IOL (broker='iol', worker automatico) queda intacto.
+    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
+    await supabase.from("cash_movements").delete().eq("user_id", user.id); // toda la caja
     setConfirmDel(null); reloadBatches(); reloadMovs();
   };
 
