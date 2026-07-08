@@ -4346,11 +4346,12 @@ function deriveFromLedger(movs) {
   const agg = new Map();
   for (const m of movs || []) {
     const cat = m.categoria;
-    if (!["trade_cedear", "trade_bono", "trade_otro", "fci"].includes(cat)) continue;
+    if (!["trade_cedear", "trade_bono", "trade_otro", "fci", "futuro"].includes(cat)) continue;
     let type, cur = "ARS", ticker = m.ticker, scale = 1;
     if (cat === "trade_cedear") type = "cedear";
     else if (cat === "trade_otro") type = "stock";
     else if (cat === "trade_bono") type = "bond_ars";
+    else if (cat === "futuro") type = "future"; // solo las filas con ticker (Compra/Venta Indice DLR); las Credito/Debito Indice no tienen ticker y se saltean
     else { type = "fci"; scale = 1 / 1000; ticker = FCI_LEDGER_MAP[m.ticker] || m.ticker; cur = /usd/i.test(m.ticker || "") ? "USD-MEP" : "ARS"; }
     if (!ticker) continue;
     const key = type + "|" + ticker;
@@ -4430,12 +4431,15 @@ function ImportacionesView() {
   // (IOL intacto). Devuelve error o null.
   const applyDerived = async (derived) => {
     await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
-    await supabase.from("cash_movements").delete().eq("user_id", user.id).like("notes", "Saldo derivado del libro%");
+    // Borra TODA la caja del usuario: la derivada (Σtotal del libro) ya incluye
+    // futuros (Credito/Debito Indice), caución, aranceles, etc. — no debe convivir
+    // con los ajustes del worker de futuros o se duplicaría.
+    await supabase.from("cash_movements").delete().eq("user_id", user.id);
     const today = new Date().toISOString().slice(0, 10);
     const posRows = derived.positions.map((p) => ({
       user_id: user.id, ticker: p.ticker, instrument_type: p.instrument_type, operation_type: p.side,
       quantity: p.quantity, entry_price: p.entry_price, entry_currency: p.entry_currency, entry_date: p.entry_date,
-      broker: "cocos", settlement: p.instrument_type === "fci" ? "CI" : "T1", extra: { source: "derivado_libro" },
+      broker: "cocos", settlement: (p.instrument_type === "fci" || p.instrument_type === "future") ? "CI" : "T1", extra: { source: "derivado_libro" },
     }));
     for (let k = 0; k < posRows.length; k += 200) {
       const { error } = await supabase.from("positions").insert(posRows.slice(k, k + 200));
@@ -4612,7 +4616,7 @@ function ImportacionesView() {
                 )}
               </div>
             )}
-            <div style={{ fontSize: 10, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>Eliminar un lote borra sus movimientos y el portfolio derivado de él. Excluye futuros (los maneja el worker) y no ajusta la apertura de caja.</div>
+            <div style={{ fontSize: 10, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>Eliminar un lote borra sus movimientos y el portfolio derivado de él. Netea CEDEARs, bonos, acciones, FCI y futuros; caución y liquidaciones van a la caja. No ajusta la apertura de caja.</div>
           </div>
         </>
       )}
