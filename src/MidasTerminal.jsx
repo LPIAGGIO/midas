@@ -7973,8 +7973,19 @@ function useStockPrices() {
           const ticker = String(item.symbol).trim().toUpperCase();
           if (map[ticker]) return;
 
-          const price = item.c ?? item.px_ask ?? null;
-          if (price == null || Number(price) <= 0) return;
+          // El precio de cierre (c) puede venir 0/null con el mercado cerrado o
+          // si el ticker no operó. En ese caso caemos al midpoint del book (o
+          // ask/bid sueltos). Sin esto, esos CEDEARs quedaban SIN precio y se
+          // valuaban a costo (bug: unos aparecían y otros "—" según si c ya
+          // había cargado en el feed).
+          let price = Number(item.c);
+          if (!(price > 0)) {
+            const ask = Number(item.px_ask), bid = Number(item.px_bid);
+            if (ask > 0 && bid > 0) price = (ask + bid) / 2;
+            else if (ask > 0) price = ask;
+            else if (bid > 0) price = bid;
+          }
+          if (!(price > 0)) return;
 
           let changePct = null;
           let previousClose = null;
