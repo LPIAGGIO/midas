@@ -585,14 +585,58 @@ function AdminPanel() {
   );
 }
 
+// Filtra el NAV según allowed_modules (lista plana de ids de hoja). null = ve todo.
+function filterNav(nav, allowed) {
+  if (allowed == null) return nav;
+  const set = new Set(allowed);
+  const out = [];
+  for (const node of nav) {
+    if (!node.children) { if (set.has(node.id)) out.push(node); }
+    else { const kids = node.children.filter((c) => set.has(c.id)); if (kids.length) out.push({ ...node, children: kids }); }
+  }
+  return out;
+}
+
+// Acceso del usuario logueado: estado (active/suspended), módulos permitidos, admin.
+function useMyProfileAccess() {
+  const { user } = useAuth();
+  const [st, setSt] = useState({ loading: true, status: "active", allowedModules: null, isAdmin: false });
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      if (!user) { if (!cancel) setSt({ loading: false, status: "active", allowedModules: null, isAdmin: false }); return; }
+      const [pr, ad] = await Promise.all([
+        supabase.from("profiles").select("status, allowed_modules").eq("id", user.id).maybeSingle(),
+        supabase.rpc("is_admin"),
+      ]);
+      if (cancel) return;
+      setSt({ loading: false, status: pr.data?.status || "active", allowedModules: pr.data?.allowed_modules ?? null, isAdmin: !!ad.data });
+    })();
+    return () => { cancel = true; };
+  }, [user]);
+  return st;
+}
+
+function SuspendedScreen({ email, onSignOut }) {
+  return (
+    <div style={{ minHeight: "100vh", background: "#0F1B2B", color: C.text, fontFamily: "'Roboto', system-ui, sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 24, textAlign: "center" }}>
+      <div style={{ fontSize: 40 }}>⛔</div>
+      <div style={{ fontSize: 20, fontWeight: 700 }}>Cuenta suspendida</div>
+      <div style={{ fontSize: 13, color: C.muted, maxWidth: 440, lineHeight: 1.5 }}>Tu cuenta (<b style={{ color: C.text }}>{email}</b>) está suspendida. Si creés que es un error, contactá al administrador.</div>
+      {onSignOut && <button onClick={onSignOut} style={{ marginTop: 8, background: "none", border: `1px solid ${C.border}`, color: C.muted, padding: "8px 14px", fontSize: 12, cursor: "pointer" }}>Cerrar sesión</button>}
+    </div>
+  );
+}
+
 export default function MidasTerminal() {
   // Gate global: sin login no se entra a ninguna pantalla. El usuario sin sesión
   // ve la Landing (pública, explica el sistema + login con Google). Mantener el
   // gate ACÁ (no en módulos) y como wrapper separado de MidasApp para no romper
   // las reglas de hooks (MidasApp tiene decenas de hooks que solo deben correr
   // cuando hay sesión).
-  const { user: gateUser, loading: gateLoading, signInWithGoogle: gateSignIn } = useAuth();
-  if (gateLoading) {
+  const { user: gateUser, loading: gateLoading, signInWithGoogle: gateSignIn, signOut: gateSignOut } = useAuth();
+  const access = useMyProfileAccess();
+  if (gateLoading || (gateUser && access.loading)) {
     return (
       <div style={{ minHeight: "100vh", background: "#0F1B2B", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(246,247,246,0.45)", fontFamily: "'Roboto', system-ui, sans-serif", fontSize: 13, letterSpacing: "0.06em" }}>
         Cargando…
@@ -607,15 +651,19 @@ export default function MidasTerminal() {
   if (typeof window !== "undefined" && window.location.pathname.replace(/\/+$/, "") === "/admin") {
     return <AdminPanel />;
   }
+  // Cuenta suspendida (no-admin): bloqueo de acceso.
+  if (access.status === "suspended" && !access.isAdmin) {
+    return <SuspendedScreen email={gateUser.email} onSignOut={gateSignOut} />;
+  }
   // Modo pop-out: ventana chiquita con SOLO la calculadora (sin sidebar/header),
   // para tenerla en paralelo con Matriz/Cocos. Se abre con ?view=cedear-fv.
   if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "cedear-fv") {
     return <div style={{ minHeight: "100vh", background: "#0F1B2B" }}><CedearValuacionModule compact /></div>;
   }
-  return <MidasApp />;
+  return <MidasApp allowedModules={access.isAdmin ? null : access.allowedModules} />;
 }
 
-function MidasApp() {
+function MidasApp({ allowedModules = null }) {
   const [collapsed, setCollapsed] = useState(false);
   const [now, setNow] = useState(new Date());
   const [open, setOpen] = useState({ bcra: false, mercado: false, analizadores: false, calculadoras: false, reportes: false });
@@ -644,6 +692,18 @@ function MidasApp() {
     },
     [isMobile]
   );
+  // NAV visible según permisos del usuario (Fase C). Admin recibe allowedModules=null
+  // → ve todo. Si el módulo activo quedó oculto, saltamos al primero visible.
+  const visibleNav = useMemo(() => filterNav(NAV, allowedModules), [allowedModules]);
+  useEffect(() => {
+    if (allowedModules == null) return;
+    const leaves = new Set(visibleNav.flatMap((n) => n.children ? n.children.map((c) => c.id) : [n.id]));
+    if (!leaves.has(active)) {
+      const first = visibleNav[0];
+      const fid = first ? (first.children ? first.children[0]?.id : first.id) : null;
+      if (fid) setActive(fid);
+    }
+  }, [allowedModules, active, visibleNav]);
   // Ventana flotante (Document PiP) de Valuación CEDEAR. Se maneja ACÁ (shell
   // siempre montado) y NO en el módulo, así sobrevive aunque cambies de pantalla.
   // Ventana flotante (Document PiP) compartida por las herramientas CEDEAR
@@ -1263,7 +1323,7 @@ function MidasApp() {
 
           {/* Lista de navegación */}
           <nav className="flex-1 overflow-y-auto eco-scroll py-2">
-            {NAV.map((item) => (
+            {visibleNav.map((item) => (
               <NavBlock
                 key={item.id}
                 item={item}
