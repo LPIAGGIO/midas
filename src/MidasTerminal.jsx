@@ -4457,13 +4457,17 @@ function ImportacionesView() {
     setParsed({ fileName: names.join(", "), rows: all }); setResult(null);
   };
 
-  // Aplica lo derivado del ledger: reemplaza posiciones cocos + caja derivada
-  // (IOL intacto). Devuelve error o null.
+  // Aplica lo derivado del ledger: reemplaza SOLO lo derivado del libro
+  // (source='derivado_libro'), conservando los trades del día que subís desde
+  // Portfolio (source='csv_matriz'). El libro cubre principio de año → ayer; el
+  // import de Portfolio cubre solo hoy — son complementarios, no se pisan.
+  // IOL (broker='iol') intacto. Devuelve error o null.
   const applyDerived = async (derived) => {
-    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
+    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos").filter("extra->>source", "eq", "derivado_libro");
     // Borra TODA la caja del usuario: la derivada (Σtotal del libro) ya incluye
     // futuros (Credito/Debito Indice), caución, aranceles, etc. — no debe convivir
-    // con los ajustes del worker de futuros o se duplicaría.
+    // con los ajustes del worker de futuros o se duplicaría. (El import de
+    // Portfolio no crea caja, solo posiciones, así que esto no lo toca.)
     await supabase.from("cash_movements").delete().eq("user_id", user.id);
     const today = new Date().toISOString().slice(0, 10);
     const allPos = [...derived.positions, ...derived.lots];
