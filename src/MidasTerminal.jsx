@@ -334,7 +334,7 @@ function AdminUserDetail({ user, onBack, onChanged }) {
     setMsg(null);
     const { error } = await supabase.from("profiles").update(patch).eq("id", user.id);
     if (error) setMsg("Error: " + error.message);
-    else { setMsg("Guardado ✓"); onChanged?.(); }
+    else setMsg("Guardado ✓"); // la lista se refresca al volver (onBack)
   };
   const toggleStatus = () => { const n = status === "active" ? "suspended" : "active"; setStatus(n); savePatch({ status: n }); };
   // Árbol de permisos: allowed_modules = lista plana de ids de hoja (items de
@@ -520,9 +520,8 @@ function AdminPanel() {
   const bg = { minHeight: "100vh", background: "#0F1B2B", color: C.text, fontFamily: "'Roboto', system-ui, sans-serif" };
   const fmtDate = (s) => s ? new Date(s).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
 
-  if (loading || isAdmin === null) {
-    return <div style={{ ...bg, display: "flex", alignItems: "center", justifyContent: "center" }}><Loader2 size={26} className="eco-spin" color={C.muted} strokeWidth={1.5} /></div>;
-  }
+  const spinner = <div style={{ ...bg, display: "flex", alignItems: "center", justifyContent: "center" }}><Loader2 size={26} className="eco-spin" color={C.muted} strokeWidth={1.5} /></div>;
+  if (isAdmin === null) return spinner;
   if (!isAdmin) {
     return (
       <div style={{ ...bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 24, textAlign: "center" }}>
@@ -533,9 +532,13 @@ function AdminPanel() {
       </div>
     );
   }
+  // El detalle se renderiza ANTES del gate de loading: así un refetch de la lista
+  // (onChanged tras editar permisos/estado o borrar) NO desmonta AdminUserDetail
+  // ni le resetea el estado local. Ese remount era el bug de "no aplica el cambio".
   if (selected) {
-    return <AdminUserDetail user={selected} onBack={() => setSelected(null)} onChanged={() => setRefreshKey((k) => k + 1)} />;
+    return <AdminUserDetail user={selected} onBack={() => { setSelected(null); setRefreshKey((k) => k + 1); }} onChanged={() => setRefreshKey((k) => k + 1)} />;
   }
+  if (loading) return spinner;
   return (
     <div style={{ ...bg, padding: "28px 32px 80px", maxWidth: 1300, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
