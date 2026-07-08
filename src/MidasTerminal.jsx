@@ -4343,17 +4343,31 @@ function useImportBatches() {
 // Amortización", no una venta) → por eso hay preview obligatorio.
 const FCI_LEDGER_MAP = { COCORMA: "Cocos Rendimiento - Clase A|rentaMixta" };
 function deriveFromLedger(movs) {
-  const agg = new Map();
+  const agg = new Map();       // contado (cedear/bono/stock) + fci: neteo a posición
+  const futureLots = [];       // futuros: un LOTE por operación (para su P&L realizado, aunque neteen 0)
+  const cash = {};             // Σtotal por moneda
+  let commAr = 0, commUsd = 0, cauNet = 0;
   for (const m of movs || []) {
+    const cur0 = m.moneda === "USD" ? "USD-MEP" : (m.moneda || "ARS");
+    cash[cur0] = (cash[cur0] || 0) + (Number(m.total) || 0);
+    const fee = Math.abs(Number(m.comision) || 0) + Math.abs(Number(m.ddmm) || 0) + Math.abs(Number(m.iva) || 0);
+    if (fee > 0) { if (cur0 === "ARS") commAr += fee; else commUsd += fee; }
+    if (m.categoria === "caucion") cauNet += Number(m.total) || 0;
+
     const cat = m.categoria;
-    if (!["trade_cedear", "trade_bono", "trade_otro", "fci", "futuro"].includes(cat)) continue;
+    // Futuros: lote individual (netean 0 al cerrar, pero queremos su P&L realizado).
+    // Las "Credito/Debito Indice" no tienen ticker → van a caja, no a posición.
+    if (cat === "futuro" && m.ticker) {
+      const q = Number(m.cantidad) || 0;
+      if (Math.abs(q) > 1e-9) futureLots.push({ ticker: m.ticker, srcTicker: m.ticker, instrument_type: "future", side: q >= 0 ? "buy" : "sell", quantity: Math.abs(q), entry_price: Number(m.precio) || 0, entry_currency: "ARS", entry_date: m.fecha_ejecucion });
+      continue;
+    }
+    if (!["trade_cedear", "trade_bono", "trade_otro", "fci"].includes(cat) || !m.ticker) continue;
     let type, cur = "ARS", ticker = m.ticker, scale = 1;
     if (cat === "trade_cedear") type = "cedear";
     else if (cat === "trade_otro") type = "stock";
     else if (cat === "trade_bono") type = "bond_ars";
-    else if (cat === "futuro") type = "future"; // solo las filas con ticker (Compra/Venta Indice DLR); las Credito/Debito Indice no tienen ticker y se saltean
     else { type = "fci"; scale = 1 / 1000; ticker = FCI_LEDGER_MAP[m.ticker] || m.ticker; cur = /usd/i.test(m.ticker || "") ? "USD-MEP" : "ARS"; }
-    if (!ticker) continue;
     const key = type + "|" + ticker;
     const a = agg.get(key) || { type, ticker, cur, srcTicker: m.ticker, netQty: 0, buyVal: 0, buyQty: 0, first: null };
     const qty = (Number(m.cantidad) || 0) * scale;
@@ -4372,12 +4386,7 @@ function deriveFromLedger(movs) {
     });
   }
   positions.sort((x, y) => (x.instrument_type < y.instrument_type ? -1 : x.instrument_type > y.instrument_type ? 1 : (x.ticker < y.ticker ? -1 : 1)));
-  const cash = {};
-  for (const m of movs || []) {
-    const cur = m.moneda === "USD" ? "USD-MEP" : (m.moneda || "ARS");
-    cash[cur] = (cash[cur] || 0) + (Number(m.total) || 0);
-  }
-  return { positions, cash };
+  return { positions, futureLots, cash, commAr, commUsd, cauNet };
 }
 
 function ImportacionesModule() {
@@ -4436,7 +4445,8 @@ function ImportacionesView() {
     // con los ajustes del worker de futuros o se duplicaría.
     await supabase.from("cash_movements").delete().eq("user_id", user.id);
     const today = new Date().toISOString().slice(0, 10);
-    const posRows = derived.positions.map((p) => ({
+    const allPos = [...derived.positions, ...derived.futureLots];
+    const posRows = allPos.map((p) => ({
       user_id: user.id, ticker: p.ticker, instrument_type: p.instrument_type, operation_type: p.side,
       quantity: p.quantity, entry_price: p.entry_price, entry_currency: p.entry_currency, entry_date: p.entry_date,
       broker: "cocos", settlement: (p.instrument_type === "fci" || p.instrument_type === "future") ? "CI" : "T1", extra: { source: "derivado_libro" },
@@ -4445,11 +4455,23 @@ function ImportacionesView() {
       const { error } = await supabase.from("positions").insert(posRows.slice(k, k + 200));
       if (error) return error.message;
     }
-    const cashRows = Object.entries(derived.cash).filter(([, v]) => Math.abs(v) > 0.005).map(([cur, amt]) => ({
-      user_id: user.id, movement_date: today, movement_type: amt >= 0 ? "deposit" : "withdrawal",
-      currency: cur, amount: Math.abs(amt), notes: "Saldo derivado del libro (Σ movimientos)", broker: "cocos",
-    }));
-    if (cashRows.length) { const { error } = await supabase.from("cash_movements").insert(cashRows); if (error) return error.message; }
+    // Caja itemizada: comisiones (alimentan "Comisiones acumuladas") + caución
+    // (alimenta su fila en P&L por Instrumento) + un plug por moneda que cuadra al
+    // Σtotal del libro. Así P&L por Instrumento ve comisiones y caución, no un lump.
+    const cashRows = [];
+    if (derived.commAr > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: "withdrawal", currency: "ARS", amount: derived.commAr, notes: "Derechos de mercado + IVA + aranceles (del libro)", broker: "cocos" });
+    if (derived.commUsd > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: "withdrawal", currency: "USD-MEP", amount: derived.commUsd, notes: "Derechos + IVA del libro (USD)", broker: "cocos" });
+    if (Math.abs(derived.cauNet) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: derived.cauNet >= 0 ? "deposit" : "withdrawal", currency: "ARS", amount: Math.abs(derived.cauNet), notes: "Caución resultado neto (del libro)", broker: "cocos" });
+    for (const [cur, T] of Object.entries(derived.cash)) {
+      const C = cur === "ARS" ? derived.commAr : (cur === "USD-MEP" ? derived.commUsd : 0);
+      const K = cur === "ARS" ? derived.cauNet : 0;
+      const plug = T + C - K; // Σ(cash) = -C + K + plug = T (el total real del libro)
+      if (Math.abs(plug) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: plug >= 0 ? "deposit" : "withdrawal", currency: cur, amount: Math.abs(plug), notes: "Saldo derivado del libro (ancla al total)", broker: "cocos" });
+    }
+    for (let k = 0; k < cashRows.length; k += 200) {
+      const { error } = await supabase.from("cash_movements").insert(cashRows.slice(k, k + 200));
+      if (error) return error.message;
+    }
     return null;
   };
 
@@ -4473,7 +4495,7 @@ function ImportacionesView() {
     const err = await applyDerived(derived);
     setImporting(false);
     if (err) { setResult({ err }); return; }
-    setResult({ ok: newRows.length, applied: derived.positions.length });
+    setResult({ ok: newRows.length, applied: derived.positions.length + derived.futureLots.length });
     setParsed(null); reloadBatches(); reloadMovs();
   };
 
@@ -4481,7 +4503,7 @@ function ImportacionesView() {
   const deleteBatch = async (id) => {
     await supabase.from("import_batches").delete().eq("id", id);
     await supabase.from("positions").delete().eq("user_id", user.id).filter("extra->>source", "eq", "derivado_libro");
-    await supabase.from("cash_movements").delete().eq("user_id", user.id).like("notes", "Saldo derivado del libro%");
+    await supabase.from("cash_movements").delete().eq("user_id", user.id); // toda la caja derivada
     setConfirmDel(null); reloadBatches(); reloadMovs();
   };
 
