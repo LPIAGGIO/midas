@@ -4566,21 +4566,29 @@ function ImportacionesView() {
           {result && <div style={{ fontSize: 12, marginBottom: 16, color: result.err ? C.red : "#34d399" }}>{result.err ? result.err : `✓ ${result.ok} movimientos importados · ${result.applied} posiciones reconstruidas. Andá a Portfolio.`}</div>}
 
           {/* ── Zona separada: tus importaciones + reconstruir ── */}
-          <div style={{ marginTop: 26, paddingTop: 18, borderTop: `2px solid ${C.border}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-              <div style={{ fontSize: 10, letterSpacing: "0.14em", color: C.dim, textTransform: "uppercase", fontWeight: 700 }}>Tus importaciones ({batches.length}{sinLote > 0 ? " + 1" : ""})</div>
+          <div style={{ marginTop: 34, paddingTop: 22, borderTop: `3px solid ${C.accent}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <Upload size={17} color={C.accent} strokeWidth={2} />
+                <span style={{ fontSize: 16, color: C.text, fontWeight: 700, fontFamily: "'Raleway', sans-serif" }}>Tus importaciones</span>
+                <span style={{ fontSize: 12, color: C.dim }}>({batches.length}{sinLote > 0 ? " + 1 previa" : ""})</span>
+              </div>
               {movs.length > 0 && <button onClick={reaplicar} disabled={applying} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: applying ? "default" : "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>{applying ? "Reconstruyendo…" : "↻ Reconstruir portfolio desde el libro"}</button>}
             </div>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 14 }}>Cada archivo que importás, por broker. Son independientes — podés tener imports de distintos brokers.</div>
             {rebuildMsg && <div style={{ fontSize: 11.5, marginBottom: 10, color: rebuildMsg.startsWith("Error") ? C.red : "#34d399" }}>{rebuildMsg}</div>}
             {batches.length === 0 && sinLote === 0 ? (
               <div style={{ fontSize: 12, color: C.dim, padding: "16px 0" }}>Todavía no importaste nada. Subí tu CSV arriba.</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {batches.map((b) => (
-                  <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px solid ${C.border}`, borderRadius: 8, flexWrap: "wrap" }}>
+                  <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px solid ${C.border}`, borderLeft: `3px solid ${b.broker === "cocos" ? "#22D3EE" : b.broker === "iol" ? "#FBBF24" : C.accent}`, borderRadius: 8, flexWrap: "wrap" }}>
                     <div>
-                      <div style={{ fontSize: 12.5, color: C.text, fontWeight: 600 }}>{b.file_name || "importación"}</div>
-                      <div style={{ fontSize: 10.5, color: C.dim, marginTop: 2 }}>{b.n_rows} movimientos · {fmtDate(b.created_at)} · {b.broker}</div>
+                      <div style={{ fontSize: 12.5, color: C.text, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.06em", color: "#0b0e11", background: b.broker === "cocos" ? "#22D3EE" : b.broker === "iol" ? "#FBBF24" : C.accent, borderRadius: 3, padding: "2px 6px", textTransform: "uppercase" }}>{b.broker}</span>
+                        {b.file_name || "importación"}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: C.dim, marginTop: 3 }}>{b.n_rows} movimientos · {fmtDate(b.created_at)}</div>
                     </div>
                     {confirmDel === b.id ? (
                       <div className="flex" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
