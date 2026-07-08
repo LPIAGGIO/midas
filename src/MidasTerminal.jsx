@@ -4360,12 +4360,13 @@ function deriveFromLedger(movs) {
   const lots = [];             // lotes individuales: cedear/acción/futuro/bono-sin-MEP
   const netAgg = new Map();    // neteo: bonos-con-MEP + FCI
   const cash = {};
-  let commAr = 0, commUsd = 0, cauNet = 0, cauColoc = 0, cauTom = 0;
+  const comm = {};   // costos por moneda, DESGLOSADOS: { comision, ddmm (derechos de mercado), iva }
+  let cauNet = 0, cauColoc = 0, cauTom = 0;
   for (const m of rows) {
     const cur0 = m.moneda === "USD" ? "USD-MEP" : (m.moneda || "ARS");
     cash[cur0] = (cash[cur0] || 0) + (Number(m.total) || 0);
-    const fee = Math.abs(Number(m.comision) || 0) + Math.abs(Number(m.ddmm) || 0) + Math.abs(Number(m.iva) || 0);
-    if (fee > 0) { if (cur0 === "ARS") commAr += fee; else commUsd += fee; }
+    const c = Math.abs(Number(m.comision) || 0), dd = Math.abs(Number(m.ddmm) || 0), iv = Math.abs(Number(m.iva) || 0);
+    if (c + dd + iv > 0) { const g = comm[cur0] || (comm[cur0] = { comision: 0, ddmm: 0, iva: 0 }); g.comision += c; g.ddmm += dd; g.iva += iv; }
     if (m.categoria === "caucion") {
       // Colocadora (prestás → ganás interés, +) y tomadora (te financiás →
       // pagás interés, −) son económicamente distintas: las separamos. Ambas
@@ -4407,7 +4408,7 @@ function deriveFromLedger(movs) {
       entry_price: a.buyQty > 0 ? a.buyVal / a.buyQty : 0, entry_currency: a.cur, entry_date: a.first,
     });
   }
-  return { positions, lots, cash, commAr, commUsd, cauNet, cauColoc, cauTom };
+  return { positions, lots, cash, comm, cauNet, cauColoc, cauTom };
 }
 
 function ImportacionesModule() {
@@ -4480,16 +4481,21 @@ function ImportacionesView() {
       const { error } = await supabase.from("positions").insert(posRows.slice(k, k + 200));
       if (error) return error.message;
     }
-    // Caja itemizada: comisiones (alimentan "Comisiones acumuladas") + caución
-    // (alimenta su fila en P&L por Instrumento) + un plug por moneda que cuadra al
-    // Σtotal del libro. Así P&L por Instrumento ve comisiones y caución, no un lump.
+    // Caja itemizada: costos DESGLOSADOS (comisión / derechos de mercado / IVA,
+    // cada uno alimenta "Comisiones acumuladas") + caución (alimenta su fila en
+    // P&L por Instrumento) + un plug por moneda que cuadra al Σtotal del libro.
     const cashRows = [];
-    if (derived.commAr > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: "withdrawal", currency: "ARS", amount: derived.commAr, notes: "Derechos de mercado + IVA + aranceles (del libro)", broker: "cocos" });
-    if (derived.commUsd > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: "withdrawal", currency: "USD-MEP", amount: derived.commUsd, notes: "Derechos + IVA del libro (USD)", broker: "cocos" });
+    const sfx = (cur) => (cur === "ARS" ? "" : " (USD)");
+    for (const [cur, g] of Object.entries(derived.comm || {})) {
+      if (g.comision > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: "withdrawal", currency: cur, amount: g.comision, notes: "Comisión (del libro)" + sfx(cur), broker: "cocos" });
+      if (g.ddmm > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: "withdrawal", currency: cur, amount: g.ddmm, notes: "Derechos de mercado (del libro)" + sfx(cur), broker: "cocos" });
+      if (g.iva > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: "withdrawal", currency: cur, amount: g.iva, notes: "IVA (del libro)" + sfx(cur), broker: "cocos" });
+    }
     if (Math.abs(derived.cauColoc) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: derived.cauColoc >= 0 ? "deposit" : "withdrawal", currency: "ARS", amount: Math.abs(derived.cauColoc), notes: "Caución colocadora resultado neto (del libro)", broker: "cocos" });
     if (Math.abs(derived.cauTom) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: derived.cauTom >= 0 ? "deposit" : "withdrawal", currency: "ARS", amount: Math.abs(derived.cauTom), notes: "Caución tomadora resultado neto (del libro)", broker: "cocos" });
     for (const [cur, T] of Object.entries(derived.cash)) {
-      const C = cur === "ARS" ? derived.commAr : (cur === "USD-MEP" ? derived.commUsd : 0);
+      const g = derived.comm && derived.comm[cur];
+      const C = g ? g.comision + g.ddmm + g.iva : 0; // total de costos de esa moneda (para el plug)
       const K = cur === "ARS" ? derived.cauNet : 0;
       const plug = T + C - K; // Σ(cash) = -C + K + plug = T (el total real del libro)
       if (Math.abs(plug) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: plug >= 0 ? "deposit" : "withdrawal", currency: cur, amount: Math.abs(plug), notes: "Saldo derivado del libro (ancla al total)", broker: "cocos" });
