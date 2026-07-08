@@ -410,7 +410,7 @@ function AdminUserDetail({ user, onBack, onChanged }) {
         </div>
         {(() => {
           const box = (on, some) => (
-            <span style={{ display: "inline-flex", width: 15, height: 15, marginRight: 8, borderRadius: 3, border: `1.5px solid ${on || some ? C.accent : C.dim}`, background: on ? C.accent : "transparent", color: "#0b0e11", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{on ? "✓" : some ? "–" : ""}</span>
+            <span style={{ display: "inline-flex", width: 15, height: 15, marginRight: 8, borderRadius: 3, border: `1.5px solid ${on || some ? C.accent : C.dim}`, background: on || some ? C.accent : "transparent", color: "#0b0e11", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{on ? "✓" : some ? "–" : ""}</span>
           );
           const row = { display: "flex", alignItems: "center", cursor: "pointer", padding: "3px 4px", borderRadius: 4, userSelect: "none" };
           return (
