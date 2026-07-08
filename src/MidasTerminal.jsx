@@ -4454,7 +4454,7 @@ function ImportacionesView() {
     // con los ajustes del worker de futuros o se duplicaría.
     await supabase.from("cash_movements").delete().eq("user_id", user.id);
     const today = new Date().toISOString().slice(0, 10);
-    const allPos = [...derived.positions, ...derived.futureLots];
+    const allPos = [...derived.positions, ...derived.lots];
     const posRows = allPos.map((p) => ({
       user_id: user.id, ticker: p.ticker, instrument_type: p.instrument_type, operation_type: p.side,
       quantity: p.quantity, entry_price: p.entry_price, entry_currency: p.entry_currency, entry_date: p.entry_date,
@@ -4504,7 +4504,7 @@ function ImportacionesView() {
     const err = await applyDerived(derived);
     setImporting(false);
     if (err) { setResult({ err }); return; }
-    setResult({ ok: newRows.length, applied: derived.positions.length + derived.futureLots.length });
+    setResult({ ok: newRows.length, applied: derived.positions.length + derived.lots.length });
     setParsed(null); reloadBatches(); reloadMovs();
   };
 
