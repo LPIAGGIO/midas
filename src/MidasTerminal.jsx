@@ -7955,6 +7955,19 @@ function useBondPrices() {
             finalPrev = maePrev;
           }
 
+          // Sanity de ESCALA: para bonos hard-dollar (AO28/AL/GD…) mae_close a
+          // veces guarda el precio en escala USD (ej 0,97) mientras BYMA lo trae
+          // en pesos (ej 149.040). Si hay price fresco de BYMA/data912 y el prev
+          // elegido difiere del price por más de ~3x, es un choque de escala →
+          // usamos el prev del propio feed de precio (o dejamos null para caer al
+          // changePct del feed). Sin esto, el P&L HOY explotaba (+99,93% fantasma).
+          if (priorHasFreshPrice && finalPrev != null && Number(prior.price) > 0) {
+            const ratio = Number(finalPrev) / Number(prior.price);
+            if (ratio > 3 || ratio < 1 / 3) {
+              finalPrev = (priorPrev != null && priorPrev / Number(prior.price) <= 3 && priorPrev / Number(prior.price) >= 1 / 3) ? priorPrev : null;
+            }
+          }
+
           if (priorHasFreshPrice) {
             // BYMA/data912 tienen price del día. Su cotización está
             // alineada con lo que muestra Cocos/Matriz (ambos leen el
