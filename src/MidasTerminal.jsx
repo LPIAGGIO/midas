@@ -4355,13 +4355,20 @@ function deriveFromLedger(movs) {
   const lots = [];             // lotes individuales: cedear/acción/futuro/bono-sin-MEP
   const netAgg = new Map();    // neteo: bonos-con-MEP + FCI
   const cash = {};
-  let commAr = 0, commUsd = 0, cauNet = 0;
+  let commAr = 0, commUsd = 0, cauNet = 0, cauColoc = 0, cauTom = 0;
   for (const m of rows) {
     const cur0 = m.moneda === "USD" ? "USD-MEP" : (m.moneda || "ARS");
     cash[cur0] = (cash[cur0] || 0) + (Number(m.total) || 0);
     const fee = Math.abs(Number(m.comision) || 0) + Math.abs(Number(m.ddmm) || 0) + Math.abs(Number(m.iva) || 0);
     if (fee > 0) { if (cur0 === "ARS") commAr += fee; else commUsd += fee; }
-    if (m.categoria === "caucion") cauNet += Number(m.total) || 0;
+    if (m.categoria === "caucion") {
+      // Colocadora (prestás → ganás interés, +) y tomadora (te financiás →
+      // pagás interés, −) son económicamente distintas: las separamos. Ambas
+      // patas (Contado + Término) llevan "Colocador"/"Tomador" en el tipo.
+      const t = Number(m.total) || 0;
+      cauNet += t;
+      if (/tomad/i.test(m.tipo_operacion || "")) cauTom += t; else cauColoc += t;
+    }
 
     const cat = m.categoria;
     if (!["trade_cedear", "trade_bono", "trade_otro", "fci", "futuro"].includes(cat) || !m.ticker) continue;
@@ -4395,7 +4402,7 @@ function deriveFromLedger(movs) {
       entry_price: a.buyQty > 0 ? a.buyVal / a.buyQty : 0, entry_currency: a.cur, entry_date: a.first,
     });
   }
-  return { positions, lots, cash, commAr, commUsd, cauNet };
+  return { positions, lots, cash, commAr, commUsd, cauNet, cauColoc, cauTom };
 }
 
 function ImportacionesModule() {
@@ -4470,7 +4477,8 @@ function ImportacionesView() {
     const cashRows = [];
     if (derived.commAr > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: "withdrawal", currency: "ARS", amount: derived.commAr, notes: "Derechos de mercado + IVA + aranceles (del libro)", broker: "cocos" });
     if (derived.commUsd > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: "withdrawal", currency: "USD-MEP", amount: derived.commUsd, notes: "Derechos + IVA del libro (USD)", broker: "cocos" });
-    if (Math.abs(derived.cauNet) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: derived.cauNet >= 0 ? "deposit" : "withdrawal", currency: "ARS", amount: Math.abs(derived.cauNet), notes: "Caución resultado neto (del libro)", broker: "cocos" });
+    if (Math.abs(derived.cauColoc) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: derived.cauColoc >= 0 ? "deposit" : "withdrawal", currency: "ARS", amount: Math.abs(derived.cauColoc), notes: "Caución colocadora resultado neto (del libro)", broker: "cocos" });
+    if (Math.abs(derived.cauTom) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: derived.cauTom >= 0 ? "deposit" : "withdrawal", currency: "ARS", amount: Math.abs(derived.cauTom), notes: "Caución tomadora resultado neto (del libro)", broker: "cocos" });
     for (const [cur, T] of Object.entries(derived.cash)) {
       const C = cur === "ARS" ? derived.commAr : (cur === "USD-MEP" ? derived.commUsd : 0);
       const K = cur === "ARS" ? derived.cauNet : 0;
@@ -28875,21 +28883,27 @@ function PnlPorInstrumentoModule() {
     // en cash_movements como "Caución resultado neto ...". Lo mostramos como fila
     // sintética para que el instrumento no falte en el P&L.
     try {
-      const cauRe = /^Cauci[oó]n resultado/i;
-      let net = 0, ops = 0, first = null, last = null;
+      const cauRe = /^Cauci[oó]n\b/i;
+      // Una fila por tipo: colocadora (prestás, +) vs tomadora (te financiás, −).
+      const groups = new Map(); // label -> {net, ops, first, last}
       for (const m of cashMovements || []) {
-        if (!cauRe.test((m.notes || "").trim())) continue;
-        net += (m.movement_type === "deposit" ? 1 : -1) * Number(m.amount || 0);
-        ops++;
+        const note = (m.notes || "").trim();
+        if (!cauRe.test(note)) continue;
+        const label = /tomad/i.test(note) ? "CAUCIÓN TOMADORA" : /coloca/i.test(note) ? "CAUCIÓN COLOCADORA" : "CAUCIÓN";
+        const g = groups.get(label) || { net: 0, ops: 0, first: null, last: null };
+        g.net += (m.movement_type === "deposit" ? 1 : -1) * Number(m.amount || 0);
+        g.ops++;
         const d = m.movement_date;
-        if (d) { if (!first || d < first) first = d; if (!last || d > last) last = d; }
+        if (d) { if (!g.first || d < g.first) g.first = d; if (!g.last || d > g.last) g.last = d; }
+        groups.set(label, g);
       }
-      if (ops > 0) {
-        acc.set("caucion|CAUCION", {
-          type: "caucion", ticker: "CAUCION", currency: "ARS",
+      for (const [label, g] of groups) {
+        if (g.ops === 0) continue;
+        acc.set("caucion|" + label, {
+          type: "caucion", ticker: label, currency: "ARS",
           buyQty: 0, buyNot: 0, sellQty: 0, sellNot: 0,
-          first, last, realized: net, total: net, hasPnl: true,
-          priceSource: "liquidacion", ops,
+          first: g.first, last: g.last, realized: g.net, total: g.net, hasPnl: true,
+          priceSource: "liquidacion", ops: g.ops,
         });
       }
     } catch (err) { console.warn("[PnlPorInstrumento] caucion falló:", err); }
