@@ -20517,8 +20517,12 @@ function useMacroIndicators() {
 // Widget de dashboard: resumen del grupo Estadísticas BCRA — un dato clave
 // de cada pantalla (banda, reservas, compras de divisas, tasas, base
 // monetaria, inflación esperada). Fetch propio a /api/bcra.
-function BcraResumenWidget() {
+// Widget UNIFICADO "Indicador Macro · BCRA": riesgo país + inflación (vía
+// useMacroIndicators/argentinadatos) + banda, reservas, compras (día y mes),
+// TAMAR, base y REM (vía /api/bcra). Reemplaza a los dos widgets separados.
+function BcraResumenWidget({ expanded }) {
   const { remIpc } = useRemFx();
+  const { data: macro } = useMacroIndicators();
   const [d, setD] = useState(null);
   useEffect(() => {
     let mounted = true;
@@ -20546,41 +20550,53 @@ function BcraResumenWidget() {
     return () => { mounted = false; };
   }, []);
 
-  if (!d) return <div style={{ padding: "30px 22px", textAlign: "center", color: C.muted, fontSize: 11 }}>Cargando indicadores BCRA…</div>;
-  const last = (a) => (a.length ? a[a.length - 1] : null);
-  const resLast = last(d.res), mayLast = last(d.may), tamarLast = last(d.tamar), baseLast = last(d.base), remLast = last(d.reminfl);
-  const resVar = d.res.length > 1 && resLast ? resLast.valor - d.res[0].valor : null;
-  const comprasMes = d.compras.reduce((s, x) => s + x.valor, 0);
+  const fmtFecha = (i) => {
+    if (!i) return "";
+    const m1 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(i).trim());
+    if (m1) return `${m1[3]}/${m1[2]}/${m1[1].slice(2)}`;
+    const m2 = /^(\d{4})-(\d{2})$/.exec(String(i).trim());
+    if (m2) { const meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]; return `${meses[parseInt(m2[2], 10) - 1]} ${m2[1].slice(2)}`; }
+    return i;
+  };
+  const last = (a) => (a && a.length ? a[a.length - 1] : null);
+  const resLast = last(d?.res), mayLast = last(d?.may), tamarLast = last(d?.tamar), baseLast = last(d?.base), remLast = last(d?.reminfl), comprasLast = last(d?.compras);
+  const resVar = d?.res?.length > 1 && resLast ? resLast.valor - d.res[0].valor : null;
+  const comprasMes = d ? d.compras.reduce((s, x) => s + x.valor, 0) : null;
   const today = new Date().toISOString().slice(0, 10);
   const piso = projectBand(today, "floor", remIpc), techo = projectBand(today, "ceiling", remIpc);
-  const pos = mayLast ? Math.min(1, Math.max(0, (mayLast.valor - piso) / (techo - piso))) : null;
+  const bandaPos = mayLast ? Math.min(1, Math.max(0, (mayLast.valor - piso) / (techo - piso))) : null;
   const fMM = (n) => (n == null ? "—" : `US$ ${Math.round(n).toLocaleString("es-AR")} M`);
   const fAr = (n) => (n == null ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
+  const riesgoColor = macro?.riesgoPais == null ? C.dim : macro.riesgoPais > 1000 ? C.red : macro.riesgoPais > 500 ? "#d4a417" : C.green;
+  const inflMenColor = macro?.inflacionMensual == null ? C.dim : macro.inflacionMensual > 5 ? C.red : macro.inflacionMensual > 2 ? "#d4a417" : C.green;
 
-  const Row = ({ label, sub, value, color }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "8px 0", borderBottom: `1px solid ${C.border}`, gap: 10 }}>
+  const Row = ({ label, sub, value, color, date }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: expanded ? "9px 0" : "7px 0", borderBottom: `1px solid ${C.border}`, gap: 10 }}>
       <div>
         <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>{label}</div>
         {sub && <div style={{ fontSize: 9.5, color: C.dim, marginTop: 1 }}>{sub}</div>}
       </div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums", textAlign: "right", whiteSpace: "nowrap" }}>{value}</div>
+      <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: expanded ? 16 : 14.5, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+        {date && <div style={{ fontSize: 9, color: C.dim, marginTop: 1 }}>{fmtFecha(date)}</div>}
+      </div>
     </div>
   );
 
+  if (!d && !macro) return <div style={{ padding: "30px 22px", textAlign: "center", color: C.muted, fontSize: 11 }}>Cargando indicadores…</div>;
+
   return (
-    <div style={{ padding: "12px 16px", fontFamily: "'Roboto Mono', monospace" }}>
-      <Row label="Banda cambiaria" sub={mayLast ? `mayorista ${fAr(mayLast.valor)}` : ""}
-        value={pos != null ? `${(pos * 100).toFixed(0)}% de la banda` : "—"} color={C.accent} />
-      <Row label="Reservas internacionales" sub={resVar != null ? `${resVar >= 0 ? "+" : "−"}${fMM(Math.abs(resVar)).replace("US$ ", "US$ ")} en ~30d` : ""}
-        value={fMM(resLast?.valor)} color="#60a5fa" />
-      <Row label="Compras netas BCRA (mes)" sub="intervención en el MULC"
-        value={`${comprasMes >= 0 ? "+" : "−"}${fMM(Math.abs(comprasMes))}`} color={comprasMes >= 0 ? "#34d399" : "#f87171"} />
-      <Row label="TAMAR" sub="tasa de referencia · TNA"
-        value={tamarLast ? `${tamarLast.valor.toFixed(2)}%` : "—"} />
-      <Row label="Base monetaria" sub="dinero primario"
-        value={baseLast ? `$${(baseLast.valor / 1e6).toFixed(1)} bill` : "—"} />
-      <Row label="Inflación esperada (REM)" sub="mediana próx. 12 meses"
-        value={remLast ? `${remLast.valor.toFixed(1)}%` : "—"} color="#a78bfa" />
+    <div style={{ padding: expanded ? "14px 20px" : "10px 16px", fontFamily: "'Roboto Mono', monospace" }}>
+      <Row label="Riesgo País · EMBI" value={macro?.riesgoPais != null ? `${macro.riesgoPais.toLocaleString("es-AR")} pb` : "—"} color={riesgoColor} date={macro?.riesgoPaisFecha} />
+      <Row label="Inflación · Mensual" value={macro?.inflacionMensual != null ? `${macro.inflacionMensual.toFixed(1)}%` : "—"} color={inflMenColor} date={macro?.inflacionMensualFecha} />
+      <Row label="Inflación · Interanual" value={macro?.inflacionInteranual != null ? `${macro.inflacionInteranual.toFixed(1)}%` : "—"} date={macro?.inflacionInteranualFecha} />
+      <Row label="Inflación esperada (REM)" sub="mediana próx. 12 meses" value={remLast ? `${remLast.valor.toFixed(1)}%` : "—"} color="#a78bfa" />
+      <Row label="Banda cambiaria" sub={mayLast ? `mayorista ${fAr(mayLast.valor)}` : ""} value={bandaPos != null ? `${(bandaPos * 100).toFixed(0)}% de la banda` : "—"} color={C.accent} />
+      <Row label="Reservas internacionales" sub={resVar != null ? `${resVar >= 0 ? "+" : "−"}${fMM(Math.abs(resVar))} en ~30d` : ""} value={fMM(resLast?.valor)} color="#60a5fa" date={resLast?.fecha} />
+      <Row label="BCRA · Compras (últ. día)" sub="intervención en el MULC" value={comprasLast == null ? "—" : `${comprasLast.valor >= 0 ? "+" : "−"}${fMM(Math.abs(comprasLast.valor))}`} color={comprasLast == null ? C.dim : comprasLast.valor >= 0 ? C.green : C.red} date={comprasLast?.fecha} />
+      <Row label="BCRA · Compras netas (mes)" value={comprasMes == null ? "—" : `${comprasMes >= 0 ? "+" : "−"}${fMM(Math.abs(comprasMes))}`} color={comprasMes == null ? C.dim : comprasMes >= 0 ? C.green : C.red} />
+      <Row label="TAMAR" sub="tasa de referencia · TNA" value={tamarLast ? `${tamarLast.valor.toFixed(2)}%` : "—"} />
+      <Row label="Base monetaria" sub="dinero primario" value={baseLast ? `$${(baseLast.valor / 1e6).toFixed(1)} bill` : "—"} />
     </div>
   );
 }
@@ -21882,7 +21898,7 @@ function NavCurveSection({ userId, C, compact = false }) {
 const DASHBOARD_ORDER_LS_KEY = "midas:dashboard-order-v1";
 const DASHBOARD_WIDGET_IDS = [
   "curva-dlr", "cobertura-dlr", "mi-cobertura", "fx", "resumen",
-  "flujo", "nav", "carry", "macro", "bcra-resumen", "rem-dolar", "pulso", "brujula", "banda", "alertas-activas",
+  "flujo", "nav", "carry", "macro", "rem-dolar", "pulso", "brujula", "banda", "alertas-activas",
 ];
 
 /* ─────────────── Banda Cambiaria · Termómetros (Dashboard) ───────────────
@@ -22573,8 +22589,7 @@ function DashboardModule() {
             { id: "flujo", title: "Flujo de Posiciones", render: () => <PositionFlowWidget /> },
             { id: "nav", title: "Evolución del patrimonio", render: ({ expanded }) => <NavCurveSection userId={user?.id} C={C} compact={!expanded} /> },
             { id: "carry", title: "Carry Trade · Top TEA", render: ({ expanded }) => <CarryTradeWidget expanded={expanded} /> },
-            { id: "macro", title: "Indicadores Macro", render: ({ expanded }) => <BcraIndicatorsWidget expanded={expanded} /> },
-            { id: "bcra-resumen", title: "Estadísticas BCRA · Resumen", render: () => <BcraResumenWidget /> },
+            { id: "macro", title: "Indicador Macro · BCRA", render: ({ expanded }) => <BcraResumenWidget expanded={expanded} /> },
             { id: "rem-dolar", title: "REM vs Realidad · Dólar", render: () => <RemVsRealWidget futurePrices={futurePrices} /> },
             { id: "pulso", title: "Pulso de Mercado · Noticias", render: () => <MarketPulseWidget fx={fx} dlrCurve={dlrCurve} /> },
             { id: "brujula", title: "Brújula Dólar · ¿Qué está barato?", render: () => <DolarCompassWidget fx={fx} dlrCurve={dlrCurve} remIpc={remIpc} /> },
