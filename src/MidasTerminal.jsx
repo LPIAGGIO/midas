@@ -4336,6 +4336,49 @@ function useImportBatches() {
   return { rows, loading, reload };
 }
 
+// Deriva posiciones + caja del ledger (libro_movimientos). Netea trades por
+// ticker (las patas MEP se cancelan solas porque cantidad viene firmada). FCI
+// viene ×1000 en el CSV → escala /1000. Excluye futuros (los maneja el worker).
+// OJO: letras vencidas aparecen como tenencia (el vencimiento es "Renta y
+// Amortización", no una venta) → por eso hay preview obligatorio.
+const FCI_LEDGER_MAP = { COCORMA: "Cocos Rendimiento - Clase A|rentaMixta" };
+function deriveFromLedger(movs) {
+  const agg = new Map();
+  for (const m of movs || []) {
+    const cat = m.categoria;
+    if (!["trade_cedear", "trade_bono", "trade_otro", "fci"].includes(cat)) continue;
+    let type, cur = "ARS", ticker = m.ticker, scale = 1;
+    if (cat === "trade_cedear") type = "cedear";
+    else if (cat === "trade_otro") type = "stock";
+    else if (cat === "trade_bono") type = "bond_ars";
+    else { type = "fci"; scale = 1 / 1000; ticker = FCI_LEDGER_MAP[m.ticker] || m.ticker; cur = /usd/i.test(m.ticker || "") ? "USD-MEP" : "ARS"; }
+    if (!ticker) continue;
+    const key = type + "|" + ticker;
+    const a = agg.get(key) || { type, ticker, cur, srcTicker: m.ticker, netQty: 0, buyVal: 0, buyQty: 0, first: null };
+    const qty = (Number(m.cantidad) || 0) * scale;
+    a.netQty += qty;
+    if (qty > 0) { a.buyQty += qty; a.buyVal += qty * (Number(m.precio) || 0); }
+    if (m.fecha_ejecucion && (!a.first || m.fecha_ejecucion < a.first)) a.first = m.fecha_ejecucion;
+    agg.set(key, a);
+  }
+  const positions = [];
+  for (const a of agg.values()) {
+    if (Math.abs(a.netQty) < 1e-6) continue;
+    positions.push({
+      ticker: a.ticker, srcTicker: a.srcTicker, instrument_type: a.type,
+      side: a.netQty >= 0 ? "buy" : "sell", quantity: Math.abs(a.netQty),
+      entry_price: a.buyQty > 0 ? a.buyVal / a.buyQty : 0, entry_currency: a.cur, entry_date: a.first,
+    });
+  }
+  positions.sort((x, y) => (x.instrument_type < y.instrument_type ? -1 : x.instrument_type > y.instrument_type ? 1 : (x.ticker < y.ticker ? -1 : 1)));
+  const cash = {};
+  for (const m of movs || []) {
+    const cur = m.moneda === "USD" ? "USD-MEP" : (m.moneda || "ARS");
+    cash[cur] = (cash[cur] || 0) + (Number(m.total) || 0);
+  }
+  return { positions, cash };
+}
+
 function ImportacionesModule() {
   const { user, loading } = useAuth();
   if (loading) return <div className="absolute inset-0 flex items-center justify-center"><Loader2 size={28} color={C.muted} className="eco-spin" strokeWidth={1.5} /></div>;
@@ -4352,6 +4395,9 @@ function ImportacionesView() {
   const [result, setResult] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
   const [conns, setConns] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [applying, setApplying] = useState(false);
+  const [rebuildMsg, setRebuildMsg] = useState(null);
   const { rows: batches, reload: reloadBatches } = useImportBatches();
   const { rows: movs, reload: reloadMovs } = useLibroMovimientos();
   const existingComprobantes = useMemo(() => new Set(movs.map((m) => m.nro_comprobante)), [movs]);
@@ -4402,6 +4448,36 @@ function ImportacionesView() {
   const deleteBatch = async (id) => {
     await supabase.from("import_batches").delete().eq("id", id);
     setConfirmDel(null); reloadBatches(); reloadMovs();
+  };
+
+  const doRebuild = () => { setRebuildMsg(null); setPreview(deriveFromLedger(movs)); };
+  const applyRebuild = async () => {
+    if (!preview) return;
+    setApplying(true); setRebuildMsg(null);
+    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
+    await supabase.from("cash_movements").delete().eq("user_id", user.id);
+    const today = new Date().toISOString().slice(0, 10);
+    const posRows = preview.positions.map((p) => ({
+      user_id: user.id, ticker: p.ticker, instrument_type: p.instrument_type, operation_type: p.side,
+      quantity: p.quantity, entry_price: p.entry_price, entry_currency: p.entry_currency, entry_date: p.entry_date,
+      broker: "cocos", settlement: p.instrument_type === "fci" ? "CI" : "T1", extra: { source: "derivado_libro" },
+    }));
+    let err = null;
+    for (let k = 0; k < posRows.length; k += 200) {
+      const { error } = await supabase.from("positions").insert(posRows.slice(k, k + 200));
+      if (error) { err = error.message; break; }
+    }
+    if (!err) {
+      const cashRows = Object.entries(preview.cash).filter(([, v]) => Math.abs(v) > 0.005).map(([cur, amt]) => ({
+        user_id: user.id, movement_date: today, movement_type: amt >= 0 ? "deposit" : "withdrawal",
+        currency: cur, amount: Math.abs(amt), notes: "Saldo derivado del libro (Σ movimientos) — revisar apertura", broker: "cocos",
+      }));
+      if (cashRows.length) { const { error } = await supabase.from("cash_movements").insert(cashRows); if (error) err = error.message; }
+    }
+    setApplying(false);
+    if (err) { setRebuildMsg("Error: " + err); return; }
+    setRebuildMsg(`✓ Portfolio reconstruido: ${preview.positions.length} posiciones. Andá a Portfolio para verlo.`);
+    setPreview(null);
   };
 
   const info = BROKER_IMPORT_INFO[broker];
@@ -4496,6 +4572,45 @@ function ImportacionesView() {
               )}
             </div>
           )}
+
+          {/* Reconstruir portfolio desde el libro */}
+          <div style={{ marginTop: 28, paddingTop: 20, borderTop: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 10, letterSpacing: "0.14em", color: C.dim, textTransform: "uppercase", fontWeight: 700, marginBottom: 6 }}>Reconstruir portfolio</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.6 }}>
+              Deriva tus <b style={{ color: C.text }}>posiciones y caja</b> del libro (netea trades por ticker; las patas MEP se cancelan solas). <b style={{ color: C.text }}>Reemplaza</b> tus posiciones de Cocos y tu caja por lo derivado — IOL queda intacto. No incluye futuros (los maneja el worker). Siempre muestra un preview antes de aplicar.
+            </div>
+            {!preview ? (
+              <button onClick={doRebuild} disabled={!movs.length} style={{ padding: "9px 16px", fontSize: 12, fontWeight: 700, cursor: movs.length ? "pointer" : "not-allowed", border: "none", background: movs.length ? C.accent : C.border, color: movs.length ? "#0b0e11" : C.dim }}>Reconstruir desde el libro</button>
+            ) : (
+              <div style={{ border: `1px solid ${C.accent}`, borderRadius: 8, padding: "14px 16px", background: "rgba(96,165,250,0.05)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 8 }}>Preview — {preview.positions.length} posiciones</div>
+                <div style={{ overflowX: "auto", maxHeight: 320, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 6, marginBottom: 10 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                    <thead><tr style={{ color: C.dim, textAlign: "left" }}>
+                      <th style={{ padding: "6px 10px" }}>Tipo</th><th style={{ padding: "6px 10px" }}>Ticker</th>
+                      <th style={{ padding: "6px 10px", textAlign: "right" }}>Cant.</th><th style={{ padding: "6px 10px", textAlign: "right" }}>PPC</th><th style={{ padding: "6px 10px" }}>Mon.</th>
+                    </tr></thead>
+                    <tbody>{preview.positions.map((p, i) => (
+                      <tr key={i} style={{ borderTop: `1px solid ${C.border}` }}>
+                        <td style={{ padding: "5px 10px", color: C.muted }}>{p.instrument_type}</td>
+                        <td style={{ padding: "5px 10px", color: C.text, fontWeight: 600 }}>{p.srcTicker}{p.side === "sell" ? " ⚠short" : ""}</td>
+                        <td style={{ padding: "5px 10px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{p.quantity.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
+                        <td style={{ padding: "5px 10px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{p.entry_price.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
+                        <td style={{ padding: "5px 10px", color: C.dim }}>{p.entry_currency}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>Caja derivada: {Object.entries(preview.cash).map(([c, v]) => `${c} ${v.toLocaleString("es-AR", { maximumFractionDigits: 0 })}`).join(" · ") || "—"}</div>
+                <div style={{ fontSize: 10.5, color: "#d4a417", marginBottom: 12, lineHeight: 1.5 }}>⚠ Revisá: las letras vencidas pueden aparecer como tenencia (el vencimiento no es una venta). La caja es Σ de movimientos y puede necesitar ajuste de apertura.</div>
+                <div className="flex" style={{ gap: 8 }}>
+                  <button onClick={() => setPreview(null)} disabled={applying} style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>Cancelar</button>
+                  <button onClick={applyRebuild} disabled={applying} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: applying ? "default" : "pointer", border: "none", background: C.red, color: "#fff" }}>{applying ? "Aplicando…" : "Reemplazar mi portfolio"}</button>
+                </div>
+              </div>
+            )}
+            {rebuildMsg && <div style={{ fontSize: 12, marginTop: 10, color: rebuildMsg.startsWith("Error") ? C.red : "#34d399" }}>{rebuildMsg}</div>}
+          </div>
         </>
       )}
 
