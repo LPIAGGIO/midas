@@ -4426,58 +4426,67 @@ function ImportacionesView() {
     setParsed({ fileName: names.join(", "), rows: all }); setResult(null);
   };
 
-  const doImport = async () => {
-    if (!parsed) return;
-    const newRows = parsed.rows.filter((r) => r.status === "new");
-    if (!newRows.length) { setResult({ err: "No hay movimientos nuevos (todos ya estaban cargados)." }); return; }
-    setImporting(true);
-    const { data: batch, error: be } = await supabase.from("import_batches").insert({ user_id: user.id, file_name: parsed.fileName, broker, source: "movimientos_cuenta", n_rows: newRows.length }).select().single();
-    if (be) { setImporting(false); setResult({ err: be.message }); return; }
-    let inserted = 0, err = null;
-    for (let k = 0; k < newRows.length; k += 300) {
-      const chunk = newRows.slice(k, k + 300).map(({ status, ...r }) => ({ ...r, user_id: user.id, import_batch_id: batch.id }));
-      const { error } = await supabase.from("libro_movimientos").upsert(chunk, { onConflict: "user_id,nro_comprobante", ignoreDuplicates: true });
-      if (error) { err = error.message; break; }
-      inserted += chunk.length;
-    }
-    setImporting(false);
-    if (err) { setResult({ err }); return; }
-    setResult({ ok: inserted }); setParsed(null); reloadBatches(); reloadMovs();
-  };
-
-  const deleteBatch = async (id) => {
-    await supabase.from("import_batches").delete().eq("id", id);
-    setConfirmDel(null); reloadBatches(); reloadMovs();
-  };
-
-  const doRebuild = () => { setRebuildMsg(null); setPreview(deriveFromLedger(movs)); };
-  const applyRebuild = async () => {
-    if (!preview) return;
-    setApplying(true); setRebuildMsg(null);
+  // Aplica lo derivado del ledger: reemplaza posiciones cocos + caja derivada
+  // (IOL intacto). Devuelve error o null.
+  const applyDerived = async (derived) => {
     await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
-    await supabase.from("cash_movements").delete().eq("user_id", user.id);
+    await supabase.from("cash_movements").delete().eq("user_id", user.id).like("notes", "Saldo derivado del libro%");
     const today = new Date().toISOString().slice(0, 10);
-    const posRows = preview.positions.map((p) => ({
+    const posRows = derived.positions.map((p) => ({
       user_id: user.id, ticker: p.ticker, instrument_type: p.instrument_type, operation_type: p.side,
       quantity: p.quantity, entry_price: p.entry_price, entry_currency: p.entry_currency, entry_date: p.entry_date,
       broker: "cocos", settlement: p.instrument_type === "fci" ? "CI" : "T1", extra: { source: "derivado_libro" },
     }));
-    let err = null;
     for (let k = 0; k < posRows.length; k += 200) {
       const { error } = await supabase.from("positions").insert(posRows.slice(k, k + 200));
-      if (error) { err = error.message; break; }
+      if (error) return error.message;
     }
-    if (!err) {
-      const cashRows = Object.entries(preview.cash).filter(([, v]) => Math.abs(v) > 0.005).map(([cur, amt]) => ({
-        user_id: user.id, movement_date: today, movement_type: amt >= 0 ? "deposit" : "withdrawal",
-        currency: cur, amount: Math.abs(amt), notes: "Saldo derivado del libro (Σ movimientos) — revisar apertura", broker: "cocos",
-      }));
-      if (cashRows.length) { const { error } = await supabase.from("cash_movements").insert(cashRows); if (error) err = error.message; }
+    const cashRows = Object.entries(derived.cash).filter(([, v]) => Math.abs(v) > 0.005).map(([cur, amt]) => ({
+      user_id: user.id, movement_date: today, movement_type: amt >= 0 ? "deposit" : "withdrawal",
+      currency: cur, amount: Math.abs(amt), notes: "Saldo derivado del libro (Σ movimientos)", broker: "cocos",
+    }));
+    if (cashRows.length) { const { error } = await supabase.from("cash_movements").insert(cashRows); if (error) return error.message; }
+    return null;
+  };
+
+  // Import + aplicar en un solo paso: sube el CSV al libro (batch) y reconstruye
+  // el portfolio del libro COMPLETO.
+  const importarYAplicar = async () => {
+    if (!parsed) return;
+    const newRows = parsed.rows.filter((r) => r.status === "new");
+    setImporting(true); setResult(null);
+    if (newRows.length) {
+      const { data: batch, error: be } = await supabase.from("import_batches").insert({ user_id: user.id, file_name: parsed.fileName, broker, source: "movimientos_cuenta", n_rows: newRows.length }).select().single();
+      if (be) { setImporting(false); setResult({ err: be.message }); return; }
+      for (let k = 0; k < newRows.length; k += 300) {
+        const chunk = newRows.slice(k, k + 300).map(({ status, ...r }) => ({ ...r, user_id: user.id, import_batch_id: batch.id }));
+        const { error } = await supabase.from("libro_movimientos").upsert(chunk, { onConflict: "user_id,nro_comprobante", ignoreDuplicates: true });
+        if (error) { setImporting(false); setResult({ err: error.message }); return; }
+      }
     }
+    const { data: fresh } = await supabase.from("libro_movimientos").select("*").eq("user_id", user.id);
+    const derived = deriveFromLedger(fresh || []);
+    const err = await applyDerived(derived);
+    setImporting(false);
+    if (err) { setResult({ err }); return; }
+    setResult({ ok: newRows.length, applied: derived.positions.length });
+    setParsed(null); reloadBatches(); reloadMovs();
+  };
+
+  // Borrar un lote = borrar sus movimientos (cascade) Y el portfolio derivado.
+  const deleteBatch = async (id) => {
+    await supabase.from("import_batches").delete().eq("id", id);
+    await supabase.from("positions").delete().eq("user_id", user.id).filter("extra->>source", "eq", "derivado_libro");
+    await supabase.from("cash_movements").delete().eq("user_id", user.id).like("notes", "Saldo derivado del libro%");
+    setConfirmDel(null); reloadBatches(); reloadMovs();
+  };
+
+  // Reconstruir sin subir archivo (re-deriva del ledger actual).
+  const reaplicar = async () => {
+    setApplying(true); setRebuildMsg(null);
+    const err = await applyDerived(deriveFromLedger(movs));
     setApplying(false);
-    if (err) { setRebuildMsg("Error: " + err); return; }
-    setRebuildMsg(`✓ Portfolio reconstruido: ${preview.positions.length} posiciones. Andá a Portfolio para verlo.`);
-    setPreview(null);
+    setRebuildMsg(err ? "Error: " + err : "✓ Portfolio reconstruido desde el libro. Andá a Portfolio para verlo.");
   };
 
   const info = BROKER_IMPORT_INFO[broker];
@@ -4526,90 +4535,76 @@ function ImportacionesView() {
           )}
 
           {parsed && (
-            <div style={{ border: `1px solid ${C.accent}`, borderRadius: 8, padding: "12px 16px", marginBottom: 16, background: "rgba(96,165,250,0.06)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 12, color: C.text }}><b>{parsed.fileName}</b> — <span style={{ color: "#34d399", fontWeight: 700 }}>{newCount} nuevos</span>{dupCount ? ` · ${dupCount} ya cargados` : ""}</div>
+            <div style={{ border: `1px solid ${C.accent}`, borderRadius: 8, padding: "14px 16px", marginBottom: 16, background: "rgba(96,165,250,0.06)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+                <div style={{ fontSize: 12.5, color: C.text, fontWeight: 700 }}>{parsed.fileName} — <span style={{ color: "#34d399" }}>{newCount} nuevos</span>{dupCount ? <span style={{ color: C.dim, fontWeight: 400 }}> · {dupCount} ya cargados</span> : ""}</div>
                 <div className="flex" style={{ gap: 8 }}>
-                  <button onClick={() => { setParsed(null); setResult(null); }} disabled={importing} style={{ padding: "7px 13px", fontSize: 12, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>Cancelar</button>
-                  <button onClick={doImport} disabled={importing || !newCount} style={{ padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: newCount && !importing ? "pointer" : "not-allowed", border: "none", background: newCount ? C.accent : C.border, color: newCount ? "#0b0e11" : C.dim }}>{importing ? "Importando…" : `Importar ${newCount}`}</button>
+                  <button onClick={() => { setParsed(null); setResult(null); }} disabled={importing} style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>Cancelar</button>
+                  <button onClick={importarYAplicar} disabled={importing} style={{ padding: "8px 18px", fontSize: 12.5, fontWeight: 700, cursor: importing ? "default" : "pointer", border: "none", background: C.accent, color: "#0b0e11" }}>{importing ? "Importando y aplicando…" : "Importar y aplicar al portfolio"}</button>
                 </div>
               </div>
+              <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 10 }}>Se cargan al libro y se reconstruye tu portfolio (posiciones + caja) de una. Reemplaza tus posiciones de Cocos; IOL queda intacto.</div>
+              <div style={{ overflowX: "auto", maxHeight: 300, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 6 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+                  <thead><tr style={{ color: C.dim, textAlign: "left" }}>
+                    <th style={{ padding: "5px 9px" }}>Fecha</th><th style={{ padding: "5px 9px" }}>Tipo</th><th style={{ padding: "5px 9px" }}>Ticker</th><th style={{ padding: "5px 9px", textAlign: "right" }}>Total</th><th style={{ padding: "5px 9px" }} />
+                  </tr></thead>
+                  <tbody>{parsed.rows.slice(0, 60).map((r, i) => (
+                    <tr key={i} style={{ borderTop: `1px solid ${C.border}`, opacity: r.status === "new" ? 1 : 0.5 }}>
+                      <td style={{ padding: "4px 9px", color: C.muted, whiteSpace: "nowrap" }}>{r.fecha_ejecucion || "—"}</td>
+                      <td style={{ padding: "4px 9px", color: C.muted }}>{CAT_LABEL[r.categoria] || r.categoria} <span style={{ color: C.dim }}>{r.tipo_operacion}</span></td>
+                      <td style={{ padding: "4px 9px", color: C.text }}>{r.ticker || "—"}</td>
+                      <td style={{ padding: "4px 9px", textAlign: "right", color: (r.total || 0) >= 0 ? "#34d399" : C.red, fontVariantNumeric: "tabular-nums" }}>{Number(r.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</td>
+                      <td style={{ padding: "4px 9px", fontSize: 8.5, color: r.status === "new" ? "#34d399" : C.dim, fontWeight: 700 }}>{r.status === "new" ? "NUEVO" : "ya"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              {parsed.rows.length > 60 && <div style={{ fontSize: 10, color: C.dim, marginTop: 6 }}>Mostrando 60 de {parsed.rows.length} filas.</div>}
             </div>
           )}
-          {result && <div style={{ fontSize: 12, marginBottom: 16, color: result.ok ? "#34d399" : C.red }}>{result.ok != null ? `✓ ${result.ok} movimientos importados.` : result.err}</div>}
+          {result && <div style={{ fontSize: 12, marginBottom: 16, color: result.err ? C.red : "#34d399" }}>{result.err ? result.err : `✓ ${result.ok} movimientos importados · ${result.applied} posiciones reconstruidas. Andá a Portfolio.`}</div>}
 
-          {/* Lotes activos */}
-          <div style={{ fontSize: 10, letterSpacing: "0.14em", color: C.dim, textTransform: "uppercase", fontWeight: 700, marginBottom: 8, marginTop: 6 }}>Importaciones activas ({batches.length}{sinLote > 0 ? " + 1" : ""})</div>
-          {batches.length === 0 && sinLote === 0 ? (
-            <div style={{ fontSize: 12, color: C.dim, padding: "16px 0" }}>Todavía no importaste nada.</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {batches.map((b) => (
-                <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px solid ${C.border}`, borderRadius: 8, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontSize: 12.5, color: C.text, fontWeight: 600 }}>{b.file_name || "importación"}</div>
-                    <div style={{ fontSize: 10.5, color: C.dim, marginTop: 2 }}>{b.n_rows} movimientos · {fmtDate(b.created_at)} · {b.broker}</div>
-                  </div>
-                  {confirmDel === b.id ? (
-                    <div className="flex" style={{ gap: 8 }}>
-                      <span style={{ fontSize: 10.5, color: C.muted, alignSelf: "center" }}>¿Borrar el lote y sus movimientos?</span>
-                      <button onClick={() => setConfirmDel(null)} style={{ padding: "6px 11px", fontSize: 11, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>No</button>
-                      <button onClick={() => deleteBatch(b.id)} style={{ padding: "6px 11px", fontSize: 11, fontWeight: 700, cursor: "pointer", border: "none", background: C.red, color: "#fff" }}>Sí, borrar</button>
-                    </div>
-                  ) : (
-                    <button onClick={() => setConfirmDel(b.id)} style={{ padding: "7px 13px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.red}`, background: "transparent", color: C.red }}>Eliminar</button>
-                  )}
-                </div>
-              ))}
-              {sinLote > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px dashed ${C.border}`, borderRadius: 8 }}>
-                  <div>
-                    <div style={{ fontSize: 12.5, color: C.muted, fontWeight: 600 }}>Importación previa (sin lote)</div>
-                    <div style={{ fontSize: 10.5, color: C.dim, marginTop: 2 }}>{sinLote} movimientos cargados antes del sistema de lotes</div>
-                  </div>
-                  <span style={{ fontSize: 10, color: C.dim }}>quedan en Movimientos</span>
-                </div>
-              )}
+          {/* ── Zona separada: tus importaciones + reconstruir ── */}
+          <div style={{ marginTop: 26, paddingTop: 18, borderTop: `2px solid ${C.border}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              <div style={{ fontSize: 10, letterSpacing: "0.14em", color: C.dim, textTransform: "uppercase", fontWeight: 700 }}>Tus importaciones ({batches.length}{sinLote > 0 ? " + 1" : ""})</div>
+              {movs.length > 0 && <button onClick={reaplicar} disabled={applying} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: applying ? "default" : "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>{applying ? "Reconstruyendo…" : "↻ Reconstruir portfolio desde el libro"}</button>}
             </div>
-          )}
-
-          {/* Reconstruir portfolio desde el libro */}
-          <div style={{ marginTop: 28, paddingTop: 20, borderTop: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, letterSpacing: "0.14em", color: C.dim, textTransform: "uppercase", fontWeight: 700, marginBottom: 6 }}>Reconstruir portfolio</div>
-            <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.6 }}>
-              Deriva tus <b style={{ color: C.text }}>posiciones y caja</b> del libro (netea trades por ticker; las patas MEP se cancelan solas). <b style={{ color: C.text }}>Reemplaza</b> tus posiciones de Cocos y tu caja por lo derivado — IOL queda intacto. No incluye futuros (los maneja el worker). Siempre muestra un preview antes de aplicar.
-            </div>
-            {!preview ? (
-              <button onClick={doRebuild} disabled={!movs.length} style={{ padding: "9px 16px", fontSize: 12, fontWeight: 700, cursor: movs.length ? "pointer" : "not-allowed", border: "none", background: movs.length ? C.accent : C.border, color: movs.length ? "#0b0e11" : C.dim }}>Reconstruir desde el libro</button>
+            {rebuildMsg && <div style={{ fontSize: 11.5, marginBottom: 10, color: rebuildMsg.startsWith("Error") ? C.red : "#34d399" }}>{rebuildMsg}</div>}
+            {batches.length === 0 && sinLote === 0 ? (
+              <div style={{ fontSize: 12, color: C.dim, padding: "16px 0" }}>Todavía no importaste nada. Subí tu CSV arriba.</div>
             ) : (
-              <div style={{ border: `1px solid ${C.accent}`, borderRadius: 8, padding: "14px 16px", background: "rgba(96,165,250,0.05)" }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 8 }}>Preview — {preview.positions.length} posiciones</div>
-                <div style={{ overflowX: "auto", maxHeight: 320, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 6, marginBottom: 10 }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                    <thead><tr style={{ color: C.dim, textAlign: "left" }}>
-                      <th style={{ padding: "6px 10px" }}>Tipo</th><th style={{ padding: "6px 10px" }}>Ticker</th>
-                      <th style={{ padding: "6px 10px", textAlign: "right" }}>Cant.</th><th style={{ padding: "6px 10px", textAlign: "right" }}>PPC</th><th style={{ padding: "6px 10px" }}>Mon.</th>
-                    </tr></thead>
-                    <tbody>{preview.positions.map((p, i) => (
-                      <tr key={i} style={{ borderTop: `1px solid ${C.border}` }}>
-                        <td style={{ padding: "5px 10px", color: C.muted }}>{p.instrument_type}</td>
-                        <td style={{ padding: "5px 10px", color: C.text, fontWeight: 600 }}>{p.srcTicker}{p.side === "sell" ? " ⚠short" : ""}</td>
-                        <td style={{ padding: "5px 10px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{p.quantity.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
-                        <td style={{ padding: "5px 10px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{p.entry_price.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
-                        <td style={{ padding: "5px 10px", color: C.dim }}>{p.entry_currency}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                </div>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>Caja derivada: {Object.entries(preview.cash).map(([c, v]) => `${c} ${v.toLocaleString("es-AR", { maximumFractionDigits: 0 })}`).join(" · ") || "—"}</div>
-                <div style={{ fontSize: 10.5, color: "#d4a417", marginBottom: 12, lineHeight: 1.5 }}>⚠ Revisá: las letras vencidas pueden aparecer como tenencia (el vencimiento no es una venta). La caja es Σ de movimientos y puede necesitar ajuste de apertura.</div>
-                <div className="flex" style={{ gap: 8 }}>
-                  <button onClick={() => setPreview(null)} disabled={applying} style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>Cancelar</button>
-                  <button onClick={applyRebuild} disabled={applying} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: applying ? "default" : "pointer", border: "none", background: C.red, color: "#fff" }}>{applying ? "Aplicando…" : "Reemplazar mi portfolio"}</button>
-                </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {batches.map((b) => (
+                  <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px solid ${C.border}`, borderRadius: 8, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontSize: 12.5, color: C.text, fontWeight: 600 }}>{b.file_name || "importación"}</div>
+                      <div style={{ fontSize: 10.5, color: C.dim, marginTop: 2 }}>{b.n_rows} movimientos · {fmtDate(b.created_at)} · {b.broker}</div>
+                    </div>
+                    {confirmDel === b.id ? (
+                      <div className="flex" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 10.5, color: C.muted }}>Borra los movimientos Y el portfolio derivado. ¿Seguro?</span>
+                        <button onClick={() => setConfirmDel(null)} style={{ padding: "6px 11px", fontSize: 11, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>No</button>
+                        <button onClick={() => deleteBatch(b.id)} style={{ padding: "6px 11px", fontSize: 11, fontWeight: 700, cursor: "pointer", border: "none", background: C.red, color: "#fff" }}>Sí, borrar todo</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmDel(b.id)} style={{ padding: "7px 13px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.red}`, background: "transparent", color: C.red }}>Eliminar</button>
+                    )}
+                  </div>
+                ))}
+                {sinLote > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px dashed ${C.border}`, borderRadius: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 12.5, color: C.muted, fontWeight: 600 }}>Importación previa (sin lote)</div>
+                      <div style={{ fontSize: 10.5, color: C.dim, marginTop: 2 }}>{sinLote} movimientos cargados antes del sistema de lotes</div>
+                    </div>
+                    <span style={{ fontSize: 10, color: C.dim }}>quedan en Movimientos</span>
+                  </div>
+                )}
               </div>
             )}
-            {rebuildMsg && <div style={{ fontSize: 12, marginTop: 10, color: rebuildMsg.startsWith("Error") ? C.red : "#34d399" }}>{rebuildMsg}</div>}
+            <div style={{ fontSize: 10, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>Eliminar un lote borra sus movimientos y el portfolio derivado de él. Excluye futuros (los maneja el worker) y no ajusta la apertura de caja.</div>
           </div>
         </>
       )}
