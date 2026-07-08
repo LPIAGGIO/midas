@@ -24,6 +24,7 @@ import {
   Menu,
   Bell,
   Settings,
+  Upload,
   LineChart,
   Globe,
   Landmark,
@@ -167,6 +168,7 @@ const NAV = [
     type: "single",
     requiresAuth: true,  // Si no hay sesión, muestra wall de login
   },
+  { id: "importaciones", label: "Importaciones", icon: Upload, type: "single", requiresAuth: true },
   {
     // Trading automatizado / estrategias bot. Reservado para futuros
     // agentes que efectivamente ejecuten órdenes (vía API IOL, único
@@ -1423,6 +1425,8 @@ function MidasApp({ allowedModules = null }) {
               <SinteticoDolarModule />
             ) : active === "portfolio-ia" ? (
               <PortfolioIAModule onNavigate={setActive} />
+            ) : active === "importaciones" ? (
+              <ImportacionesModule />
             ) : active === "libro-operaciones" ? (
               <LibroOperacionesModule />
             ) : active === "settings" ? (
@@ -4288,6 +4292,233 @@ function CuentaCorrienteView() {
             Fase 1: ledger crudo de tu cuenta corriente (no toca todavía posiciones ni caja). <b style={{ color: C.muted }}>Der.+IVA</b> = derecho de mercado + IVA por operación; <b style={{ color: C.muted }}>Comis.</b> = arancel del broker (en Cocos es plan fijo → suele ser $0). El <b style={{ color: C.muted }}>Total</b> es el impacto neto en la caja de esa fila.
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────── Módulo Importaciones (estilo hub) ───────────────
+ * Un solo lugar para importar: selector de broker + instrucciones de export,
+ * upload, y los LOTES de importación borrables (cada archivo = un batch en
+ * import_batches; borrar el lote borra sus movimientos por cascade). Tabs:
+ * Importar / Movimientos (ledger) / Conexiones. */
+const BROKER_IMPORT_INFO = {
+  cocos: {
+    label: "Cocos", integrado: true, importa: true,
+    steps: [
+      "Entrá a Cocos → Movimientos de cuenta.",
+      "Descargá el CSV de movimientos (la cuenta corriente completa, con comisiones, derechos e IVA por operación).",
+      "Subí ese/esos CSV acá abajo. Podés subir varios años de una.",
+    ],
+    nota: "Formato movimientos_cuenta (separado por ';'). Trae trades, FCI, caución, aranceles y rentas.",
+  },
+  iol: { label: "IOL", integrado: true, importa: false, steps: ["Conectá tu cuenta por API en la pestaña Conexiones — sincroniza posiciones solo.", "El import por archivo de IOL llega pronto."], nota: "" },
+  balanz: { label: "Balanz", importa: false, steps: ["Exportá tu resumen de operaciones a CSV/Excel.", "Soporte de archivo Balanz: pronto."], nota: "" },
+  otro: { label: "Otro broker", importa: false, steps: ["Contanos cuál usás y sumamos el formato."], nota: "" },
+};
+
+function useImportBatches() {
+  const { user } = useAuth();
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  const reload = useCallback(() => setTick((t) => t + 1), []);
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      if (!user) { setRows([]); setLoading(false); return; }
+      setLoading(true);
+      const { data } = await supabase.from("import_batches").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+      if (!cancel) { setRows(data || []); setLoading(false); }
+    })();
+    return () => { cancel = true; };
+  }, [user, tick]);
+  return { rows, loading, reload };
+}
+
+function ImportacionesModule() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="absolute inset-0 flex items-center justify-center"><Loader2 size={28} color={C.muted} className="eco-spin" strokeWidth={1.5} /></div>;
+  if (!user) return <PortfolioAuthWall />;
+  return <ImportacionesView />;
+}
+
+function ImportacionesView() {
+  const { user } = useAuth();
+  const [tab, setTab] = useState("importar");
+  const [broker, setBroker] = useState("cocos");
+  const [parsed, setParsed] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [conns, setConns] = useState([]);
+  const { rows: batches, reload: reloadBatches } = useImportBatches();
+  const { rows: movs, reload: reloadMovs } = useLibroMovimientos();
+  const existingComprobantes = useMemo(() => new Set(movs.map((m) => m.nro_comprobante)), [movs]);
+  const batchedIds = useMemo(() => new Set(movs.filter((m) => m.import_batch_id).map((m) => m.import_batch_id)), [movs]);
+  const sinLote = movs.filter((m) => !m.import_batch_id).length;
+
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("linked_brokers").select("broker,label,status,last_sync_at").eq("user_id", user.id).then(({ data }) => setConns(data || []));
+  }, [user]);
+
+  const onFiles = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    let all = [], names = [], badFmt = false;
+    for (const f of files) {
+      try {
+        const p = parseMovimientosCsv(await f.text(), existingComprobantes);
+        if (p == null) { badFmt = true; continue; }
+        names.push(f.name); all = all.concat(p);
+      } catch { badFmt = true; }
+    }
+    const seen = new Set();
+    all = all.filter((r) => (seen.has(r.nro_comprobante) ? false : (seen.add(r.nro_comprobante), true)));
+    if (!all.length) { setResult({ err: badFmt ? "No reconozco el formato (esperaba el CSV movimientos_cuenta de Cocos, separado por ';')." : "El archivo no tiene movimientos." }); setParsed(null); return; }
+    setParsed({ fileName: names.join(", "), rows: all }); setResult(null);
+  };
+
+  const doImport = async () => {
+    if (!parsed) return;
+    const newRows = parsed.rows.filter((r) => r.status === "new");
+    if (!newRows.length) { setResult({ err: "No hay movimientos nuevos (todos ya estaban cargados)." }); return; }
+    setImporting(true);
+    const { data: batch, error: be } = await supabase.from("import_batches").insert({ user_id: user.id, file_name: parsed.fileName, broker, source: "movimientos_cuenta", n_rows: newRows.length }).select().single();
+    if (be) { setImporting(false); setResult({ err: be.message }); return; }
+    let inserted = 0, err = null;
+    for (let k = 0; k < newRows.length; k += 300) {
+      const chunk = newRows.slice(k, k + 300).map(({ status, ...r }) => ({ ...r, user_id: user.id, import_batch_id: batch.id }));
+      const { error } = await supabase.from("libro_movimientos").upsert(chunk, { onConflict: "user_id,nro_comprobante", ignoreDuplicates: true });
+      if (error) { err = error.message; break; }
+      inserted += chunk.length;
+    }
+    setImporting(false);
+    if (err) { setResult({ err }); return; }
+    setResult({ ok: inserted }); setParsed(null); reloadBatches(); reloadMovs();
+  };
+
+  const deleteBatch = async (id) => {
+    await supabase.from("import_batches").delete().eq("id", id);
+    setConfirmDel(null); reloadBatches(); reloadMovs();
+  };
+
+  const info = BROKER_IMPORT_INFO[broker];
+  const newCount = parsed ? parsed.rows.filter((r) => r.status === "new").length : 0;
+  const dupCount = parsed ? parsed.rows.length - newCount : 0;
+  const fmtDate = (s) => s ? new Date(s).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+  const tabBtn = (k, l) => <button key={k} onClick={() => setTab(k)} style={{ padding: "7px 15px", fontSize: 12, fontWeight: 700, cursor: "pointer", border: `1px solid ${tab === k ? C.accent : C.border}`, background: tab === k ? C.accent : "transparent", color: tab === k ? "#0b0e11" : C.muted }}>{l}</button>;
+
+  return (
+    <div style={{ padding: "32px 36px 80px", maxWidth: 1200, margin: "0 auto" }}>
+      <div style={{ marginBottom: 8 }}><span style={{ fontSize: 9, letterSpacing: "0.22em", color: C.dim, textTransform: "uppercase", fontWeight: 600 }}>Operativa</span></div>
+      <h1 style={{ fontFamily: "'Raleway', sans-serif", fontWeight: 700, fontSize: 32, color: C.text, margin: 0, marginBottom: 6 }}>Importaciones</h1>
+      <p style={{ fontSize: 13, color: C.muted, marginTop: 0, marginBottom: 18 }}>Importá los archivos de tu broker, revisá los lotes y manejá tus movimientos — todo desde acá.</p>
+      <div className="flex" style={{ gap: 8, marginBottom: 22 }}>{tabBtn("importar", "Importar")}{tabBtn("movimientos", "Movimientos")}{tabBtn("conexiones", "Conexiones")}</div>
+
+      {tab === "importar" && (
+        <>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Elegí tu broker para ver cómo exportar, después subí los archivos.</div>
+          <div className="flex" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+            {Object.entries(BROKER_IMPORT_INFO).map(([id, b]) => (
+              <button key={id} onClick={() => setBroker(id)} style={{ position: "relative", padding: "10px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", border: `1px solid ${broker === id ? C.accent : C.border}`, borderRadius: 8, background: broker === id ? "rgba(96,165,250,0.10)" : "transparent", color: broker === id ? C.text : C.muted }}>
+                {b.label}{b.integrado && <span style={{ marginLeft: 7, fontSize: 8, color: C.accent, border: `1px solid ${C.accent}`, borderRadius: 3, padding: "1px 4px", letterSpacing: "0.05em" }}>INTEGRADO</span>}
+              </button>
+            ))}
+          </div>
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>{info.label}</div>
+            <ol style={{ margin: 0, paddingLeft: 18, fontSize: 11.5, color: C.muted, lineHeight: 1.7 }}>{info.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+            {info.nota && <div style={{ fontSize: 10, color: C.dim, marginTop: 8 }}>{info.nota}</div>}
+          </div>
+          <div style={{ fontSize: 11, color: "#34d399", background: "rgba(52,211,153,0.06)", border: "1px solid rgba(52,211,153,0.25)", borderRadius: 6, padding: "8px 12px", marginBottom: 14 }}>Privacidad: tus archivos se usan solo para calcular tu portfolio en tu cuenta.</div>
+
+          {info.importa ? (
+            <label
+              onDragOver={(e) => { e.preventDefault(); }}
+              onDrop={(e) => { e.preventDefault(); onFiles(e.dataTransfer.files); }}
+              style={{ display: "block", border: `1.5px dashed ${C.border}`, borderRadius: 10, padding: "34px 20px", textAlign: "center", cursor: "pointer", color: C.muted, marginBottom: 16 }}
+            >
+              <input type="file" accept=".csv,text/csv" multiple onChange={(e) => onFiles(e.target.files)} style={{ display: "none" }} />
+              <Upload size={26} strokeWidth={1.5} style={{ marginBottom: 8, opacity: 0.7 }} />
+              <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>Arrastrá los CSV o hacé clic para elegir</div>
+              <div style={{ fontSize: 10.5, color: C.dim, marginTop: 4 }}>Podés subir varios a la vez · dedup por comprobante, nunca duplica</div>
+            </label>
+          ) : (
+            <div style={{ border: `1px dashed ${C.border}`, borderRadius: 10, padding: "24px 20px", textAlign: "center", color: C.dim, fontSize: 12, marginBottom: 16 }}>Import por archivo de {info.label}: pronto. Por ahora soportamos el CSV de Cocos.</div>
+          )}
+
+          {parsed && (
+            <div style={{ border: `1px solid ${C.accent}`, borderRadius: 8, padding: "12px 16px", marginBottom: 16, background: "rgba(96,165,250,0.06)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: C.text }}><b>{parsed.fileName}</b> — <span style={{ color: "#34d399", fontWeight: 700 }}>{newCount} nuevos</span>{dupCount ? ` · ${dupCount} ya cargados` : ""}</div>
+                <div className="flex" style={{ gap: 8 }}>
+                  <button onClick={() => { setParsed(null); setResult(null); }} disabled={importing} style={{ padding: "7px 13px", fontSize: 12, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>Cancelar</button>
+                  <button onClick={doImport} disabled={importing || !newCount} style={{ padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: newCount && !importing ? "pointer" : "not-allowed", border: "none", background: newCount ? C.accent : C.border, color: newCount ? "#0b0e11" : C.dim }}>{importing ? "Importando…" : `Importar ${newCount}`}</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {result && <div style={{ fontSize: 12, marginBottom: 16, color: result.ok ? "#34d399" : C.red }}>{result.ok != null ? `✓ ${result.ok} movimientos importados.` : result.err}</div>}
+
+          {/* Lotes activos */}
+          <div style={{ fontSize: 10, letterSpacing: "0.14em", color: C.dim, textTransform: "uppercase", fontWeight: 700, marginBottom: 8, marginTop: 6 }}>Importaciones activas ({batches.length}{sinLote > 0 ? " + 1" : ""})</div>
+          {batches.length === 0 && sinLote === 0 ? (
+            <div style={{ fontSize: 12, color: C.dim, padding: "16px 0" }}>Todavía no importaste nada.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {batches.map((b) => (
+                <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px solid ${C.border}`, borderRadius: 8, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, color: C.text, fontWeight: 600 }}>{b.file_name || "importación"}</div>
+                    <div style={{ fontSize: 10.5, color: C.dim, marginTop: 2 }}>{b.n_rows} movimientos · {fmtDate(b.created_at)} · {b.broker}</div>
+                  </div>
+                  {confirmDel === b.id ? (
+                    <div className="flex" style={{ gap: 8 }}>
+                      <span style={{ fontSize: 10.5, color: C.muted, alignSelf: "center" }}>¿Borrar el lote y sus movimientos?</span>
+                      <button onClick={() => setConfirmDel(null)} style={{ padding: "6px 11px", fontSize: 11, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>No</button>
+                      <button onClick={() => deleteBatch(b.id)} style={{ padding: "6px 11px", fontSize: 11, fontWeight: 700, cursor: "pointer", border: "none", background: C.red, color: "#fff" }}>Sí, borrar</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmDel(b.id)} style={{ padding: "7px 13px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.red}`, background: "transparent", color: C.red }}>Eliminar</button>
+                  )}
+                </div>
+              ))}
+              {sinLote > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px dashed ${C.border}`, borderRadius: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, color: C.muted, fontWeight: 600 }}>Importación previa (sin lote)</div>
+                    <div style={{ fontSize: 10.5, color: C.dim, marginTop: 2 }}>{sinLote} movimientos cargados antes del sistema de lotes</div>
+                  </div>
+                  <span style={{ fontSize: 10, color: C.dim }}>quedan en Movimientos</span>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "movimientos" && <CuentaCorrienteView />}
+
+      {tab === "conexiones" && (
+        <div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 14 }}>Brokers con integración por API (sincronizan solos, sin subir archivos).</div>
+          {conns.length === 0 ? (
+            <div style={{ border: `1px dashed ${C.border}`, borderRadius: 8, padding: "20px", textAlign: "center", color: C.dim, fontSize: 12 }}>
+              No tenés brokers conectados. Podés conectar <b style={{ color: C.muted }}>IOL</b> por API desde Configuración → Conexiones para sincronizar tus posiciones automáticamente.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {conns.map((c, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+                  <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{c.label || c.broker}</div>
+                  <div style={{ fontSize: 11, color: c.status === "connected" || c.status === "active" ? "#34d399" : C.muted }}>{c.status || "—"}{c.last_sync_at ? ` · sync ${fmtDate(c.last_sync_at)}` : ""}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
