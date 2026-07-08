@@ -4208,7 +4208,12 @@ function CuentaCorrienteView() {
 
   const wipeAll = async () => {
     if (!user) return;
+    // "Borrar todo" = wipe integral de Cocos: lotes + libro + posiciones cocos
+    // (cualquier fuente) + caja. IOL (broker='iol') queda intacto.
+    await supabase.from("import_batches").delete().eq("user_id", user.id);
     await supabase.from("libro_movimientos").delete().eq("user_id", user.id);
+    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
+    await supabase.from("cash_movements").delete().eq("user_id", user.id);
     setConfirmWipe(false); reload();
   };
 
@@ -4518,12 +4523,14 @@ function ImportacionesView() {
 
   // Borrar un lote = borrar sus movimientos (cascade) Y el portfolio derivado.
   const deleteBatch = async (id) => {
-    await supabase.from("import_batches").delete().eq("id", id);
-    // Borra TODO lo de Cocos integro: no solo lo derivado del libro, tambien las
-    // posiciones del import del dia (extra.source='csv_matriz'). Todo Cocos usa
-    // broker='cocos'; IOL (broker='iol', worker automatico) queda intacto.
+    // "Borrar todo": wipe INTEGRAL de Cocos, no solo este lote. Borra TODOS los
+    // lotes + TODO el libro + todas las posiciones broker='cocos' (cualquier
+    // fuente: derivado_libro, csv_matriz del import de Portfolio, opening) + toda
+    // la caja. IOL (broker='iol', worker) queda intacto. Siempre borra todo.
+    await supabase.from("import_batches").delete().eq("user_id", user.id);
+    await supabase.from("libro_movimientos").delete().eq("user_id", user.id);
     await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
-    await supabase.from("cash_movements").delete().eq("user_id", user.id); // toda la caja
+    await supabase.from("cash_movements").delete().eq("user_id", user.id);
     setConfirmDel(null); reloadBatches(); reloadMovs();
   };
 
