@@ -29769,6 +29769,13 @@ function UserMenu() {
   const { user, loading, signInWithGoogle, signOut } = useAuth();
   const [open, setOpen] = useState(false);
   const [actioning, setActioning] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    let cancel = false;
+    if (!user) { setIsAdmin(false); return; }
+    supabase.rpc("is_admin").then(({ data }) => { if (!cancel) setIsAdmin(!!data); });
+    return () => { cancel = true; };
+  }, [user]);
 
   // Cerrar el dropdown al hacer click afuera
   useEffect(() => {
@@ -29919,6 +29926,20 @@ function UserMenu() {
               </div>
             )}
           </div>
+
+          {/* Link al panel de administración (solo admins) */}
+          {isAdmin && (
+            <a
+              href="/admin"
+              className="flex items-center gap-2.5 w-full"
+              style={{ padding: "10px 14px", color: C.accent, fontSize: 12, fontWeight: 600, textDecoration: "none", borderBottom: `1px solid ${C.border}`, transition: "background-color 120ms ease" }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.deep; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+            >
+              <ShieldCheck size={13} strokeWidth={1.8} />
+              Panel de administración
+            </a>
+          )}
 
           {/* Acciones */}
           <button
