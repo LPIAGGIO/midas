@@ -8074,17 +8074,23 @@ function useBondPrices() {
         // Override del CIERRE ANTERIOR con el de IOL (tabla iol_quotes, pull de
         // las 17:30). El P&L del día usa previousClose; el feed BYMA lo trae mal
         // escalado en bonos (ej TXMJ9 daba ~0,98 de mov cuando movió 0,05). IOL
-        // trae el cierre oficial (= el de Cocos). Solo pisamos previousClose y
-        // recomputamos changePct. No-op si la tabla está vacía.
+        // trae el cierre oficial (= el de Cocos).
+        //
+        // OJO timing: el `last` que capturó la corrida de las 17:30 de la rueda
+        // ANTERIOR = el cierre de ayer = el previousClose de HOY. (No usamos el
+        // campo cierreAnterior de IOL porque de noche "rota" al cierre de hoy.)
+        // Por eso tomamos `last` solo de filas con quote_date < hoy AR.
         try {
-          const { data: iolq } = await supabase.from("iol_quotes").select("ticker, prev_close");
+          const _todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+          const { data: iolq } = await supabase.from("iol_quotes").select("ticker, last, quote_date");
           for (const r of iolq || []) {
             const t = (r.ticker || "").trim().toUpperCase();
-            const pc = Number(r.prev_close);
-            const entry = t ? map[t] : null;
-            if (!entry || !(pc > 0) || !(Number(entry.price) > 0)) continue;
+            const closePx = Number(r.last);
+            if (!t || !(closePx > 0) || !r.quote_date || r.quote_date >= _todayAR) continue;
+            const entry = map[t];
+            if (!entry || !(Number(entry.price) > 0)) continue;
             const price = Number(entry.price);
-            map[t] = { ...entry, previousClose: pc, changePct: ((price - pc) / pc) * 100 };
+            map[t] = { ...entry, previousClose: closePx, changePct: ((price - closePx) / closePx) * 100 };
           }
         } catch (e) { console.warn("[useBondPrices] override iol_quotes falló:", e?.message); }
 
