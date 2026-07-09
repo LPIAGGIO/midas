@@ -4363,7 +4363,7 @@ function deriveFromLedger(movs) {
   const netAgg = new Map();    // neteo: bonos-con-MEP + FCI
   const cash = {};
   const comm = {};   // costos por moneda, DESGLOSADOS: { comision, ddmm (derechos de mercado), iva }
-  let cauNet = 0, cauColoc = 0, cauTom = 0;
+  const caucionLegs = [];  // patas de caución (separar interés del principal de una abierta)
   for (const m of rows) {
     const cur0 = m.moneda === "USD" ? "USD-MEP" : (m.moneda || "ARS");
     cash[cur0] = (cash[cur0] || 0) + (Number(m.total) || 0);
@@ -4371,11 +4371,16 @@ function deriveFromLedger(movs) {
     if (c + dd + iv > 0) { const g = comm[cur0] || (comm[cur0] = { comision: 0, ddmm: 0, iva: 0 }); g.comision += c; g.ddmm += dd; g.iva += iv; }
     if (m.categoria === "caucion") {
       // Colocadora (prestás → ganás interés, +) y tomadora (te financiás →
-      // pagás interés, −) son económicamente distintas: las separamos. Ambas
-      // patas (Contado + Término) llevan "Colocador"/"Tomador" en el tipo.
-      const t = Number(m.total) || 0;
-      cauNet += t;
-      if (/tomad/i.test(m.tipo_operacion || "")) cauTom += t; else cauColoc += t;
+      // pagás interés, −) son distintas: las separamos. Cada caución tiene
+      // Contado (abre: mueve el principal) + Término (cierra: principal +
+      // interés + comisiones). El RESULTADO es solo el interés ± comisiones;
+      // el principal de una caución ABIERTA (Contado sin Término) NO es resultado.
+      caucionLegs.push({
+        side: /tomad/i.test(m.tipo_operacion || "") ? "tom" : "coloc",
+        contado: /contado/i.test(m.tipo_operacion || ""), // false = término (devolución)
+        total: Number(m.total) || 0,
+        date: m.fecha_ejecucion || "",
+      });
     }
 
     const cat = m.categoria;
@@ -4410,6 +4415,25 @@ function deriveFromLedger(movs) {
       entry_price: a.buyQty > 0 ? a.buyVal / a.buyQty : 0, entry_currency: a.cur, entry_date: a.first,
     });
   }
+  // Resultado de caución por lado = interés ± comisiones. Excluimos el principal
+  // de las cauciones ABIERTAS: una caución sin su Término (devolución) tiene un
+  // Contado que solo movió principal (plata prestada), NO resultado. Cada RT es
+  // 1 Contado + 1 Término; el excedente de Contado (los más recientes) está
+  // abierto → se saca del resultado. Su principal queda en la caja (el plug lo
+  // absorbe al anclar al Σtotal, que sí incluye ese cash real).
+  const caucionResult = (side) => {
+    const legs = caucionLegs.filter((l) => l.side === side);
+    const contado = legs.filter((l) => l.contado).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const nTermino = legs.filter((l) => !l.contado).length;
+    const nOpen = Math.max(0, contado.length - nTermino);
+    const openSet = new Set(contado.slice(contado.length - nOpen)); // los Contado más nuevos
+    let r = 0;
+    for (const l of legs) { if (!openSet.has(l)) r += l.total; }
+    return r;
+  };
+  const cauColoc = caucionResult("coloc");
+  const cauTom = caucionResult("tom");
+  const cauNet = cauColoc + cauTom; // para el plug: solo el resultado, el principal abierto va al plug
   return { positions, lots, cash, comm, cauNet, cauColoc, cauTom };
 }
 
