@@ -22397,7 +22397,7 @@ function NavCurveSection({ userId, C, compact = false }) {
 const DASHBOARD_ORDER_LS_KEY = "midas:dashboard-order-v1";
 const DASHBOARD_WIDGET_IDS = [
   "curva-dlr", "cobertura-dlr", "mi-cobertura", "fx", "resumen",
-  "flujo", "nav", "carry", "macro", "rem-dolar", "pulso", "brujula", "banda", "alertas-activas",
+  "nav", "carry", "macro", "rem-dolar", "pulso", "brujula", "banda", "alertas-activas",
 ];
 
 /* ─────────────── Banda Cambiaria · Termómetros (Dashboard) ───────────────
@@ -23085,7 +23085,6 @@ function DashboardModule() {
             { id: "mi-cobertura", title: "Mi Cobertura · Escenarios", render: () => <HedgeScenarioWidget /> },
             { id: "fx", title: "FX en vivo", render: ({ expanded }) => <FxLiveWidget expanded={expanded} /> },
             { id: "resumen", title: "Resumen Portfolio", render: ({ expanded }) => <PortfolioSummaryWidget expanded={expanded} /> },
-            { id: "flujo", title: "Flujo de Posiciones", render: () => <PositionFlowWidget /> },
             { id: "nav", title: "Evolución del patrimonio", render: ({ expanded }) => <NavCurveSection userId={user?.id} C={C} compact={!expanded} /> },
             { id: "carry", title: "Carry Trade · Top TEA", render: ({ expanded }) => <CarryTradeWidget expanded={expanded} /> },
             { id: "macro", title: "Indicador Macro · BCRA", render: ({ expanded }) => <BcraResumenWidget expanded={expanded} /> },
