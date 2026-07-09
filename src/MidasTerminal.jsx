@@ -2003,24 +2003,21 @@ function isWithinTradingDay() {
 // medir contra el cierre de ayer). Después de 23:59 → 0 hasta que vuelva
 // a abrir el próximo día hábil. Fin de semana → 0 todo el día.
 function isTradingDayAndMarketOpened() {
-  // Mercado AR (BYMA/MERVAL): lunes a viernes, 10:30 a 17:30 ART.
-  // Antes este check solo validaba apertura (>= 10:30), nunca chequeaba
-  // el cierre — devolvía true a las 23:00 los días hábiles.
-  const parts = new Intl.DateTimeFormat("en-US", {
+  // Mercado AR (BYMA/MERVAL): DÍA HÁBIL (lun-vie, NO feriado bursátil) y
+  // 10:30 a 17:30 ART. Antes solo miraba lun-vie + horario → daba "abierto"
+  // en feriados (ej 9 de Julio). Ahora usa isNonBusinessDay (BYMA_HOLIDAYS).
+  const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).formatToParts(new Date());
-  const wd = parts.find((p) => p.type === "weekday")?.value;
-  if (["Sat", "Sun"].includes(wd)) return false;
-  const hh = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
-  const mm = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+  const g = (t) => parts.find((p) => p.type === t)?.value;
+  const arDate = `${g("year")}-${g("month")}-${g("day")}`;
+  if (isNonBusinessDay(arDate)) return false; // fin de semana o feriado BYMA
+  const hh = parseInt(g("hour") || "0", 10);
+  const mm = parseInt(g("minute") || "0", 10);
   const mins = hh * 60 + mm;
-  const opensAt = 10 * 60 + 30; // 10:30 ART
-  const closesAt = 17 * 60 + 30; // 17:30 ART
-  return mins >= opensAt && mins < closesAt;
+  return mins >= 10 * 60 + 30 && mins < 17 * 60 + 30; // 10:30–17:30 ART
 }
 
 // Ventana de visibilidad del "P&L de hoy". Distinta del horario de mercado:
@@ -2030,14 +2027,16 @@ function isTradingDayAndMarketOpened() {
 // isTradingDayAndMarketOpened para esto: esa marca el mercado realmente
 // abierto (10:30-17:30) y la usan los indicadores de estado.
 function isPnlHoyWindow() {
-  const parts = new Intl.DateTimeFormat("en-US", {
+  const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
-    weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).formatToParts(new Date());
-  const wd = parts.find((p) => p.type === "weekday")?.value;
-  if (["Sat", "Sun"].includes(wd)) return false;
-  const hh = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
-  const mm = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+  const g = (t) => parts.find((p) => p.type === t)?.value;
+  const arDate = `${g("year")}-${g("month")}-${g("day")}`;
+  if (isNonBusinessDay(arDate)) return false; // fin de semana o feriado BYMA
+  const hh = parseInt(g("hour") || "0", 10);
+  const mm = parseInt(g("minute") || "0", 10);
   const mins = hh * 60 + mm;
   return mins >= 10 * 60 + 30 && mins < 23 * 60 + 30; // 10:30 → 23:30 ART
 }
