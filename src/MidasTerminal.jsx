@@ -8879,6 +8879,10 @@ function useFutureAdjustments(positions, futurePrices) {
     const futureGroups = {};
     for (const p of positions) {
       if (p.instrument_type !== "future") continue;
+      // Los futuros derivados del libro (import Cocos) YA tienen su P&L de ajustes
+      // dentro de la caja (el Σtotal del libro incluye los "Ajuste/Crédito/Débito
+      // Índice"). No van por el flujo de acreditación o se duplica el cash.
+      if (p.extra?.source === "derivado_libro") continue;
       const ticker = (p.ticker || "").toUpperCase().trim();
       if (!ticker) continue;
       if (!futureGroups[ticker]) {
