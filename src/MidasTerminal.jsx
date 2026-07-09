@@ -4398,7 +4398,8 @@ function deriveFromLedger(movs) {
         side: /tomad/i.test(m.tipo_operacion || "") ? "tom" : "coloc",
         contado: /contado/i.test(m.tipo_operacion || ""), // false = término (devolución)
         total: Number(m.total) || 0,
-        date: m.fecha_ejecucion || "",
+        cur: cur0,
+        date: m.fecha_ejecucion || m.fecha_liquidacion || "",
       });
     }
 
@@ -4440,6 +4441,7 @@ function deriveFromLedger(movs) {
   // 1 Contado + 1 Término; el excedente de Contado (los más recientes) está
   // abierto → se saca del resultado. Su principal queda en la caja (el plug lo
   // absorbe al anclar al Σtotal, que sí incluye ese cash real).
+  const caucionOpen = []; // Contado sin Término → su devolución se proyecta a futuro
   const caucionResult = (side) => {
     const legs = caucionLegs.filter((l) => l.side === side);
     const contado = legs.filter((l) => l.contado).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -4447,13 +4449,13 @@ function deriveFromLedger(movs) {
     const nOpen = Math.max(0, contado.length - nTermino);
     const openSet = new Set(contado.slice(contado.length - nOpen)); // los Contado más nuevos
     let r = 0;
-    for (const l of legs) { if (!openSet.has(l)) r += l.total; }
+    for (const l of legs) { if (openSet.has(l)) { caucionOpen.push(l); continue; } r += l.total; }
     return r;
   };
   const cauColoc = caucionResult("coloc");
   const cauTom = caucionResult("tom");
   const cauNet = cauColoc + cauTom; // para el plug: solo el resultado, el principal abierto va al plug
-  return { positions, lots, cash, comm, cauNet, cauColoc, cauTom, pending };
+  return { positions, lots, cash, comm, cauNet, cauColoc, cauTom, pending, caucionOpen };
 }
 
 function ImportacionesModule() {
@@ -4551,6 +4553,17 @@ function ImportacionesView() {
     for (const p of derived.pending || []) {
       if (Math.abs(p.total) < 0.005) continue;
       cashRows.push({ user_id: user.id, movement_date: p.liqDate, movement_type: p.total >= 0 ? "deposit" : "withdrawal", currency: p.cur, amount: Math.abs(p.total), notes: (`Liquidación T+1 · ${p.tipo}${p.ticker ? " " + p.ticker : ""}`).slice(0, 120), broker: "cocos" });
+    }
+    // Caución ABIERTA: el Contado (préstamo) ya entró a la caja de hoy, pero la
+    // DEVOLUCIÓN (Término) todavía no está en el CSV. La proyectamos a su
+    // vencimiento (Contado + 1 día hábil) como egreso/ingreso = −principal, para
+    // que la liquidez proyectada (24hs+) refleje la obligación (espeja el "Total
+    // dinero" de Cocos). El interés real llega cuando el CSV traiga el Término.
+    for (const o of derived.caucionOpen || []) {
+      const ret = -(Number(o.total) || 0); // tomadora: −principal (devolvés); colocadora: +principal (te devuelven)
+      if (Math.abs(ret) < 0.005 || !o.date) continue;
+      const venc = (typeof addBusinessDays === "function") ? addBusinessDays(o.date, 1) : o.date;
+      cashRows.push({ user_id: user.id, movement_date: venc, movement_type: ret >= 0 ? "deposit" : "withdrawal", currency: o.cur || "ARS", amount: Math.abs(ret), notes: `Devolución caución ${o.side === "tom" ? "tomadora" : "colocadora"} (proyectada)`, broker: "cocos" });
     }
     for (let k = 0; k < cashRows.length; k += 200) {
       const { error } = await supabase.from("cash_movements").insert(cashRows.slice(k, k + 200));
