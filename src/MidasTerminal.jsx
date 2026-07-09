@@ -4372,9 +4372,20 @@ function deriveFromLedger(movs) {
   const cash = {};
   const comm = {};   // costos por moneda, DESGLOSADOS: { comision, ddmm (derechos de mercado), iva }
   const caucionLegs = [];  // patas de caución (separar interés del principal de una abierta)
+  const pending = [];      // trades con liquidación FUTURA (T+1): no van a la caja de hoy
+  const _todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   for (const m of rows) {
     const cur0 = m.moneda === "USD" ? "USD-MEP" : (m.moneda || "ARS");
-    cash[cur0] = (cash[cur0] || 0) + (Number(m.total) || 0);
+    const tot = Number(m.total) || 0;
+    // T+1: compras/ventas liquidan al día hábil siguiente. Si la liquidación es
+    // futura, ese cash TODAVÍA no está disponible → va a liquidez proyectada
+    // (fechado en fecha_liquidacion), no a la caja de hoy. El resto (cash, FCI,
+    // caución, futuros) impacta en el día.
+    if (tot !== 0 && /^trade_/.test(m.categoria || "") && m.fecha_liquidacion && m.fecha_liquidacion > _todayAR) {
+      pending.push({ cur: cur0, total: tot, liqDate: m.fecha_liquidacion, tipo: (m.tipo_operacion || "").trim(), ticker: m.ticker || "" });
+    } else {
+      cash[cur0] = (cash[cur0] || 0) + tot;
+    }
     const c = Math.abs(Number(m.comision) || 0), dd = Math.abs(Number(m.ddmm) || 0), iv = Math.abs(Number(m.iva) || 0);
     if (c + dd + iv > 0) { const g = comm[cur0] || (comm[cur0] = { comision: 0, ddmm: 0, iva: 0 }); g.comision += c; g.ddmm += dd; g.iva += iv; }
     if (m.categoria === "caucion") {
@@ -4442,7 +4453,7 @@ function deriveFromLedger(movs) {
   const cauColoc = caucionResult("coloc");
   const cauTom = caucionResult("tom");
   const cauNet = cauColoc + cauTom; // para el plug: solo el resultado, el principal abierto va al plug
-  return { positions, lots, cash, comm, cauNet, cauColoc, cauTom };
+  return { positions, lots, cash, comm, cauNet, cauColoc, cauTom, pending };
 }
 
 function ImportacionesModule() {
@@ -4531,8 +4542,15 @@ function ImportacionesView() {
       const g = derived.comm && derived.comm[cur];
       const C = g ? g.comision + g.ddmm + g.iva : 0; // total de costos de esa moneda (para el plug)
       const K = cur === "ARS" ? derived.cauNet : 0;
-      const plug = T + C - K; // Σ(cash) = -C + K + plug = T (el total real del libro)
+      const plug = T + C - K; // Σ(cash) = -C + K + plug = T (el total SETTLED del libro)
       if (Math.abs(plug) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: plug >= 0 ? "deposit" : "withdrawal", currency: cur, amount: Math.abs(plug), notes: "Saldo derivado del libro (ancla al total)", broker: "cocos" });
+    }
+    // T+1 pendiente: cada trade con liquidación FUTURA se fecha en su
+    // fecha_liquidacion. balanceByCurrency lo excluye de la caja de hoy
+    // (movement_date > hoy) y aparece en la liquidez proyectada de esa fecha.
+    for (const p of derived.pending || []) {
+      if (Math.abs(p.total) < 0.005) continue;
+      cashRows.push({ user_id: user.id, movement_date: p.liqDate, movement_type: p.total >= 0 ? "deposit" : "withdrawal", currency: p.cur, amount: Math.abs(p.total), notes: (`Liquidación T+1 · ${p.tipo}${p.ticker ? " " + p.ticker : ""}`).slice(0, 120), broker: "cocos" });
     }
     for (let k = 0; k < cashRows.length; k += 200) {
       const { error } = await supabase.from("cash_movements").insert(cashRows.slice(k, k + 200));
