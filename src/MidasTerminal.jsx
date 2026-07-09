@@ -4030,8 +4030,16 @@ function parseMovimientosCsv(text, existing) {
   const seen = new Set();
   for (let i = 1; i < lines.length; i++) {
     const c = lines[i].split(";");
-    const comp = (c[iComp] || "").trim();
-    if (!comp || seen.has(comp)) continue;
+    let comp = (c[iComp] || "").trim();
+    if (!comp) {
+      // Fila sin comprobante (ej. tenencia de apertura cargada a mano en el CSV):
+      // generamos uno sintético ESTABLE a partir de sus campos, así importa y no
+      // se pisa con otras filas vacías, y dedupea bien en re-imports. Prefijo MAN-.
+      comp = "MAN-" + [(c[iFe] || "").trim(), (c[iTipo] || "").trim(),
+        _tickerFromInstrumento((c[iInstr] || "").trim()) || (c[iInstr] || "").trim().slice(0, 14),
+        (c[iCant] || "").trim(), (c[iPre] || "").trim()].join("|").replace(/\s+/g, "");
+    }
+    if (seen.has(comp)) continue;
     seen.add(comp);
     const tipo = (c[iTipo] || "").trim();
     const instr = (c[iInstr] || "").trim();
