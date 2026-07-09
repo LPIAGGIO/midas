@@ -254,6 +254,7 @@ const NAV = [
       { id: "libro-operaciones", label: "Libro de operaciones", icon: BookOpen },
       { id: "pnl-instrumento", label: "P&L por Instrumento", icon: BarChart3 },
       { id: "reporte-cartera", label: "Reporte de cartera", icon: FileText },
+      { id: "cedear-usa", label: "CEDEARs · Precio USA", icon: Globe },
       { id: "dividendos", label: "Dividendos", icon: Coins },
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
       { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
@@ -1539,6 +1540,8 @@ function MidasApp({ allowedModules = null }) {
               <PnlPorInstrumentoModule key={active} />
             ) : active === "reporte-cartera" ? (
               <ReporteCarteraModule key={active} />
+            ) : active === "cedear-usa" ? (
+              <CedearUsaLiveModule key={active} />
             ) : active === "dividendos" ? (
               <DividendosModule key={active} />
             ) : active === "ejecucion-cedear" ? (
@@ -28564,6 +28567,205 @@ const PNL_COMISION_RE = /^(comisi[oó]n|arancel|derechos?|iva|gastos)\b/i;
  * contabilidad que la cartera (consolidatePositions, conventions ya
  * aplicadas). Futuros/cauciones van en P&L por Instrumento.
  */
+// ─────────── CEDEARs · Precio USA en vivo → teórico ARS ───────────
+// Para tu tenencia de CEDEARs: precio del subyacente en USA EN VIVO + el teórico
+// de cuánto valdría el CEDEAR acá = (USD × CCL) ÷ ratio. Cuando AR está cerrado
+// (feriado) y USA abierto, el teórico adelanta hacia dónde corrige el CEDEAR en
+// la próxima rueda. Reusa la plomería de Valuación CEDEAR (data912 usa/cedears,
+// Yahoo fallback, CCL de referencia).
+function CedearUsaLiveModule() {
+  const { positions, loading: posLoading } = useUserPositions();
+  const stockPrices = useStockPrices()?.prices || {};
+  const [ced, setCed] = useState({});
+  const [usa, setUsa] = useState({});
+  const [yhCache, setYhCache] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  const [cclInput, setCclInput] = useState("");
+  const [cclTouched, setCclTouched] = useState(false);
+
+  const num = (x) => { const n = Number(x); return Number.isFinite(n) && n > 0 ? n : null; };
+  const mid = (a, b) => (a && b ? (a + b) / 2 : (a || b || null));
+  const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
+
+  // data912: cedears (AR) + usa (subyacentes en vivo)
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const [cR, uR] = await Promise.all([
+          fetch(`/api/data912?type=cedears&_=${Date.now()}`),
+          fetch(`/api/data912?type=usa&_=${Date.now()}`),
+        ]);
+        const cArr = cR.ok ? await cR.json() : [];
+        const uArr = uR.ok ? await uR.json() : [];
+        if (!mounted) return;
+        const cm = {}; for (const x of cArr) if (x?.symbol) cm[String(x.symbol).toUpperCase()] = x;
+        const um = {}; for (const x of uArr) if (x?.symbol) um[String(x.symbol).toUpperCase()] = x;
+        setCed(cm); setUsa(um); setLoading(false);
+      } catch { if (mounted) setLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, [tick]);
+  useEffect(() => { setYhCache({}); }, [tick]);
+
+  // CCL de referencia (mediana de líquidos), igual que Valuación/Ejecución.
+  const cclRef = useMemo(() => {
+    const pool = [];
+    for (const s of EJEC_CORE) {
+      const c = ced[s], u = usa[s], r = EJEC_RATIOS[s];
+      if (!c || !u || !r) continue;
+      const cMid = mid(num(c.px_bid), num(c.px_ask)) || num(c.c);
+      const uMid = mid(num(u.px_bid), num(u.px_ask)) || num(u.c);
+      if (cMid && uMid) pool.push((r * cMid) / uMid);
+    }
+    return ejecMedian(pool);
+  }, [ced, usa]);
+  useEffect(() => { if (!cclTouched && cclRef) setCclInput(String(Math.round(cclRef))); }, [cclRef, cclTouched]);
+  const ccl = pn(cclInput) || cclRef;
+
+  // Tenencia de CEDEARs (neto por ticker, Cocos + IOL).
+  const held = useMemo(() => {
+    const m = new Map();
+    for (const p of positions || []) {
+      if (p.instrument_type !== "cedear" || !p.ticker) continue;
+      const t = p.ticker.toUpperCase().trim();
+      const sign = p.operation_type === "sell" ? -1 : 1;
+      const cur = m.get(t) || { ticker: t, qty: 0 };
+      cur.qty += (Number(p.quantity) || 0) * sign;
+      m.set(t, cur);
+    }
+    return Array.from(m.values()).filter((x) => x.qty > 1e-6);
+  }, [positions]);
+
+  // Yahoo fallback para subyacentes que data912 usa no trae (ETFs/ADRs).
+  useEffect(() => {
+    let active = true;
+    for (const h of held) {
+      const t = h.ticker;
+      const u = usa[CEDEAR_US_MAP[t] || t];
+      const uPx = u ? (mid(num(u.px_bid), num(u.px_ask)) || num(u.c)) : null;
+      if (uPx || yhCache[t] != null) continue;
+      const ys = CEDEAR_YH_MAP[t] || t;
+      fetch(`/api/fundamentals?price=${encodeURIComponent(ys)}`)
+        .then((r) => r.json())
+        .then((j) => { if (!active) return; const p = j?.prices?.[ys]; if (Number.isFinite(p) && p > 0) setYhCache((prev) => ({ ...prev, [t]: p })); })
+        .catch(() => {});
+    }
+    return () => { active = false; };
+  }, [held, usa]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rows = useMemo(() => {
+    const out = [];
+    for (const h of held) {
+      const t = h.ticker;
+      const ratio = CEDEAR_CAT[t]?.r ?? null;
+      const name = CEDEAR_CAT[t]?.n || t;
+      const u = usa[CEDEAR_US_MAP[t] || t];
+      let usdPx = u ? (mid(num(u.px_bid), num(u.px_ask)) || num(u.c)) : null;
+      let usSrc = usdPx ? "data912" : null;
+      if (!usdPx && yhCache[t] != null) { usdPx = yhCache[t]; usSrc = "yahoo"; }
+      const usChg = u && Number.isFinite(Number(u.pct_change)) ? Number(u.pct_change) : null;
+      const teorico = (usdPx && ccl && ratio) ? (usdPx * ccl) / ratio : null;
+      const cAr = ced[t];
+      const arPx = (cAr ? (mid(num(cAr.px_bid), num(cAr.px_ask)) || num(cAr.c)) : null) || num(stockPrices[t]?.price);
+      const gap = (teorico != null && arPx != null) ? teorico - arPx : null;
+      const gapPct = (gap != null && arPx) ? (gap / arPx) * 100 : null;
+      const gapPos = (gap != null) ? gap * h.qty : null;
+      out.push({ ticker: t, name, qty: h.qty, ratio, usdPx, usSrc, usChg, teorico, arPx, gap, gapPct, gapPos });
+    }
+    out.sort((a, b) => Math.abs(b.gapPos ?? 0) - Math.abs(a.gapPos ?? 0) || a.ticker.localeCompare(b.ticker));
+    return out;
+  }, [held, usa, yhCache, ced, stockPrices, ccl]);
+
+  const totGapPos = rows.reduce((s, r) => s + (r.gapPos || 0), 0);
+
+  const fUsd = (n) => (n == null ? "—" : `US$ ${Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  const fArs = (n) => (n == null || !Number.isFinite(n) ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
+  const fQ = (n) => (n == null ? "—" : Number(n).toLocaleString("es-AR", { maximumFractionDigits: 2 }));
+  const fPct = (n) => (n == null || !Number.isFinite(n) ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}%`);
+  const fSign = (n) => (n == null ? "—" : `${n >= 0 ? "+" : "−"}$${Math.abs(Math.round(n)).toLocaleString("es-AR")}`);
+  const colG = (n) => (n == null ? C.dim : n >= 0 ? C.green : C.red);
+
+  const th = { padding: "6px 8px", fontSize: 10, fontWeight: 600, color: C.dim, textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" };
+  const td = { padding: "6px 8px", fontSize: 11.5, color: C.text, borderBottom: `1px solid ${C.border}`, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+  const numc = { ...td, textAlign: "right" };
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1180, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>CEDEARs · Precio USA en vivo</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 820 }}>
+            Tu tenencia de CEDEARs con el subyacente en USA <b>en vivo</b> y el <b>teórico acá</b> = (precio USD × CCL) ÷ ratio. Cuando AR está cerrado y USA abierto, el teórico adelanta hacia dónde corrige el CEDEAR en la próxima rueda. <span style={{ color: C.dim }}>Subyacente: data912 USA / Yahoo. No es recomendación.</span>
+          </p>
+        </div>
+        <div className="flex items-center" style={{ gap: 8 }}>
+          <div className="flex items-center" style={{ gap: 6 }}>
+            <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em" }}>CCL</span>
+            <input value={cclInput} onChange={(e) => { setCclTouched(true); setCclInput(e.target.value); }}
+              style={{ width: 92, padding: "6px 8px", fontSize: 12, background: C.panel, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", textAlign: "right" }} />
+            {cclTouched && cclRef ? <button onClick={() => { setCclTouched(false); setCclInput(String(Math.round(cclRef))); }} title="Volver al CCL de referencia" style={{ fontSize: 10, color: C.muted, background: "transparent", border: "none", cursor: "pointer" }}>↺ ref</button> : null}
+          </div>
+          <button onClick={() => setTick((t) => t + 1)} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6 }}>↻ Actualizar</button>
+        </div>
+      </div>
+
+      {(loading || posLoading) && !rows.length ? (
+        <div style={{ padding: 40, textAlign: "center" }}><Loader2 size={22} color={C.muted} className="eco-spin" /></div>
+      ) : !rows.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 12 }}>No tenés CEDEARs en cartera.</div>
+      ) : (
+        <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ ...th, textAlign: "left" }}>CEDEAR</th>
+                <th style={{ ...th, textAlign: "right" }}>Cant.</th>
+                <th style={{ ...th, textAlign: "right" }}>Ratio</th>
+                <th style={{ ...th, textAlign: "right" }}>USA en vivo</th>
+                <th style={{ ...th, textAlign: "right" }}>Var. USA</th>
+                <th style={{ ...th, textAlign: "right" }}>Teórico acá</th>
+                <th style={{ ...th, textAlign: "right" }}>AR actual</th>
+                <th style={{ ...th, textAlign: "right" }}>Gap %</th>
+                <th style={{ ...th, textAlign: "right" }}>Gap $ posición</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.ticker}>
+                  <td style={{ ...td, textAlign: "left" }}>
+                    <span style={{ fontWeight: 700 }}>{r.ticker}</span>
+                    <span style={{ color: C.dim, marginLeft: 6, fontSize: 10, fontFamily: "'Roboto', sans-serif" }}>{r.name}</span>
+                  </td>
+                  <td style={numc}>{fQ(r.qty)}</td>
+                  <td style={{ ...numc, color: C.dim }}>{r.ratio ?? "—"}</td>
+                  <td style={numc}>{fUsd(r.usdPx)}{r.usSrc === "yahoo" ? <span style={{ color: C.dim, fontSize: 9, marginLeft: 4 }}>YH</span> : null}</td>
+                  <td style={{ ...numc, color: colG(r.usChg) }}>{fPct(r.usChg)}</td>
+                  <td style={{ ...numc, fontWeight: 700 }}>{fArs(r.teorico)}</td>
+                  <td style={{ ...numc, color: C.muted }}>{fArs(r.arPx)}</td>
+                  <td style={{ ...numc, color: colG(r.gapPct) }}>{fPct(r.gapPct)}</td>
+                  <td style={{ ...numc, color: colG(r.gapPos), fontWeight: 600 }}>{fSign(r.gapPos)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td style={{ ...td, fontWeight: 700, color: C.text }} colSpan={8}>Gap total estimado (si el CEDEAR converge al teórico)</td>
+                <td style={{ ...numc, fontWeight: 700, color: colG(totGapPos) }}>{fSign(totGapPos)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+      <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>
+        <b>Teórico acá</b> = (subyacente USD × CCL) ÷ ratio. <b>Gap</b> = teórico − precio AR actual: positivo = el CEDEAR está barato acá y "debería" subir hacia el teórico; negativo = caro. <b>Gap $ posición</b> = gap × tu cantidad (lo que ganás/perdés si converge). El CCL arranca en la referencia de mercado (mediana de líquidos); editalo si querés otro.
+      </p>
+    </div>
+  );
+}
+
 function ReporteCarteraModule() {
   const { positions, loading } = useUserPositions();
   const bondPrices = useBondPrices()?.prices || {};
