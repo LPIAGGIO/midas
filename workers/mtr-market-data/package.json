@@ -1,0 +1,19 @@
+{
+  "name": "mtr-market-data",
+  "version": "1.0.0",
+  "description": "Worker que mantiene un WebSocket abierto contra matbarofex.primary.ventures (visor A3, sesion guest) y persiste market data live de futuros DLR a Supabase.",
+  "main": "src/index.js",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "test:parser": "node -e \"const p = require('./src/tickParser'); console.log(p.parseTick('M:rx_DDF_DLR_JUN26|271031|810|1436.5|1437.5|50|1436.5|2026-05-26T16:47:16Z|79909|114715556000|79909000|1432|1440|1434.5|808651|||1434|2026-05-22|1434|2026-05-22'));\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.4.0",
+    "ws": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

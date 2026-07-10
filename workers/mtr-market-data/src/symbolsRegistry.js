@@ -1,0 +1,79 @@
+// Lista hardcodeada de los 12 futuros DLR estandar (sin opciones, sin minis).
+// Extraida del ref-data del 26/05/2026.
+//
+// FUTURO: cuando un contrato vence (ej. DLR_MAY26 desaparece el 31/05),
+// hay que actualizarlo o pegarle a /api/v2/ref-data y diff-ear. Para MVP,
+// hardcode + revision manual mensual. Ver TODO al final.
+
+const DLR_FUTURES = [
+  { securityId: "rx_DDF_DLR_MAY26", symbol: "DLR/MAY26", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_JUN26", symbol: "DLR/JUN26", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_JUL26", symbol: "DLR/JUL26", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_AGO26", symbol: "DLR/AGO26", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_SEP26", symbol: "DLR/SEP26", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_OCT26", symbol: "DLR/OCT26", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_NOV26", symbol: "DLR/NOV26", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_DIC26", symbol: "DLR/DIC26", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_ENE27", symbol: "DLR/ENE27", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_FEB27", symbol: "DLR/FEB27", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_MAR27", symbol: "DLR/MAR27", segment: "rx_DDF" },
+  { securityId: "rx_DDF_DLR_ABR27", symbol: "DLR/ABR27", segment: "rx_DDF" },
+];
+
+// Cauciones colocadoras en PESOS del MAE (segmento rx_MAE). El "precio" de
+// estos instrumentos ES la tasa (TNA %), no un precio de futuro. Misma fuente
+// que el snapshot estatico viejo (api.mae.com.ar/cauciones), por otro
+// transporte. La 1D alimenta el benchmark "vs caucion" de la curva DLR y el
+// analizador Futuros vs Caucion; 2D-4D vienen gratis en el mismo feed para
+// armar una mini-curva. El tickParser deja la tasa en last/bid/ask (rueda
+// activa) o reference/settlement (fuera de hora).
+const CAUCIONES_ARS = [
+  { securityId: "rx_MAE_CAARS_1D", symbol: "CAARS/1D", segment: "rx_MAE" },
+  { securityId: "rx_MAE_CAARS_2D", symbol: "CAARS/2D", segment: "rx_MAE" },
+  { securityId: "rx_MAE_CAARS_3D", symbol: "CAARS/3D", segment: "rx_MAE" },
+  { securityId: "rx_MAE_CAARS_4D", symbol: "CAARS/4D", segment: "rx_MAE" },
+];
+
+const WTI_FUTURES = [
+  { securityId: "rx_DUAL_WTI_JUL26", symbol: "WTI/JUL26", segment: "rx_DUAL" },
+];
+
+const ALL_SYMBOLS = [...DLR_FUTURES, ...CAUCIONES_ARS, ...WTI_FUTURES];
+
+/**
+ * Devuelve la lista de securityIds para suscribir al WS de Primary.
+ * El topic del WS es `md.${securityId}`.
+ */
+function getSymbolsToSubscribe() {
+  return ALL_SYMBOLS.map((s) => s.securityId);
+}
+
+/**
+ * Devuelve metadata de un securityId (symbol, segment).
+ * El sink lo usa para enriquecer el upsert.
+ */
+function getSymbolMeta(securityId) {
+  return ALL_SYMBOLS.find((s) => s.securityId === securityId);
+}
+
+/**
+ * Construye los topics WS a partir de los securityIds.
+ * Topic format: `md.${securityId}` (md = market data).
+ */
+function buildTopics(securityIds) {
+  return securityIds.map((id) => `md.${id}`);
+}
+
+module.exports = {
+  DLR_FUTURES,
+  CAUCIONES_ARS,
+  ALL_SYMBOLS,
+  getSymbolsToSubscribe,
+  getSymbolMeta,
+  buildTopics,
+};
+
+// TODO[refresh-dinamico]: leer /api/v2/ref-data cada 24h, filtrar
+//   securities con id que matchee /^rx_DDF_DLR_[A-Z]{3}\d{2}$/, comparar
+//   con ALL_SYMBOLS y mandar S/U al WS para suscribir nuevos y desuscribir
+//   vencidos. No bloqueante para MVP.

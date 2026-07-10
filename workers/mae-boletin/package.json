@@ -1,0 +1,15 @@
+{
+  "name": "midas-mae-boletin",
+  "version": "1.0.0",
+  "description": "Worker que cachea el boletín de cierre diario de MAE en Supabase",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js",
+    "backfill": "node backfill.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.20.1"
+  }
+}

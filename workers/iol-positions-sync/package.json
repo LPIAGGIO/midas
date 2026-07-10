@@ -1,0 +1,16 @@
+{
+  "name": "iol-positions-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Espeja las tenencias de IOL en la tabla positions de Midas",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js",
+    "dry-run": "node worker.js --dry-run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  }
+}

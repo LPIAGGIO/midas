@@ -1,0 +1,17 @@
+{
+  "name": "fci-snapshot",
+  "version": "1.0.0",
+  "main": "worker.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.4",
+    "dotenv": "^17.4.2",
+    "ws": "^8.20.1"
+  }
+}
