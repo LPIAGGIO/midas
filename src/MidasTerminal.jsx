@@ -9239,7 +9239,16 @@ function useFutureAdjustments(positions, futurePrices) {
           return;
         }
 
-        const pending = (data || []).filter((r) => r.status === "pending");
+        // Ignoramos los ajustes de futuros DERIVADOS DEL LIBRO (import Cocos): su
+        // P&L de ajustes ya está en la caja del libro, no van por acreditación.
+        // El worker VPS los genera igual (no tiene el filtro), así que los
+        // descartamos acá en el display → el banner solo cuenta futuros reales.
+        const derivedFutIds = new Set(
+          (positions || [])
+            .filter((p) => p.instrument_type === "future" && p.extra?.source === "derivado_libro")
+            .map((p) => p.id)
+        );
+        const pending = (data || []).filter((r) => r.status === "pending" && !derivedFutIds.has(r.position_id));
         const confirmed = (data || []).filter((r) => r.status === "confirmed");
         setPendingAdjustments(pending);
         setConfirmedAdjustments(confirmed);
@@ -9255,7 +9264,7 @@ function useFutureAdjustments(positions, futurePrices) {
     return () => {
       cancelled = true;
     };
-  }, [user, refreshKey]);
+  }, [user, refreshKey, positions]);
 
   // --- Confirmar un ajuste: edita la fila + crea cash_movement ----
   const confirm = useCallback(
