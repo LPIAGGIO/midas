@@ -242,7 +242,7 @@ const NAV = [
       { id: "calc-kelly", label: "Criterio de Kelly", icon: Percent },
       { id: "calc-montecarlo", label: "Monte Carlo", icon: Activity },
       { id: "calc-cedear-fv", label: "Valuación CEDEAR", icon: Scale },
-      { id: "calc-cedear-venta", label: "Simulador Venta CEDEAR", icon: Calculator },
+      { id: "calc-cedear-venta", label: "Simulador de Venta", icon: Calculator },
     ],
   },
   {
@@ -27341,29 +27341,40 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
     e.target.value = "";
   };
 
-  // Buscar CUALQUIER CEDEAR (lo tengas o no) y traer su precio actual (data912)
-  // para simular. Llena un lote con el precio de mercado; vos ponés la cantidad.
+  // Buscar CUALQUIER CEDEAR o ACCIÓN (lo tengas o no) y traer su precio actual
+  // (data912) para simular. Llena un lote con el precio de mercado; vos ponés la
+  // cantidad. La matemática (costo/venta/comisiones) es igual para ambos.
   const [cedPx, setCedPx] = useState({});
+  const [accSyms, setAccSyms] = useState([]); // símbolos de acciones locales (para el buscador)
   const [pxTick, setPxTick] = useState(0);
   const [pxLoading, setPxLoading] = useState(false);
   useEffect(() => {
     let m = true; setPxLoading(true);
-    fetch(`/api/data912?type=cedears&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])).then((arr) => {
+    const mid = (x) => { const b = Number(x.px_bid), a = Number(x.px_ask), c = Number(x.c); return (b > 0 && a > 0) ? (a + b) / 2 : (c > 0 ? c : null); };
+    Promise.all([
+      fetch(`/api/data912?type=cedears&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])),
+      fetch(`/api/data912?type=acciones&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])),
+    ]).then(([ced, acc]) => {
       if (!m) return;
       const px = {};
-      for (const x of arr || []) if (x?.symbol) { const b = Number(x.px_bid), a = Number(x.px_ask), c = Number(x.c); px[String(x.symbol).toUpperCase()] = (b > 0 && a > 0) ? (a + b) / 2 : (c > 0 ? c : null); }
-      setCedPx(px); setPxLoading(false);
+      for (const x of ced || []) if (x?.symbol) px[String(x.symbol).toUpperCase()] = mid(x);
+      const asy = [];
+      for (const x of acc || []) if (x?.symbol) { const s = String(x.symbol).toUpperCase(); px[s] = mid(x); asy.push(s); }
+      setCedPx(px); setAccSyms([...new Set(asy)].sort()); setPxLoading(false);
     }).catch(() => { if (m) setPxLoading(false); });
     return () => { m = false; };
   }, [pxTick]);
   const [tq, setTq] = useState("");
   const [topen, setTopen] = useState(false);
   const tOptions = useMemo(() => {
-    const all = Object.keys(CEDEAR_CAT).map((k) => ({ sym: k, name: CEDEAR_CAT[k].n }));
+    const ceds = Object.keys(CEDEAR_CAT).map((k) => ({ sym: k, name: CEDEAR_CAT[k].n, kind: "CEDEAR" }));
+    // Acciones: las del feed que NO son también CEDEAR (evita duplicar tickers).
+    const accs = accSyms.filter((s) => !CEDEAR_CAT[s]).map((s) => ({ sym: s, name: "Acción local", kind: "Acción" }));
+    const all = [...ceds, ...accs];
     const term = tq.trim().toUpperCase();
     const list = term ? all.filter((o) => o.sym.includes(term) || o.name.toUpperCase().includes(term)) : all;
     return list.sort((a, b) => a.sym.localeCompare(b.sym)).slice(0, 30);
-  }, [tq]);
+  }, [tq, accSyms]);
   const pickTicker = (sym) => {
     const p = cedPx[sym];
     setLots([{ qty: "", price: p != null ? p.toFixed(2).replace(".", ",") : "" }]);
@@ -27423,7 +27434,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
       ) : (
       <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulador de venta CEDEAR</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Simulador de venta</h1>
           <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
             Para scalping con compras escalonadas. Cargá tus lotes a mano, desde tu cartera, o subí el CSV de operaciones (ReporteOperaciones de Cocos/Matriz): separa lo cerrado (round-trips ya realizados, con su resultado) de lo que quedó abierto, y carga la posición abierta a su costo promedio para simular el cierre. Simulá vender N papeles a un precio y mirá el resultado neto de comisiones y el precio mínimo para no perder.
           </p>
@@ -27499,13 +27510,14 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
         {/* Buscar cualquier CEDEAR (lo tengas o no) y traer su precio actual. */}
         <div style={{ position: "relative", marginBottom: 9 }}>
           <input value={topen ? tq : ""} onFocus={() => { setTopen(true); setTq(""); }} onBlur={() => setTimeout(() => setTopen(false), 150)} onChange={(e) => setTq(e.target.value)}
-            placeholder="🔎 Buscar un CEDEAR para simular (trae precio actual)…" style={{ ...tInput, width: "100%" }} />
+            placeholder="🔎 Buscar un CEDEAR o acción para simular (trae precio actual)…" style={{ ...tInput, width: "100%" }} />
           {topen && tOptions.length > 0 && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 3, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, zIndex: 10, maxHeight: 220, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
               {tOptions.map((o) => (
                 <div key={o.sym} onMouseDown={() => pickTicker(o.sym)} className="flex items-center justify-between"
                   style={{ padding: "7px 10px", cursor: "pointer", borderBottom: `1px solid ${C.border}`, gap: 8 }}>
                   <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#f59e0b", fontSize: 12, minWidth: 50 }}>{o.sym}</span>
+                  <span style={{ fontSize: 8.5, color: C.dim, textTransform: "uppercase", letterSpacing: "0.06em", border: `1px solid ${C.border}`, borderRadius: 3, padding: "1px 4px" }}>{o.kind === "Acción" ? "ACC" : "CED"}</span>
                   <span style={{ fontSize: 11, color: C.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
                   <span style={{ fontSize: 11.5, color: cedPx[o.sym] != null ? "#34d399" : C.dim, fontFamily: "'JetBrains Mono', monospace" }}>{cedPx[o.sym] != null ? `$${Math.round(cedPx[o.sym]).toLocaleString("es-AR")}` : "s/precio"}</span>
                 </div>
@@ -27537,7 +27549,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
             <input value={iva} onChange={(e) => setIva(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
           </div>
           <div style={{ flex: "2 1 240px", fontSize: 10.5, color: C.dim, paddingBottom: 8 }}>
-            Cocos CEDEAR: 0 comisión, solo derechos de mercado + IVA, en cada pata (compra y venta). Costo por pata ≈ {(c * 100).toFixed(3)}%.
+            Cocos CEDEARs y acciones: 0 comisión, solo derechos de mercado + IVA, en cada pata (compra y venta). Costo por pata ≈ {(c * 100).toFixed(3)}%. (Los derechos de mercado pueden diferir entre CEDEAR y acción — ajustá el % si hace falta.)
           </div>
         </div>
       </div>
