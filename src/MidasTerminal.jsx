@@ -28838,6 +28838,8 @@ function CedearUsaLiveModule() {
 
 function ReporteCarteraModule() {
   const { positions, loading } = useUserPositions();
+  const { fx } = useDashboardFx();
+  const cclMid = fx?.ccl?.mid ?? null; // CCL de referencia (mismo que "Dólar Hoy" del Portfolio)
   const bondPrices = useBondPrices()?.prices || {};
   const stockPrices = useStockPrices()?.prices || {};
   const fciPrices = useFciPrices(positions)?.prices || {};
@@ -28920,7 +28922,15 @@ function ReporteCarteraModule() {
             Tu cartera abierta de contado agrupada por tipo, estilo Balanz: costo (V. inicial), valor a mercado, rendimiento, días de tenencia (DPT) y anualizado (TNA). Precios en vivo.
           </p>
         </div>
-        <button onClick={downloadCsv} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>↓ Exportar CSV</button>
+        <div className="flex items-center" style={{ gap: 14 }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em" }}>CCL</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums" }}>
+              {cclMid != null ? `$${Math.round(cclMid).toLocaleString("es-AR")}` : "—"}
+            </div>
+          </div>
+          <button onClick={downloadCsv} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>↓ Exportar CSV</button>
+        </div>
       </div>
 
       {brokers.length > 1 && (
