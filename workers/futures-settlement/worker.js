@@ -568,21 +568,30 @@ async function main() {
   if (DRY_RUN) info("Modo DRY-RUN activo - no se escribira nada en la base.");
 
   // Posiciones de futuros de TODOS los usuarios.
-  const { data: positions, error: posErr } = await supabase
+  const { data: allPositions, error: posErr } = await supabase
     .from("positions")
-    .select("id, user_id, ticker, instrument_type, operation_type, quantity, entry_price, entry_date, created_at")
+    .select("id, user_id, ticker, instrument_type, operation_type, quantity, entry_price, entry_date, created_at, extra")
     .eq("instrument_type", "future");
   if (posErr) throw new Error(`leyendo positions: ${posErr.message}`);
 
-  if (!positions || positions.length === 0) {
-    info("No hay posiciones de futuros. Nada que hacer.");
+  // Excluir futuros DERIVADOS DEL LIBRO (import Cocos, extra.source='derivado_libro'):
+  // su P&L de ajustes YA esta en la caja del libro (Sigma-total), NO van por
+  // acreditacion. Sin esto el worker regenera cada noche filas fantasma para los
+  // futuros netos 0 de un CSV importado -> banner "N movimientos pendientes" que
+  // no corresponde (LP: el cartel solo debe salir si habia tenencia abierta real).
+  const positions = (allPositions || []).filter(
+    (p) => !p || !p.extra || p.extra.source !== "derivado_libro"
+  );
+
+  if (positions.length === 0) {
+    info("No hay posiciones de futuros reales (excluidas las derivadas del libro). Nada que hacer.");
     return;
   }
 
   const tickers = Array.from(
     new Set(positions.map((p) => (p.ticker || "").toUpperCase().trim()).filter(Boolean))
   );
-  info(`${positions.length} posicion(es) de futuros, ${tickers.length} ticker(s): ${tickers.join(", ")}`);
+  info(`${positions.length} posicion(es) de futuros reales (de ${(allPositions || []).length} totales), ${tickers.length} ticker(s): ${tickers.join(", ")}`);
 
   await captureSettlements(tickers, settleDate);
   await generateAdjustments(positions, settleDate);
