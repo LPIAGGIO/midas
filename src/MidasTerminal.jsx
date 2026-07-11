@@ -15591,7 +15591,7 @@ function PortfolioDashboard({ onNavigate }) {
     const iolCashTotal = Object.values(iolCashByCurrency || {})
       .reduce((s, v) => s + (Number(v) || 0), 0);
     if (iolCashTotal !== 0) set.add("iol");
-    const ordered = ["iol", "cocos", "eco", "manual"].filter((b) => set.has(b));
+    const ordered = ["iol", "cocos", "balanz", "eco", "manual"].filter((b) => set.has(b));
     const manualCash = cashState?.balanceByCurrency || {};
     if (Object.values(manualCash).some((v) => Number(v) !== 0)) {
       ordered.push("efectivo");
