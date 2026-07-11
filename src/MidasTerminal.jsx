@@ -2369,6 +2369,7 @@ function IOLConnectBanner({ onConnect, onDismiss }) {
 const BROKER_CATALOG = {
   iol:    { id: "iol",    label: "InvertirOnline (IOL)", short: "IOL",  type: "api",    color: "#FFD400" },
   cocos:  { id: "cocos",  label: "Cocos Capital",        short: "COC",  type: "manual", color: "#7C3AED" },
+  balanz: { id: "balanz", label: "Balanz",               short: "BAL",  type: "manual", color: "#34D399" },
   eco:    { id: "eco",    label: "ECO Valores",          short: "ECO",  type: "manual", color: "#10B981" },
   manual: { id: "manual", label: "Otro / Manual",        short: "MAN",  type: "manual", color: "#94A3B8" },
 };
