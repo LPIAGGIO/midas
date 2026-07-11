@@ -5354,15 +5354,19 @@ function Landing({ onLogin }) {
           <span style={{ background: "linear-gradient(100deg, #5B8DD6, #34d399)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent", color: "transparent" }}>en una sola pantalla</span>
         </h1>
         <p style={{ fontSize: 16.5, color: C.muted, maxWidth: 620, margin: "22px auto 0", lineHeight: 1.6 }}>Cartera valuada en vivo, dólar futuro, carry, curvas de tasas, cotizaciones y estadísticas del BCRA. Datos en tiempo real, las cuentas hechas.</p>
-        <div className="flex justify-center" style={{ marginTop: 30 }}><LoginBtn big /></div>
-        <div style={{ fontSize: 12, color: C.dim, marginTop: 14 }}>Gratis con tu cuenta de Gmail · sin tarjeta</div>
+        <div style={{ fontSize: 12, color: C.dim, marginTop: 24 }}>Gratis con tu cuenta de Gmail · sin tarjeta</div>
       </div>
       <div style={{ maxWidth: 1020, margin: "0 auto", padding: "50px 28px 52px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))", gap: 16 }}>
         {features.map((f) => <FeatureCard key={f.t} {...f} />)}
       </div>
-      <div style={{ maxWidth: 1020, margin: "0 auto", padding: "26px 28px 56px" }}>
-        <div style={{ textAlign: "center", fontSize: 11, color: C.dim, borderTop: `1px solid ${C.border}`, paddingTop: 26, fontFamily: "'Roboto', sans-serif" }}>
-          Midas · terminal del mercado argentino
+      <div style={{ maxWidth: 1020, margin: "0 auto", padding: "26px 28px 48px" }}>
+        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 26 }}>
+          <p style={{ fontSize: 11, color: C.dim, lineHeight: 1.65, textAlign: "center", maxWidth: 780, margin: "0 auto" }}>
+            <strong style={{ color: C.muted }}>Aviso importante.</strong> Midas es una herramienta <strong style={{ color: C.muted }}>informativa y de análisis</strong>. Toda la información, cotizaciones, cálculos, valuaciones y estadísticas que muestra tienen fines <strong style={{ color: C.muted }}>únicamente informativos y educativos</strong> y <strong style={{ color: C.muted }}>NO constituyen asesoramiento financiero ni una recomendación de compra, venta o inversión</strong> en ningún instrumento. Los datos provienen de fuentes de terceros y pueden tener demoras, errores u omisiones. Las decisiones de inversión son de <strong style={{ color: C.muted }}>exclusiva responsabilidad del usuario</strong>. Midas no es agente de liquidación y compensación, agente de negociación, ni asesor de inversiones registrado; no ejecuta operaciones ni administra fondos de terceros.
+          </p>
+          <div style={{ textAlign: "center", fontSize: 11, color: C.dim, marginTop: 18, fontFamily: "'Roboto', sans-serif" }}>
+            Midas · terminal del mercado argentino
+          </div>
         </div>
       </div>
     </div>
