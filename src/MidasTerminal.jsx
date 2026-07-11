@@ -4328,9 +4328,90 @@ const BROKER_IMPORT_INFO = {
     nota: "Formato movimientos_cuenta (separado por ';'). Trae trades, FCI, caución, aranceles y rentas.",
   },
   iol: { label: "IOL", integrado: true, importa: false, steps: ["Conectá tu cuenta por API en la pestaña Conexiones — sincroniza posiciones solo.", "El import por archivo de IOL llega pronto."], nota: "" },
-  balanz: { label: "Balanz", importa: false, steps: ["Exportá tu resumen de operaciones a CSV/Excel.", "Soporte de archivo Balanz: pronto."], nota: "" },
+  balanz: { label: "Balanz", integrado: true, importa: true,
+    steps: [
+      "Entrá a Balanz → Mis Instrumentos (tenencia).",
+      "Exportá a Excel (el botón de descarga, sale un .xlsx).",
+      "Subí ese .xlsx acá abajo. Es la foto de tu tenencia; reemplaza tus posiciones de Balanz.",
+    ],
+    nota: "Formato MisInstrumentos (.xlsx). Trae acciones, CEDEARs, ONs, letras y bonos con cantidad, PPP y valor.",
+  },
   otro: { label: "Otro broker", importa: false, steps: ["Contanos cuál usás y sumamos el formato."], nota: "" },
 };
+
+// ─────────── Import Balanz (.xlsx "Mis Instrumentos" = foto de tenencia) ───────────
+const BALANZ_TIPO_MAP = {
+  "acciones": "stock", "cedears": "cedear", "cedear": "cedear",
+  "corporativos": "on", "obligaciones negociables": "on", "on": "on",
+  "letras": "bond_ars", "lecaps": "bond_ars", "bonos": "bond_ars",
+  "titulos publicos": "bond_ars", "títulos públicos": "bond_ars",
+  "fci": "fci", "fondos": "fci",
+};
+const BALANZ_MONEDA_MAP = {
+  "pesos": "ARS", "peso": "ARS", "ars": "ARS",
+  "dolares": "USD-MEP", "dólares": "USD-MEP", "dolar": "USD-MEP", "usd": "USD-MEP",
+  "us dollar (cable)": "USD-CCL", "dolar cable": "USD-CCL", "dólar cable": "USD-CCL", "cable": "USD-CCL",
+};
+function _unescapeXml(s) {
+  return String(s).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+}
+// Devuelve las posiciones parseadas (o tira Error con code). fflate por dynamic import.
+async function parseBalanzXlsx(arrayBuffer) {
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const files = unzipSync(new Uint8Array(arrayBuffer));
+  const names = Object.keys(files);
+  const sheetName = names.find((n) => /xl\/worksheets\/sheet1\.xml$/.test(n)) || names.find((n) => /xl\/worksheets\/.*\.xml$/.test(n));
+  if (!sheetName) throw new Error("no_sheet");
+  const xml = strFromU8(files[sheetName]);
+  // sharedStrings (Balanz usa inline strings, pero por robustez lo soportamos)
+  let shared = null;
+  const ssName = names.find((n) => /sharedStrings\.xml$/.test(n));
+  if (ssName) { shared = [...strFromU8(files[ssName]).matchAll(/<si>([\s\S]*?)<\/si>/g)].map((s) => _unescapeXml([...s[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(""))); }
+  const rowsXml = xml.split("<row").slice(1);
+  const parseRow = (rx) => {
+    const o = {}; const re = /<c r="([A-Z]+)[0-9]+"([^>]*)>([\s\S]*?)<\/c>/g; let m;
+    while ((m = re.exec(rx))) {
+      const col = m[1], attrs = m[2], body = m[3];
+      const tM = body.match(/<t[^>]*>([\s\S]*?)<\/t>/), vM = body.match(/<v>([\s\S]*?)<\/v>/);
+      let v = null;
+      if (/t="s"/.test(attrs) && shared && vM) v = shared[Number(vM[1])];
+      else if (tM) v = _unescapeXml(tM[1]);
+      else if (vM) v = vM[1];
+      o[col] = v;
+    }
+    return o;
+  };
+  const header = parseRow(rowsXml[0] || "");
+  const colByName = {};
+  for (const [c, n] of Object.entries(header)) if (n) colByName[String(n).trim().toLowerCase()] = c;
+  const col = (n) => colByName[n];
+  const cT = col("ticker"), cTipo = col("tipo de instrumento"), cNom = col("nominales"),
+    cPre = col("precio"), cPpp = col("precio promedio de compra"), cVal = col("valor actual"), cMon = col("moneda"), cDesc = col("descripcion") || col("descripción");
+  if (!cT || !cNom) throw new Error("bad_format");
+  const num = (s) => { const x = Number(String(s ?? "").trim().replace(/,/g, "")); return Number.isFinite(x) ? x : null; };
+  const out = [];
+  for (let i = 1; i < rowsXml.length; i++) {
+    const r = parseRow(rowsXml[i]);
+    const ticker = (r[cT] || "").toString().trim().toUpperCase();
+    if (!ticker) continue;
+    const tipoRaw = (r[cTipo] || "").toString().trim();
+    const itype = BALANZ_TIPO_MAP[tipoRaw.toLowerCase()] || "stock";
+    const balanzCur = BALANZ_MONEDA_MAP[(r[cMon] || "").toString().trim().toLowerCase()] || "ARS";
+    const qty = num(r[cNom]);
+    const ppp = num(r[cPpp]);
+    if (!qty || qty <= 0) continue;
+    // Convención: bonos/letras/ON en Midas usan /100; Balanz cotiza por 1 VN
+    // (valor = nominales × PPP). entry_price = PPP×100 para que Midas dé el mismo
+    // valor. Acciones/CEDEARs van directo (sin convención).
+    const isBond = ["bond_ars", "bond_usd", "on"].includes(itype);
+    const entry = ppp != null ? (isBond ? ppp * 100 : ppp) : 0;
+    // Balanz muestra TODO valuado en PESOS (aun los "Dólares"): el valor = qty×PPP
+    // está en pesos. Por eso van en ARS — etiquetarlos USD-MEP los doble-dolarizaría.
+    // El origen (balanzCur) queda en extra para info / futura conversión.
+    out.push({ ticker, instrument_type: itype, quantity: qty, entry_price: entry, entry_currency: "ARS", balanzCur, tipoRaw, moneda: r[cMon], desc: cDesc ? r[cDesc] : null, precio: num(r[cPre]), valorActual: num(r[cVal]), ppp });
+  }
+  return out;
+}
 
 function useImportBatches() {
   const { user } = useAuth();
@@ -4491,6 +4572,20 @@ function ImportacionesView() {
   const onFiles = async (fileList) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
+    // Balanz: .xlsx de "Mis Instrumentos" = foto de tenencia (posiciones directas).
+    if (broker === "balanz") {
+      try {
+        const f = files[0];
+        const pos = await parseBalanzXlsx(await f.arrayBuffer());
+        if (!pos.length) { setResult({ err: "El .xlsx no tiene instrumentos (¿es el export de 'Mis Instrumentos' de Balanz?)." }); setParsed(null); return; }
+        setParsed({ kind: "balanz", fileName: f.name, positions: pos }); setResult(null);
+      } catch (e) {
+        const code = String(e?.message || "");
+        setResult({ err: (code === "bad_format" || code === "no_sheet") ? "No reconozco el formato (esperaba el .xlsx de 'Mis Instrumentos' de Balanz)." : ("Error leyendo el Excel: " + code).slice(0, 160) });
+        setParsed(null);
+      }
+      return;
+    }
     let all = [], names = [], badFmt = false;
     for (const f of files) {
       try {
@@ -4572,10 +4667,39 @@ function ImportacionesView() {
     return null;
   };
 
+  // Balanz: la foto de tenencia REEMPLAZA las posiciones broker='balanz'
+  // (snapshot, no incremental). Cocos e IOL quedan intactos.
+  const applyBalanzPositions = async (positions) => {
+    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "balanz");
+    const today = new Date().toISOString().slice(0, 10);
+    const posRows = positions.map((p) => ({
+      user_id: user.id, ticker: p.ticker, instrument_type: p.instrument_type, operation_type: "buy",
+      quantity: p.quantity, entry_price: p.entry_price, entry_currency: p.entry_currency, entry_date: today,
+      broker: "balanz", settlement: p.instrument_type === "fci" ? "CI" : "T1", extra: { source: "balanz_snapshot", balanz_moneda: p.balanzCur || "ARS" },
+    }));
+    for (let k = 0; k < posRows.length; k += 200) {
+      const { error } = await supabase.from("positions").insert(posRows.slice(k, k + 200));
+      if (error) return error.message;
+    }
+    return null;
+  };
+
   // Import + aplicar en un solo paso: sube el CSV al libro (batch) y reconstruye
   // el portfolio del libro COMPLETO.
   const importarYAplicar = async () => {
     if (!parsed) return;
+    // Balanz: reemplaza posiciones broker='balanz' con la foto.
+    if (parsed.kind === "balanz") {
+      setImporting(true); setResult(null);
+      await supabase.from("import_batches").delete().eq("user_id", user.id).eq("broker", "balanz"); // solo 1 foto vigente
+      await supabase.from("import_batches").insert({ user_id: user.id, file_name: parsed.fileName, broker: "balanz", source: "balanz_snapshot", n_rows: parsed.positions.length });
+      const err = await applyBalanzPositions(parsed.positions);
+      setImporting(false);
+      if (err) { setResult({ err }); return; }
+      setResult({ ok: parsed.positions.length, applied: parsed.positions.length });
+      setParsed(null); reloadBatches();
+      return;
+    }
     const newRows = parsed.rows.filter((r) => r.status === "new");
     setImporting(true); setResult(null);
     if (newRows.length) {
@@ -4598,11 +4722,17 @@ function ImportacionesView() {
 
   // Borrar un lote = borrar sus movimientos (cascade) Y el portfolio derivado.
   const deleteBatch = async (id) => {
-    // "Borrar todo": wipe INTEGRAL de Cocos, no solo este lote. Borra TODOS los
-    // lotes + TODO el libro + todas las posiciones broker='cocos' (cualquier
-    // fuente: derivado_libro, csv_matriz del import de Portfolio, opening) + toda
-    // la caja. IOL (broker='iol', worker) queda intacto. Siempre borra todo.
-    await supabase.from("import_batches").delete().eq("user_id", user.id);
+    const b = (batches || []).find((x) => x.id === id);
+    if (b?.broker === "balanz") {
+      // Balanz: borra solo la foto (posiciones broker='balanz') + su lote. Cocos/IOL intactos.
+      await supabase.from("import_batches").delete().eq("id", id);
+      await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "balanz");
+      setConfirmDel(null); reloadBatches();
+      return;
+    }
+    // Cocos "Borrar todo": wipe INTEGRAL de Cocos (lotes + libro + posiciones
+    // broker='cocos' de cualquier fuente + caja). IOL y Balanz quedan intactos.
+    await supabase.from("import_batches").delete().eq("user_id", user.id).or("broker.is.null,broker.neq.balanz");
     await supabase.from("libro_movimientos").delete().eq("user_id", user.id);
     await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
     await supabase.from("cash_movements").delete().eq("user_id", user.id);
@@ -4618,8 +4748,9 @@ function ImportacionesView() {
   };
 
   const info = BROKER_IMPORT_INFO[broker];
-  const newCount = parsed ? parsed.rows.filter((r) => r.status === "new").length : 0;
-  const dupCount = parsed ? parsed.rows.length - newCount : 0;
+  const isBalanzParsed = parsed?.kind === "balanz";
+  const newCount = !parsed ? 0 : isBalanzParsed ? parsed.positions.length : parsed.rows.filter((r) => r.status === "new").length;
+  const dupCount = (!parsed || isBalanzParsed) ? 0 : parsed.rows.length - newCount;
   const fmtDate = (s) => s ? new Date(s).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
   const tabBtn = (k, l) => <button key={k} onClick={() => setTab(k)} style={{ padding: "7px 15px", fontSize: 12, fontWeight: 700, cursor: "pointer", border: `1px solid ${tab === k ? C.accent : C.border}`, background: tab === k ? C.accent : "transparent", color: tab === k ? "#0b0e11" : C.muted }}>{l}</button>;
 
@@ -4653,10 +4784,10 @@ function ImportacionesView() {
               onDrop={(e) => { e.preventDefault(); onFiles(e.dataTransfer.files); }}
               style={{ display: "block", border: `1.5px dashed ${C.border}`, borderRadius: 10, padding: "34px 20px", textAlign: "center", cursor: "pointer", color: C.muted, marginBottom: 16 }}
             >
-              <input type="file" accept=".csv,text/csv" multiple onChange={(e) => onFiles(e.target.files)} style={{ display: "none" }} />
+              <input type="file" accept={broker === "balanz" ? ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : ".csv,text/csv"} multiple={broker !== "balanz"} onChange={(e) => onFiles(e.target.files)} style={{ display: "none" }} />
               <Upload size={26} strokeWidth={1.5} style={{ marginBottom: 8, opacity: 0.7 }} />
-              <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>Arrastrá los CSV o hacé clic para elegir</div>
-              <div style={{ fontSize: 10.5, color: C.dim, marginTop: 4 }}>Podés subir varios a la vez · dedup por comprobante, nunca duplica</div>
+              <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{broker === "balanz" ? "Arrastrá el Excel (.xlsx) o hacé clic para elegir" : "Arrastrá los CSV o hacé clic para elegir"}</div>
+              <div style={{ fontSize: 10.5, color: C.dim, marginTop: 4 }}>{broker === "balanz" ? "Foto de tenencia (Mis Instrumentos) · reemplaza tus posiciones de Balanz" : "Podés subir varios a la vez · dedup por comprobante, nunca duplica"}</div>
             </label>
           ) : (
             <div style={{ border: `1px dashed ${C.border}`, borderRadius: 10, padding: "24px 20px", textAlign: "center", color: C.dim, fontSize: 12, marginBottom: 16 }}>Import por archivo de {info.label}: pronto. Por ahora soportamos el CSV de Cocos.</div>
@@ -4665,33 +4796,53 @@ function ImportacionesView() {
           {parsed && (
             <div style={{ border: `1px solid ${C.accent}`, borderRadius: 8, padding: "14px 16px", marginBottom: 16, background: "rgba(96,165,250,0.06)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
-                <div style={{ fontSize: 12.5, color: C.text, fontWeight: 700 }}>{parsed.fileName} — <span style={{ color: "#34d399" }}>{newCount} nuevos</span>{dupCount ? <span style={{ color: C.dim, fontWeight: 400 }}> · {dupCount} ya cargados</span> : ""}</div>
+                <div style={{ fontSize: 12.5, color: C.text, fontWeight: 700 }}>{parsed.fileName} — <span style={{ color: "#34d399" }}>{newCount} {isBalanzParsed ? "instrumentos" : "nuevos"}</span>{dupCount ? <span style={{ color: C.dim, fontWeight: 400 }}> · {dupCount} ya cargados</span> : ""}</div>
                 <div className="flex" style={{ gap: 8 }}>
                   <button onClick={() => { setParsed(null); setResult(null); }} disabled={importing} style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>Cancelar</button>
                   <button onClick={importarYAplicar} disabled={importing} style={{ padding: "8px 18px", fontSize: 12.5, fontWeight: 700, cursor: importing ? "default" : "pointer", border: "none", background: C.accent, color: "#0b0e11" }}>{importing ? "Importando y aplicando…" : "Importar y aplicar al portfolio"}</button>
                 </div>
               </div>
-              <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 10 }}>Se cargan al libro y se reconstruye tu portfolio (posiciones + caja) de una. Reemplaza tus posiciones de Cocos; IOL queda intacto.</div>
-              <div style={{ overflowX: "auto", maxHeight: 300, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 6 }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
-                  <thead><tr style={{ color: C.dim, textAlign: "left" }}>
-                    <th style={{ padding: "5px 9px" }}>Fecha</th><th style={{ padding: "5px 9px" }}>Tipo</th><th style={{ padding: "5px 9px" }}>Ticker</th><th style={{ padding: "5px 9px", textAlign: "right" }}>Total</th><th style={{ padding: "5px 9px" }} />
-                  </tr></thead>
-                  <tbody>{parsed.rows.slice(0, 60).map((r, i) => (
-                    <tr key={i} style={{ borderTop: `1px solid ${C.border}`, opacity: r.status === "new" ? 1 : 0.5 }}>
-                      <td style={{ padding: "4px 9px", color: C.muted, whiteSpace: "nowrap" }}>{r.fecha_ejecucion || "—"}</td>
-                      <td style={{ padding: "4px 9px", color: C.muted }}>{CAT_LABEL[r.categoria] || r.categoria} <span style={{ color: C.dim }}>{r.tipo_operacion}</span></td>
-                      <td style={{ padding: "4px 9px", color: C.text }}>{r.ticker || "—"}</td>
-                      <td style={{ padding: "4px 9px", textAlign: "right", color: (r.total || 0) >= 0 ? "#34d399" : C.red, fontVariantNumeric: "tabular-nums" }}>{Number(r.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</td>
-                      <td style={{ padding: "4px 9px", fontSize: 8.5, color: r.status === "new" ? "#34d399" : C.dim, fontWeight: 700 }}>{r.status === "new" ? "NUEVO" : "ya"}</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-              {parsed.rows.length > 60 && <div style={{ fontSize: 10, color: C.dim, marginTop: 6 }}>Mostrando 60 de {parsed.rows.length} filas.</div>}
+              <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 10 }}>{isBalanzParsed ? "Es tu foto de tenencia de Balanz — reemplaza tus posiciones de Balanz. Cocos e IOL quedan intactos." : "Se cargan al libro y se reconstruye tu portfolio (posiciones + caja) de una. Reemplaza tus posiciones de Cocos; IOL queda intacto."}</div>
+              {isBalanzParsed ? (
+                <div style={{ overflowX: "auto", maxHeight: 300, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 6 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+                    <thead><tr style={{ color: C.dim, textAlign: "left" }}>
+                      <th style={{ padding: "5px 9px" }}>Ticker</th><th style={{ padding: "5px 9px" }}>Tipo</th><th style={{ padding: "5px 9px", textAlign: "right" }}>Cantidad</th><th style={{ padding: "5px 9px", textAlign: "right" }}>PPP</th><th style={{ padding: "5px 9px", textAlign: "right" }}>Valor</th><th style={{ padding: "5px 9px" }}>Moneda</th>
+                    </tr></thead>
+                    <tbody>{parsed.positions.map((p, i) => (
+                      <tr key={i} style={{ borderTop: `1px solid ${C.border}` }}>
+                        <td style={{ padding: "4px 9px", color: C.text, fontWeight: 600 }}>{p.ticker}</td>
+                        <td style={{ padding: "4px 9px", color: C.muted }}>{p.tipoRaw || p.instrument_type}</td>
+                        <td style={{ padding: "4px 9px", textAlign: "right", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{Number(p.quantity).toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
+                        <td style={{ padding: "4px 9px", textAlign: "right", color: C.dim, fontVariantNumeric: "tabular-nums" }}>{p.ppp != null ? Number(p.ppp).toLocaleString("es-AR", { maximumFractionDigits: 2 }) : "—"}</td>
+                        <td style={{ padding: "4px 9px", textAlign: "right", color: "#34d399", fontVariantNumeric: "tabular-nums" }}>{p.valorActual != null ? Number(p.valorActual).toLocaleString("es-AR", { maximumFractionDigits: 0 }) : "—"}</td>
+                        <td style={{ padding: "4px 9px", color: C.dim }}>{p.moneda}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              ) : (<>
+                <div style={{ overflowX: "auto", maxHeight: 300, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 6 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+                    <thead><tr style={{ color: C.dim, textAlign: "left" }}>
+                      <th style={{ padding: "5px 9px" }}>Fecha</th><th style={{ padding: "5px 9px" }}>Tipo</th><th style={{ padding: "5px 9px" }}>Ticker</th><th style={{ padding: "5px 9px", textAlign: "right" }}>Total</th><th style={{ padding: "5px 9px" }} />
+                    </tr></thead>
+                    <tbody>{parsed.rows.slice(0, 60).map((r, i) => (
+                      <tr key={i} style={{ borderTop: `1px solid ${C.border}`, opacity: r.status === "new" ? 1 : 0.5 }}>
+                        <td style={{ padding: "4px 9px", color: C.muted, whiteSpace: "nowrap" }}>{r.fecha_ejecucion || "—"}</td>
+                        <td style={{ padding: "4px 9px", color: C.muted }}>{CAT_LABEL[r.categoria] || r.categoria} <span style={{ color: C.dim }}>{r.tipo_operacion}</span></td>
+                        <td style={{ padding: "4px 9px", color: C.text }}>{r.ticker || "—"}</td>
+                        <td style={{ padding: "4px 9px", textAlign: "right", color: (r.total || 0) >= 0 ? "#34d399" : C.red, fontVariantNumeric: "tabular-nums" }}>{Number(r.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</td>
+                        <td style={{ padding: "4px 9px", fontSize: 8.5, color: r.status === "new" ? "#34d399" : C.dim, fontWeight: 700 }}>{r.status === "new" ? "NUEVO" : "ya"}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                {parsed.rows.length > 60 && <div style={{ fontSize: 10, color: C.dim, marginTop: 6 }}>Mostrando 60 de {parsed.rows.length} filas.</div>}
+              </>)}
             </div>
           )}
-          {result && <div style={{ fontSize: 12, marginBottom: 16, color: result.err ? C.red : "#34d399" }}>{result.err ? result.err : `✓ ${result.ok} movimientos importados · ${result.applied} posiciones reconstruidas. Andá a Portfolio.`}</div>}
+          {result && <div style={{ fontSize: 12, marginBottom: 16, color: result.err ? C.red : "#34d399" }}>{result.err ? result.err : `✓ ${result.applied} posiciones en tu portfolio. Andá a Portfolio para verlas.`}</div>}
 
           {/* ── Zona separada: tus importaciones + reconstruir ── */}
           <div style={{ marginTop: 34, paddingTop: 22, borderTop: `3px solid ${C.accent}` }}>
@@ -4710,10 +4861,10 @@ function ImportacionesView() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {batches.map((b) => (
-                  <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px solid ${C.border}`, borderLeft: `3px solid ${b.broker === "cocos" ? "#22D3EE" : b.broker === "iol" ? "#FBBF24" : C.accent}`, borderRadius: 8, flexWrap: "wrap" }}>
+                  <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", border: `1px solid ${C.border}`, borderLeft: `3px solid ${b.broker === "cocos" ? "#22D3EE" : b.broker === "iol" ? "#FBBF24" : b.broker === "balanz" ? "#34D399" : C.accent}`, borderRadius: 8, flexWrap: "wrap" }}>
                     <div>
                       <div style={{ fontSize: 12.5, color: C.text, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.06em", color: "#0b0e11", background: b.broker === "cocos" ? "#22D3EE" : b.broker === "iol" ? "#FBBF24" : C.accent, borderRadius: 3, padding: "2px 6px", textTransform: "uppercase" }}>{b.broker}</span>
+                        <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.06em", color: "#0b0e11", background: b.broker === "cocos" ? "#22D3EE" : b.broker === "iol" ? "#FBBF24" : b.broker === "balanz" ? "#34D399" : C.accent, borderRadius: 3, padding: "2px 6px", textTransform: "uppercase" }}>{b.broker}</span>
                         {b.file_name || "importación"}
                       </div>
                       <div style={{ fontSize: 10.5, color: C.dim, marginTop: 3 }}>{b.n_rows} movimientos · {fmtDate(b.created_at)}</div>
