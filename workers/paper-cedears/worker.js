@@ -11,7 +11,8 @@
  * cuál aguanta mejor el costo de rotar más seguido:
  *   w5  → rota cada 5 ruedas  (~semanal)
  *   w10 → rota cada 10 ruedas (~quincenal)
- *   m21 → rota cada 21 ruedas (~mensual, la original)
+ *   m21 → rota el 17 de cada mes (mensual; el día en que LP rota el book real)
+ *   iol21 → igual que m21 (17 del mes) pero con el costo real de IOL Gold
  *
  * Auto-seed: cada variante sin estado se siembra con todo el histórico
  * (is_live=false); las que ya tienen estado avanzan 1 día (is_live=true). Así
@@ -34,11 +35,13 @@ const LB = 252, SKIP = 21, TOPK = 8, CAPITAL = 1000, FEE = 0.002;
 // iol21 modela el costo real de IOL Gold (comisión 0,5%/lado + IVA 21% ≈ 0,605%
 // + spread 0,2%) ≈ 0,8%/lado, misma cadencia mensual, para aislar cuánto le come
 // la comisión del broker al mismo momentum.
+// mode: "ruedas" rota cada `rebal` ruedas; "day17" rota el 17 de cada mes (o el
+// primer día hábil siguiente si el 17 cae finde/feriado), una vez por mes.
 const VARIANTS = [
-  { id: "w5", rebal: 5, fee: 0.002 },
-  { id: "w10", rebal: 10, fee: 0.002 },
-  { id: "m21", rebal: 21, fee: 0.002 },
-  { id: "iol21", rebal: 21, fee: 0.008 },
+  { id: "w5", mode: "ruedas", rebal: 5, fee: 0.002 },
+  { id: "w10", mode: "ruedas", rebal: 10, fee: 0.002 },
+  { id: "m21", mode: "day17", rebal: 21, fee: 0.002 },
+  { id: "iol21", mode: "day17", rebal: 21, fee: 0.008 },
 ];
 
 const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
@@ -67,8 +70,11 @@ function runVariant(V, ctx) {
   const REBAL = V.rebal, FEE = V.fee;
   let cash, holdings = {}, startIdx, lastRebalIdx, live;
   if (!state) {
-    // siembra: backfill completo, histórico teórico
-    cash = CAPITAL; startIdx = LB; lastRebalIdx = LB - REBAL; live = false;
+    // siembra: backfill completo, histórico teórico. En "ruedas" arranca
+    // invirtiendo el día 1 (lastRebalIdx = LB-REBAL); en "day17" la primera
+    // rotación cae en el primer cruce del 17 después de LB.
+    cash = CAPITAL; startIdx = LB; live = false;
+    lastRebalIdx = V.mode === "day17" ? LB : LB - REBAL;
   } else {
     cash = Number(state.cash_usd);
     for (const [t, u] of Object.entries(holdingsIn || {})) holdings[t] = u;
@@ -79,7 +85,14 @@ function runVariant(V, ctx) {
 
   const eqRows = [], trRows = [];
   for (let i = startIdx; i < dates.length; i++) {
-    if (i - lastRebalIdx >= REBAL) {
+    // "day17": rota en el primer día hábil en/después del 17 de cada mes (una
+    // vez por mes). "ruedas": cada REBAL ruedas. Comparación de ISO date como
+    // string (yyyy-mm-dd ordena lexicográficamente).
+    const dtI = dates[i], m17 = dtI.slice(0, 7) + "-17";
+    const doRebal = V.mode === "day17"
+      ? (dtI >= m17 && dates[lastRebalIdx] < m17)
+      : (i - lastRebalIdx >= REBAL);
+    if (doRebal) {
       const ranked = assets.map((a) => { const pa = px(a, i - SKIP), pb = px(a, i - LB); return [a, (pa && pb) ? pa / pb - 1 : -Infinity]; }).sort((x, y) => y[1] - x[1]);
       const picked = ranked.slice(0, TOPK).filter(([, m]) => m > 0).map(([a]) => a); // dual: solo momentum positivo
       let portVal = cash; for (const [t, u] of Object.entries(holdings)) { const p = px(t, i); if (p) portVal += u * p; }

@@ -28337,8 +28337,8 @@ function KellyCalcModule() {
 const CEDEAR_VARIANTS = [
   { id: "w5", label: "Semanal", desc: "rota cada 5 ruedas, costo Cocos", color: "#60a5fa" },
   { id: "w10", label: "Quincenal", desc: "rota cada 10 ruedas, costo Cocos", color: "#a78bfa" },
-  { id: "m21", label: "Mensual", desc: "rota cada 21 ruedas, costo Cocos", color: "#34d399" },
-  { id: "iol21", label: "Mensual vía IOL", desc: "rota cada 21 ruedas, comisión IOL Gold ~0,8%/lado", color: "#f59e0b" },
+  { id: "m21", label: "Mensual", desc: "rota el 17 de cada mes, costo Cocos", color: "#34d399" },
+  { id: "iol21", label: "Mensual vía IOL", desc: "rota el 17 de cada mes, comisión IOL Gold ~0,8%/lado", color: "#f59e0b" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════
