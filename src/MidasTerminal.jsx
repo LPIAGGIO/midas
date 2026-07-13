@@ -258,7 +258,6 @@ const NAV = [
       { id: "dividendos", label: "Dividendos", icon: Coins },
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
       { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
-      { id: "lab-riesgo", label: "Lab · Riesgo A/B", icon: Sigma },
     ],
   },
 ];
@@ -1553,8 +1552,6 @@ function MidasApp({ allowedModules = null }) {
               <SimuladorVentaCedearModule key={active} onPopOut={() => openCedearPip("venta")} pipActive={cedearPip?.view === "venta"} />
             ) : active === "paper-cedears" ? (
               <PaperCedearsModule key={active} />
-            ) : active === "lab-riesgo" ? (
-              <MomentumRiskModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
             ) : active === "calc-montecarlo" ? (
@@ -28562,56 +28559,6 @@ function MomentumRiskPanel({ eq }) {
   );
 }
 
-// Pantalla propia que envuelve el panel de riesgo (header + curva del A/B +
-// MomentumRiskPanel). Es un modulo normal del nav (id lab-riesgo): la
-// visibilidad se controla por allowed_modules desde /admin, no hardcodeada.
-function MomentumRiskModule() {
-  const [eq, setEq] = useState(null);
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        let all = [], from = 0;
-        for (;;) {
-          const { data: d, error } = await supabase.from("paper_cedear_equity")
-            .select("d,variant,equity,bh_equity,is_live").order("d", { ascending: true }).range(from, from + 999);
-          if (error || !d || !d.length) break;
-          all = all.concat(d); if (d.length < 1000) break; from += 1000;
-        }
-        if (mounted) setEq(all);
-      } catch { if (mounted) setEq([]); }
-    })();
-    return () => { mounted = false; };
-  }, []);
-
-  if (!eq) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando el A/B…</div>;
-  if (!eq.length) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin datos del paper todavía.</div>;
-
-  const byV = {};
-  for (const r of eq) (byV[r.variant || "m21"] = byV[r.variant || "m21"] || []).push(r);
-  for (const k in byV) byV[k].sort((a, b) => (a.d < b.d ? -1 : 1));
-  const curve = [
-    ...CEDEAR_VARIANTS.map((v) => ({ label: v.label, color: v.color, data: (byV[v.id] || []).map((r) => ({ fecha: r.d, valor: Number(r.equity) })) })),
-    { label: "Comprar y holdear", color: C.dim, data: (byV.m21 || byV.iol21 || []).map((r) => ({ fecha: r.d, valor: Number(r.bh_equity) })) },
-  ];
-  const ref = byV.m21 || Object.values(byV)[0] || [];
-  const fmtD = (iso) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "—");
-
-  return (
-    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Lab · Riesgo del A/B</h1>
-      <p style={{ fontSize: 12.5, color: C.muted, margin: "6px 0 16px", maxWidth: 840, lineHeight: 1.5 }}>
-        Momentum CEDEARs vs comprar-y-holdear · {fmtD(ref[0]?.d)} → {fmtD(ref[ref.length - 1]?.d)} · {ref.length} ruedas.
-        Califica el A/B con el instrumental de López de Prado: Sharpe/Sortino, Information Ratio vs comprar-y-holdear y el deflated Sharpe (descuenta el haber probado 4 variantes).
-      </p>
-      <div style={{ background: C.panel, borderRadius: 10, padding: "10px 12px", marginBottom: 4 }}>
-        <BcraMultiLine lines={curve} height={230} fmtY={(n) => Number(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })} />
-      </div>
-      <MomentumRiskPanel eq={eq} />
-    </div>
-  );
-}
-
 function PaperCedearsModule() {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
@@ -29089,6 +29036,8 @@ function PaperCedearsModule() {
           <div style={{ padding: 30, textAlign: "center", color: C.dim, fontSize: 12 }}>Sin datos de backtest todavía.</div>
         )}
       </div>
+
+      <MomentumRiskPanel eq={data.eq} />
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
         El backtest de 10 años corre el mismo motor de momentum sobre precios reales (Yahoo, 30 acciones USA). Bate a comprar y holdear, pero cae en una década muy alcista de las tecnológicas y con sesgo de supervivencia del universo — el momentum sufre en mercados laterales o bajistas. Las tarjetas de arriba son el forward-test EN VIVO (~13 meses desde el 15/06); el gráfico es el histórico. Simulación, no opera plata real ni es recomendación.
