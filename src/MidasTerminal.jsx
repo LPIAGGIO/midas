@@ -28167,6 +28167,46 @@ const MC_BUCKETS = {
 };
 const MC_CONTADO = ["bond_ars", "bond_usd", "on", "stock", "cedear", "fci"];
 
+// Campo numérico a nivel módulo (NO dentro del render — si no, se remonta en
+// cada tecla y pierde el foco → solo funcionan las flechas). Mantiene su propio
+// texto para poder tipear decimales/coma; `money` activa máscara de miles.
+function MCField({ label, value, onChange, suffix, hint, onReset, money }) {
+  const [txt, setTxt] = useState("");
+  useEffect(() => {
+    const parsed = money ? Number(String(txt).replace(/\./g, "")) : Number(String(txt).replace(",", "."));
+    if (!(Number.isFinite(parsed) && parsed === value)) {
+      setTxt(value == null || value === "" ? "" : (money ? Number(value).toLocaleString("es-AR") : String(value)));
+    }
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handle = (e) => {
+    const t = e.target.value;
+    if (money) {
+      const digits = t.replace(/[^\d]/g, "");
+      const n = digits === "" ? 0 : Number(digits);
+      setTxt(digits === "" ? "" : n.toLocaleString("es-AR"));
+      onChange(n);
+    } else {
+      setTxt(t);
+      const n = Number(t.replace(",", "."));
+      if (t !== "" && Number.isFinite(n)) onChange(n);
+    }
+  };
+  return (
+    <div style={{ flex: "1 1 130px", minWidth: 120 }}>
+      <label style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.dim, marginBottom: 5 }}>
+        <span>{label}</span>
+        {onReset && <span onClick={onReset} style={{ cursor: "pointer", color: C.accent, fontSize: 10 }}>auto</span>}
+      </label>
+      <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.border}`, borderRadius: 6 }}>
+        <input type="text" inputMode={money ? "numeric" : "decimal"} value={txt} onChange={handle}
+          style={{ flex: 1, padding: "8px 10px", fontSize: 14, background: "transparent", color: C.text, border: "none", outline: "none", width: "100%", fontVariantNumeric: "tabular-nums" }} />
+        {suffix && <span style={{ padding: "0 10px", fontSize: 12, color: C.dim, whiteSpace: "nowrap" }}>{suffix}</span>}
+      </div>
+      {hint && <div style={{ fontSize: 9.5, color: C.dim, marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
+}
+
 function CarteraMonteCarloModule() {
   const { positions, loading } = useUserPositions();
   const { fx } = useDashboardFx();
@@ -28266,20 +28306,6 @@ function CarteraMonteCarloModule() {
   const fMoney = (arsVal) => (arsVal == null || !Number.isFinite(arsVal) ? "—" : `${cur === "USD" ? "US$ " : "$"}${Math.round(arsVal * fxFactor).toLocaleString("es-AR")}`);
   const fPctN = (n) => (n == null || !Number.isFinite(n) ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(1)}%`);
 
-  const Field = ({ label, value, setValue, suffix, step = 1, hint, onReset }) => (
-    <div style={{ flex: "1 1 130px", minWidth: 120 }}>
-      <label style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.dim, marginBottom: 5 }}>
-        <span>{label}</span>
-        {onReset && <span onClick={onReset} style={{ cursor: "pointer", color: C.accent, fontSize: 10 }}>auto</span>}
-      </label>
-      <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.border}`, borderRadius: 6 }}>
-        <input type="number" value={value} step={step} onChange={(e) => setValue(e.target.value === "" ? 0 : Number(e.target.value))}
-          style={{ flex: 1, padding: "8px 10px", fontSize: 14, background: "transparent", color: C.text, border: "none", outline: "none", width: "100%", fontVariantNumeric: "tabular-nums" }} />
-        {suffix && <span style={{ padding: "0 10px", fontSize: 12, color: C.dim }}>{suffix}</span>}
-      </div>
-      {hint && <div style={{ fontSize: 9.5, color: C.dim, marginTop: 3 }}>{hint}</div>}
-    </div>
-  );
   const Res = ({ label, value, color, sub }) => (
     <div style={{ flex: "1 1 140px", minWidth: 130, border: `1px solid ${C.border}`, borderRadius: 8, padding: "11px 13px" }}>
       <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 5 }}>{label}</div>
@@ -28343,12 +28369,12 @@ function CarteraMonteCarloModule() {
       </div>
 
       <div className="flex" style={{ gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <Field label="Horizonte" value={horizonte} setValue={setHorizonte} suffix="meses" />
-        <Field label={`Aporte mensual`} value={aporte} setValue={setAporte} suffix={cur === "USD" ? "US$" : "$"} step={cur === "USD" ? 100 : 100000} hint={aporte > 0 ? `${fMoney((aporte / (fxFactor || 1)) * sim.H)} en ${sim.H} meses` : "opcional"} />
-        <Field label="Retorno esperado (µ)" value={Number(mu.toFixed(1))} setValue={(v) => setMuOv(v)} suffix="%/año" onReset={muOv != null ? () => setMuOv(null) : null} hint={muOv != null ? "editado" : "de tu cartera"} />
-        <Field label="Volatilidad (σ)" value={Number(sg.toFixed(1))} setValue={(v) => setSgOv(v)} suffix="%/año" onReset={sgOv != null ? () => setSgOv(null) : null} hint={sgOv != null ? "editado" : "de tu cartera"} />
-        <Field label="Correlación entre activos" value={rho} setValue={setRho} suffix="%" hint="afecta el σ del combo" />
-        <Field label="Simulaciones" value={nsims} setValue={setNsims} step={500} />
+        <MCField label="Horizonte" value={horizonte} onChange={setHorizonte} suffix="meses" />
+        <MCField label={`Aporte mensual (${cur})`} value={aporte} onChange={setAporte} suffix={cur === "USD" ? "US$" : "$"} money hint={aporte > 0 ? `${fMoney((aporte / (fxFactor || 1)) * sim.H)} en ${sim.H} meses` : "opcional · en " + cur} />
+        <MCField label="Retorno esperado (µ)" value={Number(mu.toFixed(1))} onChange={(v) => setMuOv(v)} suffix="%/año" onReset={muOv != null ? () => setMuOv(null) : null} hint={muOv != null ? "editado" : "de tu cartera"} />
+        <MCField label="Volatilidad (σ)" value={Number(sg.toFixed(1))} onChange={(v) => setSgOv(v)} suffix="%/año" onReset={sgOv != null ? () => setSgOv(null) : null} hint={sgOv != null ? "editado" : "de tu cartera"} />
+        <MCField label="Correlación entre activos" value={rho} onChange={setRho} suffix="%" hint="afecta el σ del combo" />
+        <MCField label="Simulaciones" value={nsims} onChange={setNsims} />
       </div>
 
       <div className="flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
