@@ -258,6 +258,7 @@ const NAV = [
       { id: "dividendos", label: "Dividendos", icon: Coins },
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
       { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
+      { id: "lab-riesgo", label: "Lab · Riesgo A/B", icon: Sigma, ownerOnly: true },
     ],
   },
 ];
@@ -1552,6 +1553,8 @@ function MidasApp({ allowedModules = null }) {
               <SimuladorVentaCedearModule key={active} onPopOut={() => openCedearPip("venta")} pipActive={cedearPip?.view === "venta"} />
             ) : active === "paper-cedears" ? (
               <PaperCedearsModule key={active} />
+            ) : active === "lab-riesgo" ? (
+              <MomentumRiskModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
             ) : active === "calc-montecarlo" ? (
@@ -28337,6 +28340,257 @@ const CEDEAR_VARIANTS = [
   { id: "m21", label: "Mensual", desc: "rota cada 21 ruedas, costo Cocos", color: "#34d399" },
   { id: "iol21", label: "Mensual vía IOL", desc: "rota cada 21 ruedas, comisión IOL Gold ~0,8%/lado", color: "#f59e0b" },
 ];
+
+// ═══════════════════════════════════════════════════════════════════════
+// MomentumRiskModule — "Lab · Riesgo del A/B" (ownerOnly, solo el owner lo ve).
+//
+// Califica las 4 variantes del paper (paper_cedear_equity) con el instrumental
+// de López de Prado: Sharpe/Sortino/max drawdown, Information Ratio vs
+// comprar-y-holdear, y sobre todo el DEFLATED SHARPE RATIO — que descuenta el
+// haber probado 4 variantes (selection bias). Responde la pregunta que importa:
+// ¿el momentum le gana DE VERDAD al B&H, o es ruido de haber probado varias?
+//
+// Clave metodológica: el Sharpe crudo en ARS no dice nada (todo tiene drift
+// nominal enorme, rf de caución ~40% TNA). Por eso el edge real se mide sobre
+// el EXCESO vs comprar-y-holdear (misma beta ARS/CEDEAR de los dos lados → el
+// exceso aísla la habilidad del momentum). El deflated se calcula sobre ese IR.
+// ═══════════════════════════════════════════════════════════════════════
+const _TRAD_YR = 252;
+const _EULER = 0.5772156649015329;
+function _mean(a) { return a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0; }
+function _std(a, ddof = 1) {
+  if (a.length <= ddof) return 0;
+  const m = _mean(a); const v = a.reduce((s, x) => s + (x - m) * (x - m), 0) / (a.length - ddof);
+  return Math.sqrt(Math.max(v, 0));
+}
+function _downStd(a) { // desvío de la cola negativa (target 0), para Sortino
+  if (!a.length) return 0;
+  const v = a.reduce((s, x) => s + (x < 0 ? x * x : 0), 0) / a.length;
+  return Math.sqrt(Math.max(v, 0));
+}
+function _skewKurt(a) { // skew y kurtosis poblacionales (kurt normal = 3)
+  const n = a.length; if (n < 3) return { skew: 0, kurt: 3 };
+  const m = _mean(a); const sd = Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / n);
+  if (sd === 0) return { skew: 0, kurt: 3 };
+  const skew = a.reduce((s, x) => s + Math.pow((x - m) / sd, 3), 0) / n;
+  const kurt = a.reduce((s, x) => s + Math.pow((x - m) / sd, 4), 0) / n;
+  return { skew, kurt };
+}
+function _normCdf(x) { // Abramowitz-Stegun 26.2.17
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989422804014327 * Math.exp(-x * x / 2);
+  const p = d * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  return x > 0 ? 1 - p : p;
+}
+function _normInv(p) { // Acklam
+  if (p <= 0) return -Infinity; if (p >= 1) return Infinity;
+  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02, 1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
+  const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00, -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00];
+  const pl = 0.02425, ph = 1 - pl; let q, r;
+  if (p < pl) { q = Math.sqrt(-2 * Math.log(p)); return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+  if (p <= ph) { q = p - 0.5; r = q * q; return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1); }
+  q = Math.sqrt(-2 * Math.log(1 - p)); return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+}
+// Probabilistic Sharpe Ratio: P(SR_real > SR_bench) dado skew/kurt de la serie.
+// sr y srBench son por-período (diario). T = nro de observaciones.
+function _psr(sr, srBench, T, skew, kurt) {
+  const denom = Math.sqrt(Math.max(1 - skew * sr + ((kurt - 1) / 4) * sr * sr, 1e-9));
+  return _normCdf(((sr - srBench) * Math.sqrt(Math.max(T - 1, 1))) / denom);
+}
+
+function MomentumRiskModule() {
+  const [eq, setEq] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        let all = [], from = 0;
+        for (;;) {
+          const { data: d, error } = await supabase.from("paper_cedear_equity")
+            .select("d,variant,equity,bh_equity,is_live").order("d", { ascending: true }).range(from, from + 999);
+          if (error || !d || !d.length) break;
+          all = all.concat(d); if (d.length < 1000) break; from += 1000;
+        }
+        if (mounted) setEq(all);
+      } catch { if (mounted) setEq([]); }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const model = useMemo(() => {
+    if (!eq || !eq.length) return null;
+    const byVar = {};
+    for (const r of eq) (byVar[r.variant || "m21"] = byVar[r.variant || "m21"] || []).push(r);
+    for (const k in byVar) byVar[k].sort((a, b) => (a.d < b.d ? -1 : 1));
+
+    const stats = (E) => { // métricas de una curva de equity (array de números)
+      const rets = []; for (let i = 1; i < E.length; i++) rets.push(E[i] / E[i - 1] - 1);
+      let peak = -Infinity, dd = 0; for (const e of E) { if (e > peak) peak = e; if (peak > 0) dd = Math.min(dd, e / peak - 1); }
+      const shD = _std(rets) > 0 ? _mean(rets) / _std(rets) : 0;
+      const soD = _downStd(rets) > 0 ? _mean(rets) / _downStd(rets) : 0;
+      return { rets, sharpe: shD * Math.sqrt(_TRAD_YR), sortino: soD * Math.sqrt(_TRAD_YR), maxDD: dd * 100, shD };
+    };
+
+    const rowsRef = byVar.m21 || Object.values(byVar)[0] || [];
+    const bhE = rowsRef.map((r) => Number(r.bh_equity));
+    const bhStats = stats(bhE);
+    const span0 = rowsRef.length > 1 ? (new Date(rowsRef[rowsRef.length - 1].d) - new Date(rowsRef[0].d)) / 86400000 : 0;
+    const cagrOf = (E, span) => (span > 30 && E.length && E[0] > 0) ? (Math.pow(E[E.length - 1] / E[0], 365 / span) - 1) * 100 : null;
+
+    // Por variante: exceso diario vs B&H (mismo día). El IR se computa sobre eso.
+    const perVar = CEDEAR_VARIANTS.map((v) => {
+      const rows = byVar[v.id] || [];
+      const E = rows.map((r) => Number(r.equity));
+      const B = rows.map((r) => Number(r.bh_equity));
+      const s = stats(E);
+      const ex = []; for (let i = 1; i < E.length; i++) ex.push((E[i] / E[i - 1] - 1) - (B[i] / B[i - 1] - 1));
+      const irD = _std(ex) > 0 ? _mean(ex) / _std(ex) : 0;
+      const { skew, kurt } = _skewKurt(ex);
+      const span = rows.length > 1 ? (new Date(rows[rows.length - 1].d) - new Date(rows[0].d)) / 86400000 : 0;
+      const liveStart = rows.find((r) => r.is_live)?.d || null;
+      const liveRows = rows.filter((r) => r.is_live);
+      const liveRet = liveRows.length > 1 ? (Number(liveRows[liveRows.length - 1].equity) / Number(liveRows[0].equity) - 1) * 100 : null;
+      const liveBh = liveRows.length > 1 ? (Number(liveRows[liveRows.length - 1].bh_equity) / Number(liveRows[0].bh_equity) - 1) * 100 : null;
+      return {
+        ...v, rows, T: ex.length, totRet: E.length ? (E[E.length - 1] / E[0] - 1) * 100 : 0,
+        cagr: cagrOf(E, span), ...s, irD, irAnn: irD * Math.sqrt(_TRAD_YR), exSkew: skew, exKurt: kurt,
+        liveStart, liveRet, liveBh, liveDays: liveRows.length,
+      };
+    }).filter((p) => p.rows.length > 2);
+
+    // Deflated Sharpe sobre el IR: se prueba N variantes → hay que descontar
+    // el máximo esperado por azar. SR0* = sqrt(Var(IRs)) · [(1-γ)·Z⁻¹(1-1/N) + γ·Z⁻¹(1-1/(N·e))].
+    const N = perVar.length;
+    const irList = perVar.map((p) => p.irD);
+    const vIR = _std(irList, 1);
+    const sr0 = N > 1 ? vIR * ((1 - _EULER) * _normInv(1 - 1 / N) + _EULER * _normInv(1 - 1 / (N * Math.E))) : 0;
+    // el "ganador" = mayor IR diario
+    const best = perVar.reduce((a, b) => (a.irD >= b.irD ? a : b), perVar[0]);
+    const psrRaw = best ? _psr(best.irD, 0, best.T, best.exSkew, best.exKurt) : 0;      // vs 0, sin deflactar
+    const dsr = best ? _psr(best.irD, sr0, best.T, best.exSkew, best.exKurt) : 0;        // deflactado por N trials
+
+    return { perVar, bhStats, bhCagr: cagrOf(bhE, span0), bhTot: bhE.length ? (bhE[bhE.length - 1] / bhE[0] - 1) * 100 : 0, N, sr0, sr0Ann: sr0 * Math.sqrt(_TRAD_YR), best, psrRaw, dsr, from: rowsRef[0]?.d, to: rowsRef[rowsRef.length - 1]?.d, days: rowsRef.length };
+  }, [eq]);
+
+  if (!eq) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando el A/B…</div>;
+  if (!model) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin datos del paper todavía.</div>;
+
+  const fmtD = (iso) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "—");
+  const sPct = (n, dg = 1) => (n == null ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(dg)}%`);
+  const col = (n) => (n == null ? C.muted : n >= 0 ? C.green : C.red);
+  const num = (n, dg = 2) => (n == null || !Number.isFinite(n) ? "—" : n.toFixed(dg));
+
+  const curve = [
+    ...model.perVar.map((p) => ({ label: p.label, color: p.color, data: p.rows.map((r) => ({ fecha: r.d, valor: Number(r.equity) })) })),
+    { label: "Comprar y holdear", color: C.dim, data: (model.perVar[0]?.rows || []).map((r) => ({ fecha: r.d, valor: Number(r.bh_equity) })) },
+  ];
+
+  const dsrPct = model.dsr * 100, rawPct = model.psrRaw * 100;
+  const verdict = model.dsr >= 0.95
+    ? { txt: "El outperformance del momentum es estadísticamente REAL (≥95%), aun descontando las 4 variantes probadas.", color: C.green }
+    : model.dsr >= 0.90
+      ? { txt: "El outperformance es probablemente real (90–95%), pero está en zona de borde. Más track record lo confirma.", color: C.yellow }
+      : { txt: "No alcanza significancia (<90%): el margen sobre comprar-y-holdear todavía puede ser ruido de haber probado 4 variantes.", color: C.red };
+
+  const th = { textAlign: "right", padding: "7px 10px", fontSize: 10, color: C.dim, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4, whiteSpace: "nowrap" };
+  const td = { textAlign: "right", padding: "9px 10px", fontSize: 12.5, color: C.text, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" };
+
+  return (
+    <div style={{ padding: "18px 22px", maxWidth: 1080, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>Lab · Riesgo del A/B</h2>
+        <span style={{ fontSize: 10, color: C.accent, border: `1px solid ${C.accentBorder}`, padding: "1px 6px", borderRadius: 3 }}>SOLO VOS</span>
+      </div>
+      <p style={{ fontSize: 12.5, color: C.muted, margin: "6px 0 2px", lineHeight: 1.5 }}>
+        Momentum CEDEARs vs comprar-y-holdear · {fmtD(model.from)} → {fmtD(model.to)} · {model.days} ruedas.
+        El edge se mide sobre el <b style={{ color: C.text }}>exceso vs B&amp;H</b> (misma beta ARS de los dos lados), no sobre el Sharpe crudo.
+      </p>
+
+      <div style={{ background: C.panel, borderRadius: 10, padding: "10px 12px", margin: "14px 0" }}>
+        <BcraMultiLine lines={curve} height={230} fmtY={(n) => Number(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })} />
+      </div>
+
+      {/* Deflated Sharpe — el veredicto */}
+      <div style={{ background: C.deep, border: `1px solid ${verdict.color}44`, borderRadius: 10, padding: "16px 18px", margin: "6px 0 18px" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 22, alignItems: "center" }}>
+          <div style={{ minWidth: 150 }}>
+            <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Deflated Sharpe</div>
+            <div style={{ fontSize: 34, fontWeight: 800, color: verdict.color, lineHeight: 1.05, marginTop: 2 }}>{dsrPct.toFixed(1)}%</div>
+            <div style={{ fontSize: 11, color: C.muted }}>prob. de que el edge sea real</div>
+          </div>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{verdict.txt}</div>
+            <div style={{ fontSize: 11, color: C.dim, marginTop: 8, lineHeight: 1.6 }}>
+              Ganadora: <b style={{ color: model.best.color }}>{model.best.label}</b> · IR anualizado {num(model.best.irAnn)} ·
+              sin deflactar sería {rawPct.toFixed(1)}% (el descuento por probar {model.N} variantes se come {(rawPct - dsrPct).toFixed(1)} pts) ·
+              umbral de azar SR₀* {num(model.sr0Ann)} anual.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabla de métricas por variante */}
+      <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${C.borderStrong}` }}>
+              <th style={{ ...th, textAlign: "left" }}>Variante</th>
+              <th style={th}>Ret. total</th>
+              <th style={th}>CAGR</th>
+              <th style={th}>Sharpe</th>
+              <th style={th}>Sortino</th>
+              <th style={th}>Max DD</th>
+              <th style={th}>IR vs B&amp;H</th>
+              <th style={th}>Live desde</th>
+            </tr>
+          </thead>
+          <tbody>
+            {model.perVar.map((p) => (
+              <tr key={p.id} style={{ borderBottom: `1px solid ${C.border}`, background: p.id === model.best.id ? C.accentSoft : "transparent" }}>
+                <td style={{ ...td, textAlign: "left" }}>
+                  <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: p.color, marginRight: 8 }} />
+                  {p.label}{p.id === model.best.id && <span style={{ fontSize: 9, color: C.accent, marginLeft: 6 }}>★</span>}
+                  <div style={{ fontSize: 10, color: C.dim, marginLeft: 16 }}>{p.desc}</div>
+                </td>
+                <td style={{ ...td, color: col(p.totRet), fontWeight: 600 }}>{sPct(p.totRet)}</td>
+                <td style={{ ...td, color: col(p.cagr) }}>{sPct(p.cagr)}</td>
+                <td style={td}>{num(p.sharpe)}</td>
+                <td style={td}>{num(p.sortino)}</td>
+                <td style={{ ...td, color: C.red }}>{sPct(p.maxDD)}</td>
+                <td style={{ ...td, color: col(p.irAnn), fontWeight: 600 }}>{num(p.irAnn)}</td>
+                <td style={{ ...td, fontSize: 11, color: C.muted }}>
+                  {p.liveStart ? <>{fmtD(p.liveStart)}<div style={{ fontSize: 10, color: col(p.liveRet) }}>{sPct(p.liveRet)} vs {sPct(p.liveBh)}</div></> : "—"}
+                </td>
+              </tr>
+            ))}
+            <tr style={{ borderTop: `1px solid ${C.borderStrong}` }}>
+              <td style={{ ...td, textAlign: "left", color: C.muted }}>
+                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: C.dim, marginRight: 8 }} />
+                Comprar y holdear <span style={{ fontSize: 10, color: C.dim }}>(benchmark)</span>
+              </td>
+              <td style={{ ...td, color: col(model.bhTot) }}>{sPct(model.bhTot)}</td>
+              <td style={{ ...td, color: col(model.bhCagr) }}>{sPct(model.bhCagr)}</td>
+              <td style={{ ...td, color: C.muted }}>{num(model.bhStats.sharpe)}</td>
+              <td style={{ ...td, color: C.muted }}>{num(model.bhStats.sortino)}</td>
+              <td style={{ ...td, color: C.red }}>{sPct(model.bhStats.maxDD)}</td>
+              <td style={{ ...td, color: C.dim }}>—</td>
+              <td style={{ ...td, color: C.dim }}>—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p style={{ fontSize: 10.5, color: C.dim, marginTop: 12, lineHeight: 1.6 }}>
+        Sharpe/Sortino anualizados (252 ruedas, rf=0 — en ARS el Sharpe crudo infla, por eso el número que manda es el <b style={{ color: C.muted }}>IR vs B&amp;H</b>).
+        El <b style={{ color: C.muted }}>Deflated Sharpe</b> (Bailey &amp; López de Prado) toma el IR de la mejor variante y lo penaliza por haber probado {model.N} → si el % es alto, el momentum le gana al B&amp;H por skill y no por suerte de selección.
+        La mayoría de las ruedas son backtest; la columna <b style={{ color: C.muted }}>Live desde</b> es la parte forward (plata/paper real), todavía corta para significancia propia.
+      </p>
+    </div>
+  );
+}
 
 function PaperCedearsModule() {
   const [data, setData] = useState(null);
