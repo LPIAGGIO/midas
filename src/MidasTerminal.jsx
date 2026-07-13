@@ -254,6 +254,7 @@ const NAV = [
       { id: "libro-operaciones", label: "Libro de operaciones", icon: BookOpen },
       { id: "pnl-instrumento", label: "P&L por Instrumento", icon: BarChart3 },
       { id: "reporte-cartera", label: "Reporte de cartera", icon: FileText },
+      { id: "montecarlo-cartera", label: "Monte Carlo · Cartera", icon: Activity },
       { id: "cedear-usa", label: "CEDEARs · Precio USA", icon: Globe },
       { id: "dividendos", label: "Dividendos", icon: Coins },
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
@@ -1556,6 +1557,8 @@ function MidasApp({ allowedModules = null }) {
               <KellyCalcModule key={active} />
             ) : active === "calc-montecarlo" ? (
               <MonteCarloModule key={active} />
+            ) : active === "montecarlo-cartera" ? (
+              <CarteraMonteCarloModule key={active} />
             ) : active === "semaforo-merval" ? (
               <SemaforoMervalModule key={active} />
             ) : active === "fundamentals-cedears" ? (
@@ -28135,6 +28138,247 @@ function MonteCarloModule() {
 
       <p style={{ fontSize: 11.5, color: C.dim, margin: "16px 2px 0", lineHeight: 1.6, maxWidth: 760 }}>
         <strong style={{ color: C.muted }}>Cómo leerlo:</strong> la <strong>mediana</strong> es el año típico (no el del backtest, que suele ser uno bueno). Mirá la <strong>prob. de perder</strong> y la <strong>de fundirte</strong> antes que el mejor caso. Subí el <strong>% del capital por operación</strong> y vas a ver cómo se estira todo: más arriba posible, pero también más prob. de ruina — por eso Kelly recomienda usar una fracción, no todo. Ojo: esto asume que el futuro se parece al perfil que cargaste; no anticipa un cambio de régimen.
+      </p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CarteraMonteCarloModule — Monte Carlo sobre la CARTERA REAL de LP.
+//
+// Toma la tenencia consolidada (misma valuación que el Reporte de cartera:
+// consolidatePositions + precios en vivo), la bucketea por tipo de instrumento,
+// y de esa composición deriva un µ y σ ANUALES por default (editables). Después
+// simula N caminos GBM mensuales del valor de la cartera, con aporte mensual
+// opcional (el "agrego USD X/mes" de LP), y muestra el abanico: bandas por mes,
+// distribución final, prob de terminar por debajo de lo puesto y VaR.
+//
+// Honesto sobre supuestos: no hay serie histórica limpia para bonos/ONs/letras
+// AR, así que el µ/σ salen de supuestos por bucket (editables), no de historia.
+// La correlación entre buckets es un único parámetro ρ (default 0,4).
+// ═══════════════════════════════════════════════════════════════════════
+const MC_BUCKETS = {
+  stock:    { label: "Acciones AR", mu: 15, sg: 40 },
+  cedear:   { label: "CEDEARs",     mu: 12, sg: 35 },
+  bond_ars: { label: "Bonos ARS",   mu: 10, sg: 14 },
+  on:       { label: "ONs",         mu: 9,  sg: 10 },
+  bond_usd: { label: "Bonos USD",   mu: 7,  sg: 10 },
+  fci:      { label: "FCI",         mu: 8,  sg: 6  },
+};
+const MC_CONTADO = ["bond_ars", "bond_usd", "on", "stock", "cedear", "fci"];
+
+function CarteraMonteCarloModule() {
+  const { positions, loading } = useUserPositions();
+  const { fx } = useDashboardFx();
+  const cclMid = fx?.ccl?.mid ?? null;
+  const bondPrices = useBondPrices()?.prices || {};
+  const stockPrices = useStockPrices()?.prices || {};
+  const fciPrices = useFciPrices(positions)?.prices || {};
+  const futureTickers = useMemo(
+    () => Array.from(new Set((positions || []).filter((p) => p.instrument_type === "future").map((p) => (p.ticker || "").toUpperCase().trim()))),
+    [positions]
+  );
+  const futurePrices = useFuturePrices(futureTickers)?.prices || {};
+
+  // Composición real de la cartera (valor a mercado por tipo), misma valuación
+  // que el Reporte de cartera.
+  const compo = useMemo(() => {
+    if (!positions?.length) return { total: 0, byType: {} };
+    let cons = [];
+    const src = positions.filter((p) => p.instrument_type !== "caucion");
+    try { cons = consolidatePositions(src, bondPrices, futurePrices, fciPrices, stockPrices) || []; }
+    catch { return { total: 0, byType: {} }; }
+    const byType = {};
+    let total = 0;
+    for (const g of cons) {
+      if (!g || g.isClosed || !MC_CONTADO.includes(g.instrument_type)) continue;
+      if (!g.netQty || g.netQty <= 0) continue;
+      const v = Number(g.valueAtMarket);
+      if (!Number.isFinite(v) || v <= 0) continue;
+      byType[g.instrument_type] = (byType[g.instrument_type] || 0) + v;
+      total += v;
+    }
+    return { total, byType };
+  }, [positions, bondPrices, futurePrices, fciPrices, stockPrices]);
+
+  // Parámetros editables
+  const [horizonte, setHorizonte] = useState(12);   // meses
+  const [aporte, setAporte] = useState(0);           // aporte mensual (en la moneda de display)
+  const [nsims, setNsims] = useState(2000);
+  const [rho, setRho] = useState(40);                // correlación cruzada entre buckets (%)
+  const [muOv, setMuOv] = useState(null);            // override de µ (null = usa el derivado)
+  const [sgOv, setSgOv] = useState(null);
+  const [cur, setCur] = useState("ARS");             // moneda de display: ARS | USD
+
+  // µ/σ derivados de la composición
+  const derived = useMemo(() => {
+    const { total, byType } = compo;
+    if (!total) return { mu: 12, sg: 25, rows: [] };
+    const rows = MC_CONTADO.filter((t) => byType[t]).map((t) => ({
+      type: t, label: MC_BUCKETS[t].label, w: byType[t] / total, mu: MC_BUCKETS[t].mu, sg: MC_BUCKETS[t].sg, val: byType[t],
+    }));
+    const muP = rows.reduce((s, r) => s + r.w * r.mu, 0);
+    const r = Math.min(1, Math.max(0, rho / 100));
+    let varP = 0;
+    for (const a of rows) for (const b of rows) {
+      const corr = a.type === b.type ? 1 : r;
+      varP += a.w * b.w * a.sg * b.sg * corr;
+    }
+    return { mu: muP, sg: Math.sqrt(Math.max(varP, 0)), rows };
+  }, [compo, rho]);
+
+  const mu = muOv ?? derived.mu;   // % anual
+  const sg = sgOv ?? derived.sg;   // % anual
+
+  const fxFactor = cur === "USD" && cclMid ? 1 / cclMid : 1;
+  const V0ars = compo.total;
+
+  const sim = useMemo(() => {
+    if (!(V0ars > 0)) return null;
+    const H = Math.max(1, Math.min(120, Math.round(horizonte)));
+    const N = Math.max(200, Math.min(10000, Math.round(nsims)));
+    const muM = (mu / 100) / 12, sgM = (sg / 100) / Math.sqrt(12);
+    const contribArs = Math.max(0, aporte) / (fxFactor || 1); // el aporte se ingresa en moneda de display → a ARS
+    const randn = () => { let u = 0, v = 0; while (u === 0) u = Math.random(); while (v === 0) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+    const monthVals = Array.from({ length: H + 1 }, () => new Float64Array(N));
+    for (let s = 0; s < N; s++) {
+      let v = V0ars; monthVals[0][s] = v;
+      for (let m = 1; m <= H; m++) {
+        v = v * Math.exp((muM - 0.5 * sgM * sgM) + sgM * randn()) + contribArs;
+        if (v < 0) v = 0;
+        monthVals[m][s] = v;
+      }
+    }
+    const pct = (mv, p) => { const a = Float64Array.from(mv).sort(); return a[Math.min(a.length - 1, Math.floor(p / 100 * a.length))]; };
+    const bands = monthVals.map((mv) => ({ p10: pct(mv, 10), p25: pct(mv, 25), p50: pct(mv, 50), p75: pct(mv, 75), p90: pct(mv, 90) }));
+    const finals = monthVals[H];
+    const invested = V0ars + contribArs * H;
+    const fin = Float64Array.from(finals).sort();
+    const fp = (p) => fin[Math.min(fin.length - 1, Math.floor(p / 100 * fin.length))];
+    let below = 0, sum = 0; for (const x of finals) { if (x < invested) below++; sum += x; }
+    return {
+      H, N, V0: V0ars, invested, bands,
+      p5: fp(5), p50: fp(50), p95: fp(95),
+      probLoss: below / N * 100, mean: sum / N, var95: invested - fp(5),
+    };
+  }, [V0ars, horizonte, nsims, mu, sg, aporte, fxFactor]);
+
+  const fMoney = (arsVal) => (arsVal == null || !Number.isFinite(arsVal) ? "—" : `${cur === "USD" ? "US$ " : "$"}${Math.round(arsVal * fxFactor).toLocaleString("es-AR")}`);
+  const fPctN = (n) => (n == null || !Number.isFinite(n) ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(1)}%`);
+
+  const Field = ({ label, value, setValue, suffix, step = 1, hint, onReset }) => (
+    <div style={{ flex: "1 1 130px", minWidth: 120 }}>
+      <label style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.dim, marginBottom: 5 }}>
+        <span>{label}</span>
+        {onReset && <span onClick={onReset} style={{ cursor: "pointer", color: C.accent, fontSize: 10 }}>auto</span>}
+      </label>
+      <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.border}`, borderRadius: 6 }}>
+        <input type="number" value={value} step={step} onChange={(e) => setValue(e.target.value === "" ? 0 : Number(e.target.value))}
+          style={{ flex: 1, padding: "8px 10px", fontSize: 14, background: "transparent", color: C.text, border: "none", outline: "none", width: "100%", fontVariantNumeric: "tabular-nums" }} />
+        {suffix && <span style={{ padding: "0 10px", fontSize: 12, color: C.dim }}>{suffix}</span>}
+      </div>
+      {hint && <div style={{ fontSize: 9.5, color: C.dim, marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
+  const Res = ({ label, value, color, sub }) => (
+    <div style={{ flex: "1 1 140px", minWidth: 130, border: `1px solid ${C.border}`, borderRadius: 8, padding: "11px 13px" }}>
+      <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 5 }}>{label}</div>
+      <div style={{ fontSize: 17, fontWeight: 600, color: color || C.text, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando cartera…</div>;
+  if (!(V0ars > 0)) return (
+    <div style={{ padding: "24px 32px", maxWidth: 960, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, margin: 0 }}>Monte Carlo · Cartera</h1>
+      <p style={{ fontSize: 12.5, color: C.muted, marginTop: 12 }}>No hay tenencia de contado valuada para simular. Cargá o importá tu cartera y volvé.</p>
+    </div>
+  );
+
+  // Fan chart
+  const W = 640, Hc = 240, PAD = 4;
+  const yMax = Math.max(...sim.bands.map((b) => b.p90)) * 1.04;
+  const yMin = 0;
+  const xF = (m) => PAD + (m / sim.H) * (W - 2 * PAD);
+  const yF = (v) => (Hc - PAD) - ((v - yMin) / (yMax - yMin)) * (Hc - 2 * PAD);
+  const areaPath = (lo, hi) => {
+    let d = `M ${xF(0)} ${yF(sim.bands[0][hi])}`;
+    for (let m = 1; m <= sim.H; m++) d += ` L ${xF(m)} ${yF(sim.bands[m][hi])}`;
+    for (let m = sim.H; m >= 0; m--) d += ` L ${xF(m)} ${yF(sim.bands[m][lo])}`;
+    return d + " Z";
+  };
+  const linePath = (k) => sim.bands.map((b, m) => `${m === 0 ? "M" : "L"} ${xF(m)} ${yF(b[k])}`).join(" ");
+  const yInvested = yF(sim.invested);
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1000, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Monte Carlo · Cartera</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
+            Simula <strong>{sim.N.toLocaleString("es-AR")} caminos posibles</strong> del valor de <strong>tu cartera real</strong> ({fMoney(sim.V0)} hoy) a {sim.H} meses. El µ y σ salen de la composición de lo que tenés (editables). Sumá un aporte mensual para ver el efecto de meter plata todos los meses.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {["ARS", "USD"].map((c) => (
+            <button key={c} onClick={() => setCur(c)} disabled={c === "USD" && !cclMid}
+              style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${cur === c ? C.accent : C.border}`, background: cur === c ? "rgba(91,141,214,0.12)" : "transparent", color: cur === c ? C.accent : C.muted, borderRadius: 6, opacity: c === "USD" && !cclMid ? 0.4 : 1 }}>
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Composición → de acá salen el µ/σ por default */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px", marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: C.dim, marginBottom: 8 }}>Composición de tu cartera (de acá se derivan el µ y σ por default)</div>
+        <div className="flex" style={{ gap: 8, flexWrap: "wrap" }}>
+          {derived.rows.map((r) => (
+            <div key={r.type} style={{ fontSize: 11, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 5, padding: "4px 9px" }}>
+              <b style={{ color: C.text }}>{r.label}</b> {(r.w * 100).toFixed(0)}% <span style={{ color: C.dim }}>· µ {r.mu}% σ {r.sg}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex" style={{ gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <Field label="Horizonte" value={horizonte} setValue={setHorizonte} suffix="meses" />
+        <Field label={`Aporte mensual`} value={aporte} setValue={setAporte} suffix={cur === "USD" ? "US$" : "$"} step={cur === "USD" ? 100 : 100000} hint={aporte > 0 ? `${fMoney((aporte / (fxFactor || 1)) * sim.H)} en ${sim.H} meses` : "opcional"} />
+        <Field label="Retorno esperado (µ)" value={Number(mu.toFixed(1))} setValue={(v) => setMuOv(v)} suffix="%/año" onReset={muOv != null ? () => setMuOv(null) : null} hint={muOv != null ? "editado" : "de tu cartera"} />
+        <Field label="Volatilidad (σ)" value={Number(sg.toFixed(1))} setValue={(v) => setSgOv(v)} suffix="%/año" onReset={sgOv != null ? () => setSgOv(null) : null} hint={sgOv != null ? "editado" : "de tu cartera"} />
+        <Field label="Correlación entre activos" value={rho} setValue={setRho} suffix="%" hint="afecta el σ del combo" />
+        <Field label="Simulaciones" value={nsims} setValue={setNsims} step={500} />
+      </div>
+
+      <div className="flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <Res label="Peor 5% (p5)" value={fMoney(sim.p5)} color={sim.p5 < sim.invested ? C.red : C.text} sub="escenario malo" />
+        <Res label="Mediana (típico)" value={fMoney(sim.p50)} color={sim.p50 >= sim.invested ? C.green : C.red} sub="el caso central" />
+        <Res label="Mejor 5% (p95)" value={fMoney(sim.p95)} color={C.green} sub="escenario bueno" />
+        <Res label="Prob. de terminar perdiendo" value={`${sim.probLoss.toFixed(0)}%`} color={sim.probLoss > 50 ? C.red : C.yellow} sub={`vs lo puesto (${fMoney(sim.invested)})`} />
+        <Res label="VaR 95%" value={sim.var95 > 0 ? fMoney(sim.var95) : "$0"} color={C.yellow} sub="pérdida en el peor 5%" />
+      </div>
+
+      {/* Fan chart */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px" }}>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Abanico del valor de la cartera · banda 10–90% (clara), 25–75% (oscura), mediana (línea)</div>
+        <svg viewBox={`0 0 ${W} ${Hc}`} preserveAspectRatio="none" style={{ width: "100%", height: 240, display: "block" }}>
+          <path d={areaPath("p10", "p90")} fill={C.accent} opacity="0.12" />
+          <path d={areaPath("p25", "p75")} fill={C.accent} opacity="0.20" />
+          <path d={linePath("p50")} fill="none" stroke={C.accent} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          {sim.invested > 0 && yInvested > 0 && yInvested < Hc && (
+            <line x1={PAD} x2={W - PAD} y1={yInvested} y2={yInvested} stroke={C.dim} strokeWidth="1" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+          )}
+        </svg>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.dim, marginTop: 4 }}>
+          <span>hoy · {fMoney(sim.V0)}</span>
+          <span style={{ color: C.muted }}>línea punteada = lo que pusiste ({fMoney(sim.invested)})</span>
+          <span>{sim.H} meses</span>
+        </div>
+      </div>
+
+      <p style={{ fontSize: 11.5, color: C.dim, margin: "16px 2px 0", lineHeight: 1.6, maxWidth: 820 }}>
+        <strong style={{ color: C.muted }}>Cómo leerlo:</strong> la línea del medio es el camino típico; la banda es el rango donde cae la mayoría. Mirá la <strong>prob. de terminar perdiendo</strong> y el <strong>VaR</strong> (cuánto perderías en un mal 5%) antes que el mejor caso. El µ/σ salen de supuestos por tipo de activo (no de historia real de cada bono), así que <strong>ajustalos</strong> si tu visión difiere — tocá el valor y volvés a "auto" con el link. Es un modelo (GBM): asume retornos lognormales y no anticipa un cambio de régimen ni un salto del CCL. Simulación informativa, no recomendación.
       </p>
     </div>
   );
