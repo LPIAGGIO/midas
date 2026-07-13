@@ -28827,7 +28827,14 @@ function PaperCedearsModule() {
   // Estado del momentum: última rotación y próxima (~21 ruedas ≈ 30 días) — para que no parezca viejo.
   const iolState = (data.state || []).find((s) => s.id === "iol21");
   const lastRebal = iolState?.last_rebal || null;
-  const nextRebalApprox = lastRebal ? new Date(new Date(lastRebal + "T00:00:00").getTime() + 30 * 86400000).toISOString().slice(0, 10) : null;
+  // Próxima rotación = el 17 de cada mes (día en que LP rota el momentum real),
+  // no "último rebalanceo + 30 días". Si ya pasó el 17, apunta al mes que viene.
+  const nextDay17 = () => {
+    const now = new Date();
+    const t = now.getDate() <= 17 ? new Date(now.getFullYear(), now.getMonth(), 17) : new Date(now.getFullYear(), now.getMonth() + 1, 17);
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+  };
+  const nextRebalApprox = nextDay17();
   // Proyección a 10 años siguiendo momentum: capital inicial × (1 + ritmo)^10.
   const cocosUSD = realEnriched.find((g) => g.broker === "cocos")?.usdTotal || 0;
   const iolUSD = realEnriched.find((g) => g.broker === "iol")?.usdTotal || 0;
@@ -28900,7 +28907,7 @@ function PaperCedearsModule() {
         ))}
         {(() => {
           const ss = (data.state || []).find((s) => s.id === sel);
-          const nx = ss?.last_rebal ? new Date(new Date(ss.last_rebal + "T00:00:00").getTime() + 30 * 86400000).toISOString().slice(0, 10) : null;
+          const nx = ss?.last_rebal ? nextDay17() : null;
           if (!ss?.last_rebal && !selVar.liveStart) return null;
           return (
             <span style={{ marginLeft: "auto", fontSize: 10, color: C.dim }}>
