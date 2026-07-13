@@ -258,7 +258,6 @@ const NAV = [
       { id: "dividendos", label: "Dividendos", icon: Coins },
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
       { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
-      { id: "lab-riesgo", label: "Lab · Riesgo A/B", icon: Sigma, ownerOnly: true },
     ],
   },
 ];
@@ -1553,8 +1552,6 @@ function MidasApp({ allowedModules = null }) {
               <SimuladorVentaCedearModule key={active} onPopOut={() => openCedearPip("venta")} pipActive={cedearPip?.view === "venta"} />
             ) : active === "paper-cedears" ? (
               <PaperCedearsModule key={active} />
-            ) : active === "lab-riesgo" ? (
-              <MomentumRiskModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
             ) : active === "calc-montecarlo" ? (
@@ -28342,13 +28339,14 @@ const CEDEAR_VARIANTS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════
-// MomentumRiskModule — "Lab · Riesgo del A/B" (ownerOnly, solo el owner lo ve).
+// MomentumRiskPanel — "Riesgo y significancia" (ownerOnly, embebido abajo del
+// gráfico en Paper CEDEARs; recibe eq=paper_cedear_equity por prop).
 //
-// Califica las 4 variantes del paper (paper_cedear_equity) con el instrumental
-// de López de Prado: Sharpe/Sortino/max drawdown, Information Ratio vs
-// comprar-y-holdear, y sobre todo el DEFLATED SHARPE RATIO — que descuenta el
-// haber probado 4 variantes (selection bias). Responde la pregunta que importa:
-// ¿el momentum le gana DE VERDAD al B&H, o es ruido de haber probado varias?
+// Califica las 4 variantes del paper con el instrumental de López de Prado:
+// Sharpe/Sortino/max drawdown, Information Ratio vs comprar-y-holdear, y sobre
+// todo el DEFLATED SHARPE RATIO — que descuenta el haber probado 4 variantes
+// (selection bias). Responde la pregunta que importa: ¿el momentum le gana DE
+// VERDAD al B&H, o es ruido de haber probado varias?
 //
 // Clave metodológica: el Sharpe crudo en ARS no dice nada (todo tiene drift
 // nominal enorme, rf de caución ~40% TNA). Por eso el edge real se mide sobre
@@ -28400,26 +28398,7 @@ function _psr(sr, srBench, T, skew, kurt) {
   return _normCdf(((sr - srBench) * Math.sqrt(Math.max(T - 1, 1))) / denom);
 }
 
-function MomentumRiskModule() {
-  const [eq, setEq] = useState(null);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        let all = [], from = 0;
-        for (;;) {
-          const { data: d, error } = await supabase.from("paper_cedear_equity")
-            .select("d,variant,equity,bh_equity,is_live").order("d", { ascending: true }).range(from, from + 999);
-          if (error || !d || !d.length) break;
-          all = all.concat(d); if (d.length < 1000) break; from += 1000;
-        }
-        if (mounted) setEq(all);
-      } catch { if (mounted) setEq([]); }
-    })();
-    return () => { mounted = false; };
-  }, []);
-
+function MomentumRiskPanel({ eq }) {
   const model = useMemo(() => {
     if (!eq || !eq.length) return null;
     const byVar = {};
@@ -28475,18 +28454,12 @@ function MomentumRiskModule() {
     return { perVar, bhStats, bhCagr: cagrOf(bhE, span0), bhTot: bhE.length ? (bhE[bhE.length - 1] / bhE[0] - 1) * 100 : 0, N, sr0, sr0Ann: sr0 * Math.sqrt(_TRAD_YR), best, psrRaw, dsr, from: rowsRef[0]?.d, to: rowsRef[rowsRef.length - 1]?.d, days: rowsRef.length };
   }, [eq]);
 
-  if (!eq) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando el A/B…</div>;
-  if (!model) return <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin datos del paper todavía.</div>;
+  if (!model) return null;
 
   const fmtD = (iso) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "—");
   const sPct = (n, dg = 1) => (n == null ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(dg)}%`);
   const col = (n) => (n == null ? C.muted : n >= 0 ? C.green : C.red);
   const num = (n, dg = 2) => (n == null || !Number.isFinite(n) ? "—" : n.toFixed(dg));
-
-  const curve = [
-    ...model.perVar.map((p) => ({ label: p.label, color: p.color, data: p.rows.map((r) => ({ fecha: r.d, valor: Number(r.equity) })) })),
-    { label: "Comprar y holdear", color: C.dim, data: (model.perVar[0]?.rows || []).map((r) => ({ fecha: r.d, valor: Number(r.bh_equity) })) },
-  ];
 
   const dsrPct = model.dsr * 100, rawPct = model.psrRaw * 100;
   const verdict = model.dsr >= 0.95
@@ -28499,18 +28472,15 @@ function MomentumRiskModule() {
   const td = { textAlign: "right", padding: "9px 10px", fontSize: 12.5, color: C.text, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" };
 
   return (
-    <div style={{ padding: "18px 22px", maxWidth: 1080, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>Lab · Riesgo del A/B</h2>
-        <span style={{ fontSize: 10, color: C.accent, border: `1px solid ${C.accentBorder}`, padding: "1px 6px", borderRadius: 3 }}>SOLO VOS</span>
-      </div>
-      <p style={{ fontSize: 12.5, color: C.muted, margin: "6px 0 2px", lineHeight: 1.5 }}>
-        Momentum CEDEARs vs comprar-y-holdear · {fmtD(model.from)} → {fmtD(model.to)} · {model.days} ruedas.
-        El edge se mide sobre el <b style={{ color: C.text }}>exceso vs B&amp;H</b> (misma beta ARS de los dos lados), no sobre el Sharpe crudo.
-      </p>
-
-      <div style={{ background: C.panel, borderRadius: 10, padding: "10px 12px", margin: "14px 0" }}>
-        <BcraMultiLine lines={curve} height={230} fmtY={(n) => Number(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })} />
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 12 }}>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>Riesgo y significancia · deflated Sharpe</h3>
+          <span style={{ fontSize: 9, color: C.accent, border: `1px solid ${C.accentBorder}`, padding: "1px 5px", borderRadius: 3 }}>SOLO VOS</span>
+        </div>
+        <span style={{ fontSize: 10, color: C.dim }}>
+          el edge se mide sobre el exceso vs comprar-y-holdear (misma beta ARS de los dos lados), no sobre el Sharpe crudo · {model.days} ruedas
+        </span>
       </div>
 
       {/* Deflated Sharpe — el veredicto */}
@@ -28593,6 +28563,7 @@ function MomentumRiskModule() {
 }
 
 function PaperCedearsModule() {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
   const [sel, setSel] = useState("m21");
@@ -29062,6 +29033,8 @@ function PaperCedearsModule() {
           <div style={{ padding: 30, textAlign: "center", color: C.dim, fontSize: 12 }}>Sin datos de backtest todavía.</div>
         )}
       </div>
+
+      {user?.id === PAPER_OWNER_ID && <MomentumRiskPanel eq={data.eq} />}
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.5 }}>
         El backtest de 10 años corre el mismo motor de momentum sobre precios reales (Yahoo, 30 acciones USA). Bate a comprar y holdear, pero cae en una década muy alcista de las tecnológicas y con sesgo de supervivencia del universo — el momentum sufre en mercados laterales o bajistas. Las tarjetas de arriba son el forward-test EN VIVO (~13 meses desde el 15/06); el gráfico es el histórico. Simulación, no opera plata real ni es recomendación.
