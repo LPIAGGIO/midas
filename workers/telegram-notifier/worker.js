@@ -135,12 +135,14 @@ function maturityOf(ticker) {
   }
   return null;
 }
-// Dias hasta vencimiento (T+1, igual que el front). null si no hay fecha.
+// Dias calendario hasta vencimiento. Negativo = YA vencio (clave: sin el
+// Math.max(0,...) de antes, que dejaba a las letras vencidas en "0 dias" para
+// siempre y las spameaba a diario). null si no hay fecha.
 function daysToMaturity(maturityDate) {
   if (!maturityDate) return null;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const exp = new Date(maturityDate + "T00:00:00");
-  return Math.max(0, Math.round((exp - today) / 86400000) - 1);
+  return Math.round((exp - today) / 86400000);
 }
 
 /* ─────────────── Precios (espejo del front) ─────────────── */
@@ -516,7 +518,7 @@ async function evalVencimientos(users, positionsBy) {
     const pos = positionsBy[u.userId] || [];
     for (const p of pos) {
       const days = daysToMaturity(maturityOf(p.ticker));
-      if (days == null || days > VENC_DAYS) continue;
+      if (days == null || days < 0 || days > VENC_DAYS) continue; // vencidas: no alertar
       const key = `${p.ticker}`;
       if (await recentlySent(u.userId, "vencimiento", key, CD.vencimiento)) continue;
       const extra = p.type === "future" ? " — rola el contrato si queres mantener la posicion." : "";
