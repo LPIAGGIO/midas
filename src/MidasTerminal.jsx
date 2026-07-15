@@ -28424,8 +28424,17 @@ function CarteraMonteCarloModule() {
         </div>
       </div>
 
-      <p style={{ fontSize: 11.5, color: C.dim, margin: "16px 2px 0", lineHeight: 1.6, maxWidth: 820 }}>
-        <strong style={{ color: C.muted }}>Cómo leerlo:</strong> la línea del medio es el camino típico; la banda es el rango donde cae la mayoría. Mirá la <strong>prob. de terminar perdiendo</strong> y el <strong>VaR</strong> (cuánto perderías en un mal 5%) antes que el mejor caso. El µ/σ salen de supuestos por tipo de activo (no de historia real de cada bono), así que <strong>ajustalos</strong> si tu visión difiere — tocá el valor y volvés a "auto" con el link. Es un modelo (GBM): asume retornos lognormales y no anticipa un cambio de régimen ni un salto del CCL. Simulación informativa, no recomendación.
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 16px", margin: "16px 0 0", maxWidth: 820 }}>
+        <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 6 }}>¿Qué son µ y σ?</div>
+        <p style={{ fontSize: 11.5, color: C.dim, margin: 0, lineHeight: 1.6 }}>
+          <strong style={{ color: C.muted }}>µ (mu) = retorno esperado.</strong> Cuánto tiende a crecer tu cartera por año, en promedio — el "motor". Más alto = apunta más para arriba.<br />
+          <strong style={{ color: C.muted }}>σ (sigma) = volatilidad.</strong> Cuánto sube y baja en el camino — el vaivén. Más alto = abanico más ancho, más chance tanto de un año muy bueno como de uno malo (y más VaR).<br />
+          Dos carteras pueden tener el mismo µ (ganar lo mismo) pero distinto σ: la de σ alto te hace sufrir más para llegar. Los dos salen de la composición de lo que tenés (bonos = tranquilos, CEDEARs/acciones = nerviosos) y son <strong>editables</strong>: tocá el valor, y con "auto" vuelven a lo de tu cartera.
+        </p>
+      </div>
+
+      <p style={{ fontSize: 11.5, color: C.dim, margin: "14px 2px 0", lineHeight: 1.6, maxWidth: 820 }}>
+        <strong style={{ color: C.muted }}>Cómo leerlo:</strong> la línea del medio es el camino típico; la banda es el rango donde cae la mayoría. Mirá la <strong>prob. de terminar perdiendo</strong> y el <strong>VaR</strong> (cuánto perderías en un mal 5%) antes que el mejor caso. El µ/σ salen de supuestos por tipo de activo (no de historia real de cada bono), así que <strong>ajustalos</strong> si tu visión difiere. Es un modelo (GBM): asume retornos lognormales y no anticipa un cambio de régimen ni un salto del CCL. Simulación informativa, no recomendación.
       </p>
     </div>
   );
