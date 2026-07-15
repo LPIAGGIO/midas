@@ -28425,11 +28425,12 @@ function CarteraMonteCarloModule() {
       </div>
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 16px", margin: "16px 0 0", maxWidth: 820 }}>
-        <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 6 }}>¿Qué son µ y σ?</div>
+        <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 6 }}>¿Qué son µ, σ y VaR?</div>
         <p style={{ fontSize: 11.5, color: C.dim, margin: 0, lineHeight: 1.6 }}>
           <strong style={{ color: C.muted }}>µ (mu) = retorno esperado.</strong> Cuánto tiende a crecer tu cartera por año, en promedio — el "motor". Más alto = apunta más para arriba.<br />
           <strong style={{ color: C.muted }}>σ (sigma) = volatilidad.</strong> Cuánto sube y baja en el camino — el vaivén. Más alto = abanico más ancho, más chance tanto de un año muy bueno como de uno malo (y más VaR).<br />
-          Dos carteras pueden tener el mismo µ (ganar lo mismo) pero distinto σ: la de σ alto te hace sufrir más para llegar. Los dos salen de la composición de lo que tenés (bonos = tranquilos, CEDEARs/acciones = nerviosos) y son <strong>editables</strong>: tocá el valor, y con "auto" vuelven a lo de tu cartera.
+          <strong style={{ color: C.muted }}>VaR 95% = el tamaño del susto en un mal año.</strong> De cada 20 escenarios posibles, mira el peor de esos 20 (el 5% más feo) y te dice cuánta plata perderías respecto a lo que pusiste. Ejemplo: "VaR $40M" = en un mal año, podrías llegar a estar $40M abajo. OJO: no es el máximo posible (siempre puede haber uno peor), es la línea del 5% peor — la vara para saber cuánto podrías tener que bancar.<br />
+          Dos carteras pueden tener el mismo µ (ganar lo mismo) pero distinto σ: la de σ alto te hace sufrir más para llegar. µ y σ salen de la composición de lo que tenés (bonos = tranquilos, CEDEARs/acciones = nerviosos) y son <strong>editables</strong>: tocá el valor, y con "auto" vuelven a lo de tu cartera.
         </p>
       </div>
 
