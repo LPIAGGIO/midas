@@ -28258,6 +28258,7 @@ function CarteraMonteCarloModule() {
   const [muOv, setMuOv] = useState(null);            // override de µ (null = usa el derivado)
   const [sgOv, setSgOv] = useState(null);
   const [cur, setCur] = useState("ARS");             // moneda de display: ARS | USD
+  const [showHelp, setShowHelp] = useState(false);   // recuadro de glosario (µ/σ/prob/VaR) colapsable
 
   // µ/σ derivados de la composición
   const derived = useMemo(() => {
@@ -28425,14 +28426,17 @@ function CarteraMonteCarloModule() {
       </div>
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 16px", margin: "16px 0 0", maxWidth: 820 }}>
-        <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 6 }}>¿Qué significan µ, σ, la prob. de perder y el VaR?</div>
-        <p style={{ fontSize: 11.5, color: C.dim, margin: 0, lineHeight: 1.6 }}>
+        <div onClick={() => setShowHelp((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontSize: 12, color: C.text, fontWeight: 600 }}>
+          <span>¿Qué significan µ, σ, la prob. de perder y el VaR?</span>
+          <span style={{ fontSize: 11, color: C.accent }}>{showHelp ? "ocultar ▲" : "ver ▼"}</span>
+        </div>
+        {showHelp && <p style={{ fontSize: 11.5, color: C.dim, margin: "8px 0 0", lineHeight: 1.6 }}>
           <strong style={{ color: C.muted }}>µ (mu) = retorno esperado.</strong> Cuánto tiende a crecer tu cartera por año, en promedio — el "motor". Más alto = apunta más para arriba.<br />
           <strong style={{ color: C.muted }}>σ (sigma) = volatilidad.</strong> Cuánto sube y baja en el camino — el vaivén. Más alto = abanico más ancho, más chance tanto de un año muy bueno como de uno malo (y más VaR).<br />
           <strong style={{ color: C.muted }}>Prob. de terminar perdiendo = qué tan seguido perdés.</strong> De los 2.000 caminos simulados, en qué porcentaje terminás con MENOS plata de la que pusiste. Ejemplo: 32% = en 1 de cada 3 escenarios cerrás el período en rojo. Es la CHANCE de perder (qué tan probable), no el tamaño.<br />
           <strong style={{ color: C.muted }}>VaR 95% = el tamaño del susto en un mal año.</strong> De cada 20 escenarios posibles, mira el peor de esos 20 (el 5% más feo) y te dice cuánta plata perderías respecto a lo que pusiste. Ejemplo: "VaR $40M" = en un mal año, podrías llegar a estar $40M abajo. OJO: no es el máximo posible (siempre puede haber uno peor), es la línea del 5% peor — la vara para saber cuánto podrías tener que bancar. En una frase: la <strong>prob. de perder</strong> es <em>qué tan seguido</em>, el <strong>VaR</strong> es <em>cuánto</em>.<br />
           Dos carteras pueden tener el mismo µ (ganar lo mismo) pero distinto σ: la de σ alto te hace sufrir más para llegar. µ y σ salen de la composición de lo que tenés (bonos = tranquilos, CEDEARs/acciones = nerviosos) y son <strong>editables</strong>: tocá el valor, y con "auto" vuelven a lo de tu cartera.
-        </p>
+        </p>}
       </div>
 
       <p style={{ fontSize: 11.5, color: C.dim, margin: "14px 2px 0", lineHeight: 1.6, maxWidth: 820 }}>
