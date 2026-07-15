@@ -28220,12 +28220,21 @@ function CarteraMonteCarloModule() {
   );
   const futurePrices = useFuturePrices(futureTickers)?.prices || {};
 
+  // Filtro por broker (igual que el Reporte de cartera): "all" = toda la cartera.
+  const BROKER_LABEL = { cocos: "Cocos", iol: "IOL", manual: "Manual", balanz: "Balanz" };
+  const [brokerFilter, setBrokerFilter] = useState("all");
+  const brokers = useMemo(() => {
+    const s = new Set();
+    for (const p of positions || []) if (MC_CONTADO.includes(p.instrument_type)) s.add(p.broker || "manual");
+    return Array.from(s).sort();
+  }, [positions]);
+
   // Composición real de la cartera (valor a mercado por tipo), misma valuación
   // que el Reporte de cartera.
   const compo = useMemo(() => {
     if (!positions?.length) return { total: 0, byType: {} };
     let cons = [];
-    const src = positions.filter((p) => p.instrument_type !== "caucion");
+    const src = positions.filter((p) => p.instrument_type !== "caucion" && (brokerFilter === "all" || (p.broker || "manual") === brokerFilter));
     try { cons = consolidatePositions(src, bondPrices, futurePrices, fciPrices, stockPrices) || []; }
     catch { return { total: 0, byType: {} }; }
     const byType = {};
@@ -28239,7 +28248,7 @@ function CarteraMonteCarloModule() {
       total += v;
     }
     return { total, byType };
-  }, [positions, bondPrices, futurePrices, fciPrices, stockPrices]);
+  }, [positions, bondPrices, futurePrices, fciPrices, stockPrices, brokerFilter]);
 
   // Parámetros editables
   const [horizonte, setHorizonte] = useState(12);   // meses
@@ -28356,9 +28365,21 @@ function CarteraMonteCarloModule() {
         </div>
       </div>
 
+      {brokers.length > 1 && (
+        <div className="flex items-center" style={{ gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginRight: 4 }}>Broker</span>
+          {["all", ...brokers].map((b) => (
+            <button key={b} onClick={() => setBrokerFilter(b)}
+              style={{ padding: "4px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${brokerFilter === b ? C.accent : C.border}`, background: brokerFilter === b ? "rgba(124,156,255,0.12)" : "transparent", color: brokerFilter === b ? C.accent : C.muted, borderRadius: 6 }}>
+              {b === "all" ? "Todos" : (BROKER_LABEL[b] || b)}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Composición → de acá salen el µ/σ por default */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px", marginBottom: 14 }}>
-        <div style={{ fontSize: 11, color: C.dim, marginBottom: 8 }}>Composición de tu cartera (de acá se derivan el µ y σ por default)</div>
+        <div style={{ fontSize: 11, color: C.dim, marginBottom: 8 }}>Composición {brokerFilter === "all" ? "de tu cartera" : `· ${BROKER_LABEL[brokerFilter] || brokerFilter}`} (de acá se derivan el µ y σ por default)</div>
         <div className="flex" style={{ gap: 8, flexWrap: "wrap" }}>
           {derived.rows.map((r) => (
             <div key={r.type} style={{ fontSize: 11, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 5, padding: "4px 9px" }}>
