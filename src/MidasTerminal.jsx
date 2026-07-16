@@ -29208,28 +29208,37 @@ function PaperCedearsModule() {
       {rotRows.length > 1 && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 14 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Histórico de rotaciones · {selVar.label}</div>
-          <div style={{ fontSize: 10.5, color: C.dim, margin: "2px 0 12px" }}>los papeles que hay cada mes: <span style={{ color: "#34d399" }}>entró</span> · se mantuvo · <span style={{ color: "#f87171" }}>salió</span>. <b style={{ color: C.muted }}>Hoy</b> = el momentum del día (lo que la estrategia tiene ahora); abajo, cómo fue rotando el paper mes a mes.</div>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            {rotRows.map((r, i) => (
-              <div key={r.key} style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap", padding: "10px 0", borderTop: i === 0 ? "none" : `1px solid ${C.border}` }}>
-                <span style={{ minWidth: 92, display: "flex", flexDirection: "column", gap: 2 }}>
-                  <span style={{ fontSize: 12, color: r.tag === "actual" ? C.text : C.muted, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{r.label}</span>
-                  {r.tag && <span style={{ fontSize: 9, color: r.tag === "actual" ? "#34d399" : C.dim }}>{r.tag}</span>}
-                </span>
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", flex: 1 }}>
-                  {r.held.map((t) => {
-                    const isNew = r.entered.includes(t);
+          <div style={{ fontSize: 10.5, color: C.dim, margin: "2px 0 12px" }}>los papeles de cada mes, cada ticker en su columna fija — así se ve de un vistazo cuándo entra y cuándo sale. <b style={{ color: C.muted }}>Hoy</b> = el momentum del día (= tu cartera real); abajo, cómo fue rotando el paper.</div>
+          <div style={{ overflowX: "auto" }}>
+            {(() => {
+              const cnt = {};
+              for (const r of rotRows) for (const t of r.held) cnt[t] = (cnt[t] || 0) + 1;
+              const cols = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a] || (a < b ? -1 : 1));
+              const gc = `84px repeat(${cols.length}, minmax(46px, 1fr))`;
+              return (
+                <div style={{ minWidth: 84 + cols.length * 48 }}>
+                  {rotRows.map((r, i) => {
+                    const set = new Set(r.held);
+                    const isHoy = r.tag === "momentum de hoy";
                     return (
-                      <span key={t} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: isNew ? "#34d399" : C.text, background: isNew ? "rgba(52,211,153,0.12)" : C.faint, border: `1px solid ${isNew ? "rgba(52,211,153,0.30)" : C.border}` }}>{isNew ? "↑ " : ""}{t}</span>
+                      <div key={r.key} style={{ display: "grid", gridTemplateColumns: gc, gap: 4, alignItems: "center", padding: "6px 0", borderTop: i === 0 ? "none" : `1px solid ${C.border}`, background: isHoy ? "rgba(52,211,153,0.05)" : "transparent" }}>
+                        <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                          <span style={{ fontSize: 11.5, color: isHoy ? C.text : C.muted, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{r.label}</span>
+                          {r.tag && <span style={{ fontSize: 8.5, color: isHoy ? "#34d399" : C.dim }}>{r.tag}</span>}
+                        </span>
+                        {cols.map((t) => (
+                          <span key={t} style={{ textAlign: "center", minWidth: 0 }}>
+                            {set.has(t)
+                              ? <span style={{ fontSize: 10, fontWeight: 600, color: isHoy ? "#34d399" : C.text, background: isHoy ? "rgba(52,211,153,0.10)" : C.faint, border: `1px solid ${isHoy ? "rgba(52,211,153,0.25)" : C.border}`, borderRadius: 4, padding: "2px 2px", display: "block" }}>{t}</span>
+                              : <span style={{ color: C.faint, fontSize: 10 }}>·</span>}
+                          </span>
+                        ))}
+                      </div>
                     );
                   })}
-                  {r.exited.map((t) => (
-                    <span key={"x" + t} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: "#f87171", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.22)" }}>↓ {t}</span>
-                  ))}
-                  {!r.held.length && <span style={{ fontSize: 11, color: C.dim }}>en cash</span>}
                 </div>
-              </div>
-            ))}
+              );
+            })()}
           </div>
         </div>
       )}
