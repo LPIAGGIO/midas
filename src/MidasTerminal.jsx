@@ -25197,24 +25197,38 @@ function ScalpingDLRModule({ embedded = false } = {}) {
               <th style={{ textAlign: "left", padding: "9px 14px" }}>Ticker</th>
               <th style={{ textAlign: "right", padding: "9px 14px" }}>Compra (x size)</th>
               <th style={{ textAlign: "right", padding: "9px 14px" }}>Último</th>
+              <th style={{ textAlign: "center", padding: "9px 14px" }}>Flujo</th>
               <th style={{ textAlign: "right", padding: "9px 14px" }}>Venta (x size)</th>
               <th style={{ textAlign: "right", padding: "9px 14px" }}>Vol</th>
               <th style={{ textAlign: "right", padding: "9px 14px" }}>Settle</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ tk, o }) => (
+            {rows.map(({ tk, o }) => {
+              const last = px(o), stl = o?.settlement != null ? Number(o.settlement) : null;
+              const flow = (last != null && stl != null) ? (last > stl ? "compra" : last < stl ? "venta" : "flat") : null;
+              return (
               <tr key={tk} style={{ borderTop: `1px solid ${C.border}` }}>
                 <td style={{ padding: "10px 14px", color: C.text, fontWeight: 600 }}>{tk}</td>
                 <td style={{ padding: "10px 14px", textAlign: "right", color: C.green, fontVariantNumeric: "tabular-nums" }}>{o ? `${fmt(o.bid)} x${o.bidSz ?? "—"}` : "—"}</td>
                 <td style={{ padding: "10px 14px", textAlign: "right", color: C.text, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmt(px(o))}</td>
+                <td style={{ padding: "10px 14px", textAlign: "center", fontWeight: 600, fontSize: 12 }}>
+                  {flow === "compra" ? <span style={{ color: C.green }}>▲ compra</span>
+                    : flow === "venta" ? <span style={{ color: C.red }}>▼ venta</span>
+                    : <span style={{ color: C.dim }}>—</span>}
+                </td>
                 <td style={{ padding: "10px 14px", textAlign: "right", color: C.red, fontVariantNumeric: "tabular-nums" }}>{o ? `${fmt(o.offer)} x${o.askSz ?? "—"}` : "—"}</td>
                 <td style={{ padding: "10px 14px", textAlign: "right", color: C.dim, fontVariantNumeric: "tabular-nums" }}>{o?.volume ? o.volume.toLocaleString("es-AR") : "—"}</td>
                 <td style={{ padding: "10px 14px", textAlign: "right", color: C.dim, fontVariantNumeric: "tabular-nums" }}>{fmt(o?.settlement)}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
+      </div>
+
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "10px 14px", marginBottom: 16, fontSize: 11, color: C.muted, lineHeight: 1.55 }}>
+        <b style={{ color: C.text }}>Cómo leerlo fácil:</b> cada fila es el <b style={{ color: C.text }}>precio del dólar para entregar en ese mes</b> (cuanto más lejos el mes, más caro — es la devaluación que espera el mercado). En <b>Flujo</b>: <span style={{ color: C.green, fontWeight: 600 }}>▲ compra</span> = el dólar futuro está arriba del cierre de ayer (mandan los compradores), <span style={{ color: C.red, fontWeight: 600 }}>▼ venta</span> = está abajo (mandan los vendedores), <span style={{ color: C.dim }}>—</span> = sin cambios o rueda cerrada.
       </div>
 
       <div className="flex gap-3" style={{ marginBottom: 16, flexWrap: "wrap" }}>
