@@ -29205,7 +29205,10 @@ function PaperCedearsModule() {
       {rotRows.length > 1 && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 14 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Histórico de rotaciones · {selVar.label}</div>
-          <div style={{ fontSize: 10.5, color: C.dim, margin: "2px 0 12px" }}>los papeles del momentum en cada mes. <b style={{ color: C.muted }}>Hoy</b> = el momentum del día (= tu cartera real); abajo, cómo fue rotando el paper.</div>
+          <div style={{ fontSize: 10.5, color: C.dim, margin: "2px 0 8px" }}>los papeles del momentum en cada mes. <b style={{ color: C.muted }}>Hoy</b> = el momentum del día (= tu cartera real); abajo, cómo fue rotando el paper.</div>
+          <div style={{ fontSize: 10.5, color: C.muted, margin: "0 0 12px", padding: "8px 10px", background: C.faint, borderRadius: 6, lineHeight: 1.55 }}>
+            <b style={{ color: C.text }}>¿Por qué a veces hay menos de 8?</b> La estrategia se queda con hasta 8, pero <b>solo los de momentum positivo</b> — los que <b>subieron</b> en los últimos ~12 meses (retorno de 12 meses atrás a hoy, mayor a 0). Cuando pocos vienen subiendo, tiene menos nombres y el resto queda en <b>efectivo</b> (protección: no se fuerza a estar 100% invertido en un mercado flojo).
+          </div>
           <div style={{ display: "flex", flexDirection: "column" }}>
             {rotRows.map((r, i) => {
               const isHoy = r.tag === "momentum de hoy";
