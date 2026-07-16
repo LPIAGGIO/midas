@@ -137,6 +137,24 @@ function runVariant(V, ctx) {
   const idxOf = (d) => dates.indexOf(d);
   const bhUnits = {}; for (const a of assets) { const p0 = px(a, LB); if (p0) bhUnits[a] = (CAPITAL / assets.length) * (1 - FEE) / p0; }
 
+  // SEÑAL DE MOMENTUM FRESCA (independiente de los rebalanceos del paper): rankea
+  // HOY con el último cierre disponible y escribe el Top-8 en `momentum_signal`.
+  // La rutina de rebalanceo real de IOL lee de acá, así opera contra el momentum
+  // del día y NO contra las tenencias viejas del paper (que rebalancea 1/mes).
+  try {
+    const li = dates.length - 1;
+    const rk = assets.map((a) => { const pa = px(a, li - SKIP), pb = px(a, li - LB); return [a, (pa && pb) ? pa / pb - 1 : -Infinity]; })
+      .filter(([, m]) => Number.isFinite(m)).sort((x, y) => y[1] - x[1]);
+    const top8 = rk.slice(0, TOPK).filter(([, m]) => m > 0).map(([a]) => a);
+    const { error: sigErr } = await supabase.from("momentum_signal").upsert({
+      id: "current", top8,
+      ranking: rk.slice(0, 15).map(([a, m]) => ({ t: a, mom: Math.round(m * 1000) / 10 })),
+      as_of_date: dates[li], updated_at: new Date().toISOString(),
+    }, { onConflict: "id" });
+    if (sigErr) log("momentum_signal error: " + sigErr.message);
+    else log(`momentum_signal actualizado (${dates[li]}): ${top8.join(", ")}`);
+  } catch (e) { log("momentum_signal excepcion: " + (e && e.message)); }
+
   // estado + holdings actuales, agrupados por variante
   const { data: stArr } = await supabase.from("paper_cedear_state").select("*");
   const { data: hArr } = await supabase.from("paper_cedear_holdings").select("*");
