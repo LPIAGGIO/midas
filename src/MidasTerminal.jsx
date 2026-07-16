@@ -24994,7 +24994,10 @@ function HedgeScenarioWidget({ full = false }) {
  * Para volverlo ejecutable falta snapshot intradía sincrónico + puntas.
  */
 function ScalpingDLRModule({ embedded = false } = {}) {
-  const dlrTickers = ["DLRJUN26", "DLRJUL26"];
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  // Todos los contratos DLR NO vencidos (antes hardcodeaba JUN/JUL; al vencer
+  // JUN quedaba pidiendo un contrato muerto y su último viejo ensuciaba todo).
+  const dlrTickers = useMemo(() => (DLR_REGISTRY || []).filter((c) => !c.maturityDate || c.maturityDate >= todayStr).map((c) => c.ticker), [todayStr]);
   const { prices: fp, loading, error, refresh, lastFetch } = useFuturePrices(dlrTickers);
   const fxState = useDashboardFx();
   const spot = fxState?.fx?.mayorista?.mid ?? null;
@@ -25025,16 +25028,33 @@ function ScalpingDLRModule({ embedded = false } = {}) {
   }, [refresh]);
   const isOpen = dlrFuturesOpen();
 
-  const jun = fp?.["DLRJUN26"] || null;
-  const jul = fp?.["DLRJUL26"] || null;
+  // Contratos DLR ACTIVOS (no vencidos, con precio en el feed), ordenados por
+  // vencimiento. front = el más cercano; next = el siguiente. Antes hardcodeaba
+  // JUN/JUL → cuando JUN vencía seguía tomando su último viejo y el spread daba
+  // 0,0 (alerta falsa). Ahora rola solo.
+  const monthLbl = (tk) => (tk || "").slice(3, 6);
+  const activeC = (DLR_REGISTRY || [])
+    .filter((c) => (!c.maturityDate || c.maturityDate >= todayStr) && fp?.[c.ticker])
+    .sort((a, b) => ((a.maturityDate || "") < (b.maturityDate || "") ? -1 : 1));
+  const frontC = activeC[0] || null;
+  const nextC = activeC[1] || null;
+  const front = frontC ? fp[frontC.ticker] : null;
+  const next = nextC ? fp[nextC.ticker] : null;
+  const frontLbl = frontC ? monthLbl(frontC.ticker) : "—";
+  const nextLbl = nextC ? monthLbl(nextC.ticker) : "—";
   const px = (o) => (o ? (o.last != null ? o.last : o.price) : null);
-  const junLast = px(jun);
-  const julLast = px(jul);
+  const junLast = px(front);
+  const julLast = px(next);
 
-  // Spread calendario JUL − JUN. Banda normal de la data diaria: ~26-30,5.
+  // Spread calendario (next − front). La banda 25-31 vale para meses
+  // CONSECUTIVOS (~1 mes de carry); si los dos activos están a >45 días, no
+  // aplica la banda y NO se alerta (evita falsos por rolar a un mes salteado).
+  const gapDays = (frontC?.maturityDate && nextC?.maturityDate)
+    ? Math.round((new Date(nextC.maturityDate) - new Date(frontC.maturityDate)) / 86400000) : null;
+  const consecutive = gapDays != null && gapDays <= 45;
   const calSpread = (junLast != null && julLast != null) ? (julLast - junLast) : null;
   const CAL_LOW = 25, CAL_HIGH = 31;
-  const calOut = calSpread != null && (calSpread < CAL_LOW || calSpread > CAL_HIGH);
+  const calOut = consecutive && calSpread != null && (calSpread < CAL_LOW || calSpread > CAL_HIGH);
 
   // Buffer de reversión sobre el último de JUN26 (z-score corto).
   useEffect(() => {
@@ -25056,7 +25076,7 @@ function ScalpingDLRModule({ embedded = false } = {}) {
   useEffect(() => {
     const conds = [];
     if (calOut) conds.push(`Spread calendario ${calSpread.toFixed(1)} fuera de banda (${CAL_LOW}-${CAL_HIGH})`);
-    if (rev && Math.abs(rev.z) > 2) conds.push(`JUN26 ${rev.z > 0 ? "overshoot arriba" : "sobre-vendido abajo"} z=${rev.z.toFixed(1)} -> candidato a volver a ~${rev.mean.toFixed(1)}`);
+    if (rev && Math.abs(rev.z) > 2) conds.push(`${frontLbl} ${rev.z > 0 ? "overshoot arriba" : "sobre-vendido abajo"} z=${rev.z.toFixed(1)} -> candidato a volver a ~${rev.mean.toFixed(1)}`);
     const isAlerting = conds.length > 0;
     if (isAlerting && !alertingRef.current) {
       setAlerts((prev) => [{ t: Date.now(), msgs: conds }, ...prev].slice(0, 25));
@@ -25067,7 +25087,7 @@ function ScalpingDLRModule({ embedded = false } = {}) {
 
   const basis = (junLast != null && spot) ? (junLast - spot) : null;
   const fmt = (v, d = 2) => (v == null || !Number.isFinite(v) ? "—" : v.toLocaleString("es-AR", { minimumFractionDigits: d, maximumFractionDigits: d }));
-  const rows = [{ tk: "DLRJUN26", o: jun }, { tk: "DLRJUL26", o: jul }];
+  const rows = activeC.map((c) => ({ tk: c.ticker, o: fp[c.ticker] }));
 
   return (
     <div style={embedded ? { marginTop: 22 } : { padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
@@ -25120,17 +25140,17 @@ function ScalpingDLRModule({ embedded = false } = {}) {
 
       <div className="flex gap-3" style={{ marginBottom: 16, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 240, border: `1px solid ${calOut ? C.red : C.border}`, background: C.panel, padding: 14 }}>
-          <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Spread calendario (JUL - JUN)</div>
+          <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Spread calendario ({nextLbl} - {frontLbl})</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: calOut ? C.red : C.text, fontVariantNumeric: "tabular-nums" }}>{calSpread != null ? fmt(calSpread, 1) : "—"}</div>
-          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4 }}>Banda normal {CAL_LOW}-{CAL_HIGH} · {calOut ? "FUERA -> posible reversión" : "en banda"}</div>
+          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4 }}>{!consecutive ? "meses no consecutivos · banda n/a" : `Banda normal ${CAL_LOW}-${CAL_HIGH} · ${calOut ? "FUERA -> posible reversión" : "en banda"}`}</div>
         </div>
         <div style={{ flex: 1, minWidth: 240, border: `1px solid ${rev && Math.abs(rev.z) > 2 ? C.red : C.border}`, background: C.panel, padding: 14 }}>
-          <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Reversión JUN26 (z-score corto)</div>
+          <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Reversión {frontC ? frontC.ticker : "—"} (z-score corto)</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: rev && Math.abs(rev.z) > 2 ? C.red : C.text, fontVariantNumeric: "tabular-nums" }}>{rev ? `z ${fmt(rev.z, 1)}` : "—"}</div>
           <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4 }}>{rev ? `media ~${fmt(rev.mean, 1)} (${rev.n} muestras) · ${Math.abs(rev.z) > 2 ? "overshoot -> candidato a volver" : "normal"}` : "juntando muestras…"}</div>
         </div>
         <div style={{ flex: 1, minWidth: 240, border: `1px solid ${C.border}`, background: C.panel, padding: 14 }}>
-          <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Basis JUN26 vs spot</div>
+          <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Basis {frontLbl} vs spot</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>{basis != null ? `+${fmt(basis, 1)}` : "—"}</div>
           <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4 }}>{spot ? `spot mayorista ${fmt(spot)} · informativo` : "spot no disponible"}</div>
         </div>
@@ -25139,7 +25159,7 @@ function ScalpingDLRModule({ embedded = false } = {}) {
       <div style={{ border: `1px solid ${C.border}`, background: C.panel, padding: 14 }}>
         <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>Alertas ({alerts.length})</div>
         {alerts.length === 0 ? (
-          <div style={{ fontSize: 11, color: C.muted }}>Sin alertas. Se disparan cuando el spread sale de banda o JUN26 hace overshoot (|z| mayor a 2).</div>
+          <div style={{ fontSize: 11, color: C.muted }}>Sin alertas. Se disparan cuando el spread sale de banda o el front ({frontLbl}) hace overshoot (|z| mayor a 2).</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
             {alerts.map((a, i) => (
