@@ -28999,27 +28999,32 @@ function PaperCedearsModule() {
   const selVar = perVar.find((p) => p.id === sel) || perVar[perVar.length - 1];
   const selHoldings = data.holdings.filter((h) => (h.variant || "m21") === sel);
 
-  // Histórico de rotaciones: reconstruye entró/salió por rebalanceo replayando
-  // los trades del paper. Una VENTA = el papel salió del Top-8; una COMPRA de un
-  // papel que NO se tenía = entró (las compras de papeles ya en cartera son
-  // ajustes de peso, no rotación, y no se muestran).
-  const rotHistory = (() => {
+  // Histórico de rotaciones: replaya los trades del paper para reconstruir, en
+  // cada rebalanceo, la CARTERA COMPLETA (held) + qué entró y qué salió. La
+  // reconstrucción converge a las tenencias actuales (verificado). Arriba se
+  // agrega la fila "Hoy" con los actuales, y el último rebalanceo aunque no
+  // haya tenido cambios (para que no falte ningún mes).
+  const rotRows = (() => {
     const trs = (data.trades || []).filter((t) => (t.variant || "m21") === sel);
     const byDate = {};
     for (const t of trs) (byDate[t.d] = byDate[t.d] || []).push(t);
     const held = new Set();
-    const out = [];
+    const hist = [];
     for (const d of Object.keys(byDate).sort()) {
       const entered = [], exited = [];
-      for (const t of byDate[d]) {
-        if (t.side === "sell") { if (held.has(t.ticker)) { exited.push(t.ticker); held.delete(t.ticker); } }
-      }
-      for (const t of byDate[d]) {
-        if (t.side === "buy" && Number(t.units) > 0 && !held.has(t.ticker)) { entered.push(t.ticker); held.add(t.ticker); }
-      }
-      if (entered.length || exited.length) out.push({ d, entered: entered.sort(), exited: exited.sort(), held: [...held].sort() });
+      for (const t of byDate[d]) if (t.side === "sell" && held.has(t.ticker)) { exited.push(t.ticker); held.delete(t.ticker); }
+      for (const t of byDate[d]) if (t.side === "buy" && Number(t.units) > 0 && !held.has(t.ticker)) { entered.push(t.ticker); held.add(t.ticker); }
+      hist.push({ d, entered: entered.sort(), exited: exited.sort(), held: [...held].sort() });
     }
-    return out.reverse(); // más reciente primero
+    hist.reverse(); // reciente primero
+    const currentHeld = selHoldings.map((h) => h.ticker).sort();
+    const ss = (data.state || []).find((s) => s.id === sel);
+    const rows = [{ key: "hoy", label: "Hoy", tag: "actual", held: currentHeld, entered: [], exited: [] }];
+    if (ss?.last_rebal && (!hist.length || ss.last_rebal > hist[0].d)) {
+      rows.push({ key: ss.last_rebal, label: fmtD(ss.last_rebal), tag: "sin cambios", held: currentHeld, entered: [], exited: [] });
+    }
+    for (const h of hist) rows.push({ key: h.d, label: fmtD(h.d), held: h.held, entered: h.entered, exited: h.exited });
+    return rows;
   })();
 
   // Backtest 10 años (tabla paper_cedear_backtest): curva por variante, filtrada
@@ -29195,22 +29200,28 @@ function PaperCedearsModule() {
         })()}
       </div>
 
-      {rotHistory.length > 0 && (
+      {rotRows.length > 1 && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 14 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Histórico de rotaciones · {selVar.label}</div>
-          <div style={{ fontSize: 10.5, color: C.dim, margin: "2px 0 12px" }}>cada rebalanceo mensual: qué <span style={{ color: "#34d399" }}>entró</span> al Top-8 y qué <span style={{ color: "#f87171" }}>salió</span>. Lo que no aparece, se mantuvo.</div>
+          <div style={{ fontSize: 10.5, color: C.dim, margin: "2px 0 12px" }}>los papeles que hay cada mes: <span style={{ color: "#34d399" }}>entró</span> · se mantuvo · <span style={{ color: "#f87171" }}>salió</span>.</div>
           <div style={{ display: "flex", flexDirection: "column" }}>
-            {rotHistory.map((r, i) => (
-              <div key={r.d} style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap", padding: "9px 0", borderTop: i === 0 ? "none" : `1px solid ${C.border}` }}>
-                <span style={{ fontSize: 12, color: C.muted, fontWeight: 600, minWidth: 82, fontVariantNumeric: "tabular-nums" }}>{fmtD(r.d)}</span>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flex: 1 }}>
-                  {r.entered.map((t) => (
-                    <span key={"e" + t} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: "#34d399", background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.25)" }}>↑ {t}</span>
-                  ))}
+            {rotRows.map((r, i) => (
+              <div key={r.key} style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap", padding: "10px 0", borderTop: i === 0 ? "none" : `1px solid ${C.border}` }}>
+                <span style={{ minWidth: 92, display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span style={{ fontSize: 12, color: r.tag === "actual" ? C.text : C.muted, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{r.label}</span>
+                  {r.tag && <span style={{ fontSize: 9, color: r.tag === "actual" ? "#34d399" : C.dim }}>{r.tag}</span>}
+                </span>
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", flex: 1 }}>
+                  {r.held.map((t) => {
+                    const isNew = r.entered.includes(t);
+                    return (
+                      <span key={t} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: isNew ? "#34d399" : C.text, background: isNew ? "rgba(52,211,153,0.12)" : C.faint, border: `1px solid ${isNew ? "rgba(52,211,153,0.30)" : C.border}` }}>{isNew ? "↑ " : ""}{t}</span>
+                    );
+                  })}
                   {r.exited.map((t) => (
                     <span key={"x" + t} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: "#f87171", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.22)" }}>↓ {t}</span>
                   ))}
-                  {!r.entered.length && !r.exited.length && <span style={{ fontSize: 11, color: C.dim }}>sin cambios</span>}
+                  {!r.held.length && <span style={{ fontSize: 11, color: C.dim }}>en cash</span>}
                 </div>
               </div>
             ))}
