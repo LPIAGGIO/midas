@@ -28889,14 +28889,15 @@ function PaperCedearsModule() {
           if (error || !d || !d.length) break;
           btAll = btAll.concat(d); if (d.length < 1000) break; bfrom += 1000;
         }
-        const [h, stt, tr] = await Promise.all([
+        const [h, stt, tr, sig] = await Promise.all([
           supabase.from("paper_cedear_holdings").select("*"),
           supabase.from("paper_cedear_state").select("id,last_date,last_rebal"),
           supabase.from("paper_cedear_trades").select("d,variant,ticker,side,units").order("d", { ascending: true }),
+          supabase.from("momentum_signal").select("top8,as_of_date").eq("id", "current").maybeSingle(),
         ]);
         if (!mounted) return;
-        setData({ eq: eqAll, holdings: h.data || [], state: stt.data || [], backtest: btAll, trades: tr.data || [] });
-      } catch { if (mounted) setData({ eq: [], holdings: [], state: [], backtest: [], trades: [] }); }
+        setData({ eq: eqAll, holdings: h.data || [], state: stt.data || [], backtest: btAll, trades: tr.data || [], signal: sig.data || null });
+      } catch { if (mounted) setData({ eq: [], holdings: [], state: [], backtest: [], trades: [], signal: null }); }
     })();
     return () => { mounted = false; };
   }, [tick]);
@@ -29018,8 +29019,12 @@ function PaperCedearsModule() {
     }
     hist.reverse(); // reciente primero
     const currentHeld = selHoldings.map((h) => h.ticker).sort();
+    // La fila "Hoy" muestra el MOMENTUM FRESCO del día (momentum_signal, lo que
+    // la estrategia tiene AHORA = lo que LP tiene en IOL), no las tenencias del
+    // paper (que rebalancea 1/mes y quedan atrás).
+    const signalTop8 = (data.signal?.top8 || []).slice().sort();
     const ss = (data.state || []).find((s) => s.id === sel);
-    const rows = [{ key: "hoy", label: "Hoy", tag: "actual", held: currentHeld, entered: [], exited: [] }];
+    const rows = [{ key: "hoy", label: "Hoy", tag: "momentum de hoy", held: signalTop8.length ? signalTop8 : currentHeld, entered: [], exited: [] }];
     if (ss?.last_rebal && (!hist.length || ss.last_rebal > hist[0].d)) {
       rows.push({ key: ss.last_rebal, label: fmtD(ss.last_rebal), tag: "sin cambios", held: currentHeld, entered: [], exited: [] });
     }
@@ -29183,7 +29188,7 @@ function PaperCedearsModule() {
       </div>
 
       <div className="flex items-center" style={{ gap: 8, margin: "14px 2px 0", flexWrap: "wrap", fontSize: 12 }}>
-        <span style={{ color: C.dim }}>Cartera actual momentum <span style={{ color: C.muted }}>· {selVar.label}</span> ({selHoldings.length}):</span>
+        <span style={{ color: C.dim }}>Cartera del paper <span style={{ color: C.muted }}>· {selVar.label}</span> ({selHoldings.length}):</span>
         {selHoldings.length === 0 ? <span style={{ color: C.dim }}>en cash</span> : selHoldings.map((h) => (
           <span key={h.ticker} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: C.text, background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.25)" }}>{h.ticker}</span>
         ))}
@@ -29203,7 +29208,7 @@ function PaperCedearsModule() {
       {rotRows.length > 1 && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 14 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Histórico de rotaciones · {selVar.label}</div>
-          <div style={{ fontSize: 10.5, color: C.dim, margin: "2px 0 12px" }}>los papeles que hay cada mes: <span style={{ color: "#34d399" }}>entró</span> · se mantuvo · <span style={{ color: "#f87171" }}>salió</span>.</div>
+          <div style={{ fontSize: 10.5, color: C.dim, margin: "2px 0 12px" }}>los papeles que hay cada mes: <span style={{ color: "#34d399" }}>entró</span> · se mantuvo · <span style={{ color: "#f87171" }}>salió</span>. <b style={{ color: C.muted }}>Hoy</b> = el momentum del día (lo que la estrategia tiene ahora); abajo, cómo fue rotando el paper mes a mes.</div>
           <div style={{ display: "flex", flexDirection: "column" }}>
             {rotRows.map((r, i) => (
               <div key={r.key} style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap", padding: "10px 0", borderTop: i === 0 ? "none" : `1px solid ${C.border}` }}>
