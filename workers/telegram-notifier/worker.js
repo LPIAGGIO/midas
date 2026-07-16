@@ -165,18 +165,23 @@ function futurePrice(row, nowMs) {
   return null;
 }
 
-// Devuelve { price: {app:precio}, settle: {app:settlement} } de mtr_market_data.
+// Devuelve { price, settle, reference } de mtr_market_data. `reference` es el
+// CIERRE ANTERIOR oficial de A3 (precio de referencia = settle de ayer), que
+// viene siempre en sync con el feed — se usa para el P&L del día en vez de la
+// tabla histórica (que puede quedar con huecos si el worker de captura se saltea
+// un día por feed atrasado, como pasó el 14-15/07/2026 → daba ajustes fantasma).
 async function loadFutures() {
   const { data, error } = await supabase.from("mtr_market_data").select("*");
-  if (error) { console.error("[futures]", error.message); return { price: {}, settle: {} }; }
-  const nowMs = Date.now(), price = {}, settle = {};
+  if (error) { console.error("[futures]", error.message); return { price: {}, settle: {}, reference: {} }; }
+  const nowMs = Date.now(), price = {}, settle = {}, reference = {};
   for (const row of data || []) {
     const app = symbolToApp(row.symbol);
     const p = futurePrice(row, nowMs);
     if (p != null) price[app] = p;
     if (row.settlement != null) settle[app] = Number(row.settlement);
+    if (row.reference != null) reference[app] = Number(row.reference);
   }
-  return { price, settle };
+  return { price, settle, reference };
 }
 
 // { symbol: { c, pct } } desde data912 (bonos/letras/acciones/cedears).
@@ -555,7 +560,10 @@ async function futuresDayBlock(raw, fut, dateStr, money) {
     const tradedToday = lotes.some((p) => p.entry_date === dateStr);
     // Saltear futuros vencidos/cerrados (neto 0) sin actividad hoy (ABR26/MAY26).
     if (Math.abs(net) < 1e-6 && !tradedToday) continue;
-    const sToday = fut.settle[ticker], sYest = yest[ticker];
+    // Cierre de ayer: preferimos el `reference` del feed (settle anterior oficial
+    // de A3, siempre en sync); si falta, caemos a la tabla histórica.
+    const sToday = fut.settle[ticker];
+    const sYest = (fut.reference && fut.reference[ticker] != null) ? fut.reference[ticker] : yest[ticker];
     if (sToday == null || sYest == null) {
       if (Math.abs(net) < 1e-6) continue;
       fl.push(`• ${ticker} (${net > 0 ? "+" : ""}${net}): s/settle`); continue;
