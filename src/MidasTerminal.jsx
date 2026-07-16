@@ -28889,13 +28889,14 @@ function PaperCedearsModule() {
           if (error || !d || !d.length) break;
           btAll = btAll.concat(d); if (d.length < 1000) break; bfrom += 1000;
         }
-        const [h, stt] = await Promise.all([
+        const [h, stt, tr] = await Promise.all([
           supabase.from("paper_cedear_holdings").select("*"),
           supabase.from("paper_cedear_state").select("id,last_date,last_rebal"),
+          supabase.from("paper_cedear_trades").select("d,variant,ticker,side,units").order("d", { ascending: true }),
         ]);
         if (!mounted) return;
-        setData({ eq: eqAll, holdings: h.data || [], state: stt.data || [], backtest: btAll });
-      } catch { if (mounted) setData({ eq: [], holdings: [], state: [], backtest: [] }); }
+        setData({ eq: eqAll, holdings: h.data || [], state: stt.data || [], backtest: btAll, trades: tr.data || [] });
+      } catch { if (mounted) setData({ eq: [], holdings: [], state: [], backtest: [], trades: [] }); }
     })();
     return () => { mounted = false; };
   }, [tick]);
@@ -28997,6 +28998,29 @@ function PaperCedearsModule() {
 
   const selVar = perVar.find((p) => p.id === sel) || perVar[perVar.length - 1];
   const selHoldings = data.holdings.filter((h) => (h.variant || "m21") === sel);
+
+  // Histórico de rotaciones: reconstruye entró/salió por rebalanceo replayando
+  // los trades del paper. Una VENTA = el papel salió del Top-8; una COMPRA de un
+  // papel que NO se tenía = entró (las compras de papeles ya en cartera son
+  // ajustes de peso, no rotación, y no se muestran).
+  const rotHistory = (() => {
+    const trs = (data.trades || []).filter((t) => (t.variant || "m21") === sel);
+    const byDate = {};
+    for (const t of trs) (byDate[t.d] = byDate[t.d] || []).push(t);
+    const held = new Set();
+    const out = [];
+    for (const d of Object.keys(byDate).sort()) {
+      const entered = [], exited = [];
+      for (const t of byDate[d]) {
+        if (t.side === "sell") { if (held.has(t.ticker)) { exited.push(t.ticker); held.delete(t.ticker); } }
+      }
+      for (const t of byDate[d]) {
+        if (t.side === "buy" && Number(t.units) > 0 && !held.has(t.ticker)) { entered.push(t.ticker); held.add(t.ticker); }
+      }
+      if (entered.length || exited.length) out.push({ d, entered: entered.sort(), exited: exited.sort(), held: [...held].sort() });
+    }
+    return out.reverse(); // más reciente primero
+  })();
 
   // Backtest 10 años (tabla paper_cedear_backtest): curva por variante, filtrada
   // por rango (1/3/5/10 años) y rebasada a 1000 al inicio de la ventana.
@@ -29170,6 +29194,29 @@ function PaperCedearsModule() {
           );
         })()}
       </div>
+
+      {rotHistory.length > 0 && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Histórico de rotaciones · {selVar.label}</div>
+          <div style={{ fontSize: 10.5, color: C.dim, margin: "2px 0 12px" }}>cada rebalanceo mensual: qué <span style={{ color: "#34d399" }}>entró</span> al Top-8 y qué <span style={{ color: "#f87171" }}>salió</span>. Lo que no aparece, se mantuvo.</div>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {rotHistory.map((r, i) => (
+              <div key={r.d} style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap", padding: "9px 0", borderTop: i === 0 ? "none" : `1px solid ${C.border}` }}>
+                <span style={{ fontSize: 12, color: C.muted, fontWeight: 600, minWidth: 82, fontVariantNumeric: "tabular-nums" }}>{fmtD(r.d)}</span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flex: 1 }}>
+                  {r.entered.map((t) => (
+                    <span key={"e" + t} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: "#34d399", background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.25)" }}>↑ {t}</span>
+                  ))}
+                  {r.exited.map((t) => (
+                    <span key={"x" + t} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: "#f87171", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.22)" }}>↓ {t}</span>
+                  ))}
+                  {!r.entered.length && !r.exited.length && <span style={{ fontSize: 11, color: C.dim }}>sin cambios</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       </>)}
 
       {tab === "cartera" && (realByBroker.length > 0 || paperPicks.size > 0) && (
