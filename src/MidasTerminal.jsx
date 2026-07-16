@@ -182,6 +182,7 @@ const NAV = [
     badge: "BETA",
     requiresAuth: true,
   },
+  { id: "alertas", label: "Alertas", icon: Bell, type: "single", requiresAuth: true },
   {
     id: "bcra",
     label: "Estadísticas BCRA",
@@ -1559,6 +1560,8 @@ function MidasApp({ allowedModules = null }) {
               <MonteCarloModule key={active} />
             ) : active === "montecarlo-cartera" ? (
               <CarteraMonteCarloModule key={active} />
+            ) : active === "alertas" ? (
+              <AlertasModule key={active} />
             ) : active === "semaforo-merval" ? (
               <SemaforoMervalModule key={active} />
             ) : active === "fundamentals-cedears" ? (
@@ -24392,11 +24395,19 @@ function usePriceAlerts() {
     const { data } = await supabase.from("price_alerts").insert({ user_id: user.id, ticker, price, dir }).select().single();
     if (data) setByTicker((prev) => ({ ...prev, [ticker]: [...(prev[ticker] || []), { id: data.id, price: Number(data.price), dir: data.dir, triggered: false }].sort((a, b) => a.price - b.price) }));
   }, [user]);
+  // Igual que addAlert pero con dirección EXPLÍCITA (para la pantalla de Alertas,
+  // donde no siempre hay precio actual del ticker cargado).
+  const addAlertDir = useCallback(async (ticker, price, dir) => {
+    const tk = (ticker || "").toUpperCase().trim();
+    if (!user || !(price > 0) || !tk) return;
+    const { data } = await supabase.from("price_alerts").insert({ user_id: user.id, ticker: tk, price, dir: dir === "down" ? "down" : "up" }).select().single();
+    if (data) setByTicker((prev) => ({ ...prev, [tk]: [...(prev[tk] || []), { id: data.id, price: Number(data.price), dir: data.dir, triggered: false }].sort((a, b) => a.price - b.price) }));
+  }, [user]);
   const removeAlert = useCallback(async (ticker, id) => {
     await supabase.from("price_alerts").delete().eq("id", id);
     setByTicker((prev) => ({ ...prev, [ticker]: (prev[ticker] || []).filter((a) => a.id !== id) }));
   }, []);
-  return { byTicker, addAlert, removeAlert };
+  return { byTicker, addAlert, addAlertDir, removeAlert, refetch };
 }
 
 function AlertAdd({ onAdd }) {
@@ -24412,6 +24423,74 @@ function AlertAdd({ onAdd }) {
       bare
       style={{ width: 60, background: "rgba(255,255,255,0.03)", border: `1px dashed ${C.border}`, borderRadius: 4, color: C.text, fontSize: 11, padding: "3px 6px", textAlign: "right" }}
     />
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// AlertasModule — pantalla dedicada para gestionar las alertas de precio
+// (tabla price_alerts, notifican por Telegram aunque Midas esté cerrado). Las
+// mismas que se cargan por instrumento en Flujo de Posiciones; acá se ven/cargan
+// todas juntas.
+// ═══════════════════════════════════════════════════════════════════════
+function AlertasModule() {
+  const { byTicker, addAlertDir, removeAlert } = usePriceAlerts();
+  const [tk, setTk] = useState("");
+  const [price, setPrice] = useState(0);
+  const [dir, setDir] = useState("up");
+  const canAdd = tk.trim().length > 0 && price > 0;
+  const add = () => { if (canAdd) { addAlertDir(tk, price, dir); setTk(""); setPrice(0); } };
+  const tickers = Object.keys(byTicker).filter((t) => (byTicker[t] || []).length).sort();
+  const total = tickers.reduce((s, t) => s + byTicker[t].length, 0);
+  const fmt = (n) => Number(n).toLocaleString("es-AR");
+  const inputStyle = { padding: "8px 10px", fontSize: 14, background: "transparent", color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, outline: "none" };
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 860, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Alertas de precio</h1>
+      <p style={{ fontSize: 12.5, color: C.muted, margin: "6px 0 18px", maxWidth: 720, lineHeight: 1.5 }}>
+        Te avisan por <b style={{ color: C.text }}>Telegram</b> cuando un instrumento cruza el nivel que pongas — aunque tengas Midas cerrado. Cargá varios niveles por ticker; cada uno suena una vez y queda disparado. Son las mismas alertas que ponés en Flujo de Posiciones.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: C.dim, marginBottom: 5 }}>Ticker</label>
+          <input value={tk} onChange={(e) => setTk(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === "Enter") add(); }} placeholder="ej. MU" style={{ ...inputStyle, width: 110 }} />
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: C.dim, marginBottom: 5 }}>Cuando el precio</label>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button onClick={() => setDir("up")} style={{ padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${dir === "up" ? C.green : C.border}`, background: dir === "up" ? "rgba(74,222,128,0.10)" : "transparent", color: dir === "up" ? C.green : C.muted, borderRadius: 6 }}>▲ suba a</button>
+            <button onClick={() => setDir("down")} style={{ padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${dir === "down" ? C.red : C.border}`, background: dir === "down" ? "rgba(248,113,113,0.10)" : "transparent", color: dir === "down" ? C.red : C.muted, borderRadius: 6 }}>▼ baje a</button>
+          </div>
+        </div>
+        <div style={{ width: 150 }}>
+          <MCField label="Precio" value={price} onChange={setPrice} money suffix="$" />
+        </div>
+        <button onClick={add} disabled={!canAdd} style={{ padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: canAdd ? "pointer" : "not-allowed", border: `1px solid ${C.accent}`, background: "rgba(91,141,214,0.12)", color: C.accent, borderRadius: 6, opacity: canAdd ? 1 : 0.5 }}>Agregar</button>
+      </div>
+
+      {tickers.length === 0 ? (
+        <div style={{ fontSize: 13, color: C.muted, textAlign: "center", padding: 30 }}>No tenés alertas cargadas. Agregá una arriba.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 11, color: C.dim }}>{total} alerta{total === 1 ? "" : "s"} · {tickers.length} instrumento{tickers.length === 1 ? "" : "s"}</div>
+          {tickers.map((t) => (
+            <div key={t} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px" }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 8 }}>{t}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {byTicker[t].map((a) => (
+                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                    <span style={{ color: a.dir === "up" ? C.green : C.red, fontWeight: 600, width: 66 }}>{a.dir === "up" ? "▲ suba" : "▼ baje"}</span>
+                    <span style={{ color: C.text, fontWeight: 600, fontVariantNumeric: "tabular-nums", minWidth: 100 }}>${fmt(a.price)}</span>
+                    <span style={{ fontSize: 11, color: a.triggered ? C.dim : C.green }}>{a.triggered ? "disparada ✓" : "● armada"}</span>
+                    <button onClick={() => removeAlert(t, a.id)} style={{ marginLeft: "auto", fontSize: 11, color: C.dim, background: "transparent", border: "none", cursor: "pointer" }}>borrar</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
