@@ -24502,6 +24502,7 @@ function flowExpiryKey(ticker) {
   return null;
 }
 function flowConsolidate(positions) {
+  const todayISO = new Date().toISOString().slice(0, 10);
   const g = {};
   for (const p of positions || []) {
     const key = `${p.instrument_type}|${p.ticker}`;
@@ -24516,7 +24517,14 @@ function flowConsolidate(positions) {
       const ppp = net > 0 ? x.buyVal / x.buyQty : net < 0 ? x.sellVal / x.sellQty : null;
       return { type: x.type, ticker: x.ticker, net, ppp };
     })
-    .filter((x) => Math.abs(x.net) > 0.0001 && x.type !== "fci")
+    .filter((x) => {
+      if (Math.abs(x.net) <= 0.0001 || x.type === "fci") return false;
+      // Letras/boncaps ya vencidas: no las muestra (matched pero siguen en la
+      // tenencia hasta que Cocos las liquide; en el flujo aparecían "sin libro").
+      const mat = parseLetraMaturity(x.ticker);
+      if (mat && mat < todayISO) return false;
+      return true;
+    })
     .sort((a, b) => {
       const af = a.type === "future", bf = b.type === "future";
       if (af !== bf) return af ? -1 : 1; // futuros primero
@@ -25235,17 +25243,17 @@ function ScalpingDLRModule({ embedded = false } = {}) {
         <div style={{ flex: 1, minWidth: 240, border: `1px solid ${calOut ? C.red : C.border}`, background: C.panel, padding: 14 }}>
           <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Spread calendario ({nextLbl} - {frontLbl})</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: calOut ? C.red : C.text, fontVariantNumeric: "tabular-nums" }}>{calSpread != null ? fmt(calSpread, 1) : "—"}</div>
-          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4 }}>{!consecutive ? "meses no consecutivos · banda n/a" : `Banda normal ${CAL_LOW}-${CAL_HIGH} · ${calOut ? "FUERA -> posible reversión" : "en banda"}`}</div>
+          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>El dólar de <b style={{ color: C.text }}>{nextLbl}</b> está {calSpread != null ? `$${fmt(calSpread, 1)}` : "—"} más caro que el de {frontLbl} — es lo que cuesta esperar un mes. {!consecutive ? "(meses no consecutivos)" : calOut ? <span style={{ color: C.red }}>Fuera de lo normal ({CAL_LOW}-{CAL_HIGH}).</span> : "Dentro de lo normal."}</div>
         </div>
         <div style={{ flex: 1, minWidth: 240, border: `1px solid ${rev && Math.abs(rev.z) > 2 ? C.red : C.border}`, background: C.panel, padding: 14 }}>
           <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Reversión {frontC ? frontC.ticker : "—"} (z-score corto)</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: rev && Math.abs(rev.z) > 2 ? C.red : C.text, fontVariantNumeric: "tabular-nums" }}>{rev ? `z ${fmt(rev.z, 1)}` : "—"}</div>
-          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4 }}>{rev ? `media ~${fmt(rev.mean, 1)} (${rev.n} muestras) · ${Math.abs(rev.z) > 2 ? "overshoot -> candidato a volver" : "normal"}` : "juntando muestras…"}</div>
+          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{rev ? (Math.abs(rev.z) > 2 ? <span style={{ color: C.red }}>Se alejó de su precio habitual (~{fmt(rev.mean, 1)}) — suele volver al promedio.</span> : `En su precio habitual (~${fmt(rev.mean, 1)}).`) : "Juntando datos para medir…"}</div>
         </div>
         <div style={{ flex: 1, minWidth: 240, border: `1px solid ${C.border}`, background: C.panel, padding: 14 }}>
           <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Basis {frontLbl} vs spot</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>{basis != null ? `+${fmt(basis, 1)}` : "—"}</div>
-          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4 }}>{spot ? `spot mayorista ${fmt(spot)} · informativo` : "spot no disponible"}</div>
+          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{spot ? <>El futuro {frontLbl} está <b style={{ color: C.text }}>${fmt(basis, 1)}</b> más caro que el dólar de hoy (${fmt(spot)}).</> : "spot no disponible"}</div>
         </div>
       </div>
 
