@@ -29188,21 +29188,18 @@ function PaperCedearsModule() {
       </div>
 
       <div className="flex items-center" style={{ gap: 8, margin: "14px 2px 0", flexWrap: "wrap", fontSize: 12 }}>
-        <span style={{ color: C.dim }}>Cartera del paper <span style={{ color: C.muted }}>· {selVar.label}</span> ({selHoldings.length}):</span>
-        {selHoldings.length === 0 ? <span style={{ color: C.dim }}>en cash</span> : selHoldings.map((h) => (
-          <span key={h.ticker} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: C.text, background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.25)" }}>{h.ticker}</span>
-        ))}
         {(() => {
-          const ss = (data.state || []).find((s) => s.id === sel);
-          const nx = ss?.last_rebal ? nextDay17() : null;
-          if (!ss?.last_rebal && !selVar.liveStart) return null;
-          return (
-            <span style={{ marginLeft: "auto", fontSize: 10, color: C.dim }}>
-              {ss?.last_rebal ? `rebalanceado ${fmtD(ss.last_rebal)} · próximo ~${fmtD(nx)}` : ""}
-              {selVar.liveStart ? `${ss?.last_rebal ? " · " : ""}en vivo desde ${fmtD(selVar.liveStart)}` : ""}
-            </span>
-          );
+          const sigT8 = (data.signal?.top8 || []).slice().sort();
+          return (<>
+            <span style={{ color: C.dim }}>Momentum de hoy ({sigT8.length}):</span>
+            {sigT8.length === 0 ? <span style={{ color: C.dim }}>—</span> : sigT8.map((t) => (
+              <span key={t} style={{ padding: "3px 9px", fontSize: 11, fontWeight: 600, borderRadius: 4, color: C.text, background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.25)" }}>{t}</span>
+            ))}
+          </>);
         })()}
+        {data.signal?.as_of_date && (
+          <span style={{ marginLeft: "auto", fontSize: 10, color: C.dim }}>momentum al {fmtD(data.signal.as_of_date)} · rota el 16 de cada mes</span>
+        )}
       </div>
 
       {rotRows.length > 1 && (
