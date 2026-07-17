@@ -143,8 +143,10 @@ async function findLatestSurvey() {
   );
 }
 
-// Extrae las filas mensuales (mediana) de una seccion de la hoja.
-// titleRegex matchea el titulo de la seccion en la col 0.
+// Extrae las filas mensuales de una seccion de la hoja. titleRegex matchea el
+// titulo de la seccion en la col 0. Ademas de la mediana levanta (si estan)
+// promedio, desvio, p90, p10 y participantes — el cuadro del REM las trae y
+// rem_tc_history las guarda para la pantalla "REM vs Real".
 function extractSection(rows, titleRegex, label) {
   const titleRow = rows.findIndex(
     (r) => r && typeof r[0] === "string" && titleRegex.test(r[0])
@@ -155,8 +157,19 @@ function extractSection(rows, titleRegex, label) {
   if (!(typeof header[0] === "string" && /per[ií]odo/i.test(header[0]))) {
     throw new Error(`Fila de header inesperada bajo "${label}" (fila ${titleRow + 1})`);
   }
-  let medianaCol = header.findIndex((c) => typeof c === "string" && /mediana/i.test(c));
+  const findCol = (re) => header.findIndex((c) => typeof c === "string" && re.test(c));
+  const medianaCol = findCol(/mediana/i);
   if (medianaCol < 0) throw new Error(`No encontre la columna "Mediana" en "${label}"`);
+  const promedioCol = findCol(/promedio/i);
+  const desvioCol = findCol(/desv[ií]o/i);
+  const p90Col = findCol(/90/);
+  const p10Col = findCol(/10/);
+  const partCol = findCol(/participantes|cantidad/i);
+  const num = (row, col) => {
+    if (col < 0) return null;
+    const v = Number(row[col]);
+    return Number.isFinite(v) ? v : null;
+  };
 
   const out = [];
   for (let i = titleRow + 2; i < rows.length; i++) {
@@ -169,7 +182,15 @@ function extractSection(rows, titleRegex, label) {
     if (typeof periodo !== "number" || !Number.isFinite(periodo)) continue;
     const mediana = Number(row[medianaCol]);
     if (!Number.isFinite(mediana)) continue;
-    out.push({ period_date: excelSerialToISODate(periodo), mediana });
+    out.push({
+      period_date: excelSerialToISODate(periodo),
+      mediana,
+      promedio: num(row, promedioCol),
+      desvio: num(row, desvioCol),
+      p90: num(row, p90Col),
+      p10: num(row, p10Col),
+      participantes: num(row, partCol),
+    });
   }
   return out;
 }
@@ -212,6 +233,86 @@ async function upsertVariable(variable, survey, rows) {
   log(`  ${variable}: ${payload.length} upserted, ${count || 0} viejas borradas`);
 }
 
+// ----- Refresh de la pantalla "REM vs Real" (rem_tc_history + usd_mayorista_monthly) -----
+
+// survey "jun-2026" -> survey_date = ultimo dia HABIL (lun-vie) del mes de la
+// encuesta. Es la convencion de la carga historica (ej: may-2026 -> 2026-05-29).
+function surveyDateFor(survey) {
+  const m = String(survey).match(/^([a-z]{3})-(\d{4})$/);
+  if (!m) return null;
+  const mesIdx = MESES.indexOf(m[1]);
+  if (mesIdx < 0) return null;
+  const anio = Number(m[2]);
+  const d = new Date(Date.UTC(anio, mesIdx + 1, 0)); // ultimo dia del mes
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// Upsert de la encuesta corriente en rem_tc_history (historial de encuestas,
+// NO se borra lo viejo: la pantalla "REM vs Real" compara encuestas pasadas
+// contra lo que efectivamente paso).
+async function upsertTcHistory(survey, tcRows) {
+  const survey_date = surveyDateFor(survey);
+  if (!survey_date) {
+    log(`  rem_tc_history: no pude derivar survey_date de "${survey}", salteo`);
+    return;
+  }
+  const payload = tcRows.map((r) => ({
+    survey_date,
+    period_month: r.period_date.slice(0, 7) + "-01",
+    mediana: r.mediana,
+    promedio: r.promedio,
+    desvio: r.desvio,
+    p90: r.p90,
+    p10: r.p10,
+    participantes: r.participantes != null ? Math.round(r.participantes) : null,
+  }));
+  const { error } = await supabase
+    .from("rem_tc_history")
+    .upsert(payload, { onConflict: "survey_date,period_month" });
+  if (error) throw new Error(`upsert rem_tc_history: ${error.message}`);
+  log(`  rem_tc_history: encuesta ${survey} (${survey_date}) -> ${payload.length} meses`);
+}
+
+// Recalcula usd_mayorista_monthly (promedio y cierre mensual del A3500) para
+// los ultimos N meses desde la API del BCRA (v4, idVariable=5). Idempotente.
+async function refreshMayoristaMonthly(monthsBack = 3) {
+  const { mes, anio } = nowAr();
+  const desde = new Date(Date.UTC(anio, mes - monthsBack, 1)).toISOString().slice(0, 10);
+  const url = `https://api.bcra.gob.ar/estadisticas/v4.0/Monetarias/5?desde=${desde}&limit=3000`;
+  let detalle;
+  try {
+    const r = await fetch(url, { headers: { "User-Agent": "Midas/0.1 rem-sync" } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    detalle = j?.results?.[0]?.detalle || j?.results || [];
+    // v4 puede devolver results como array de {fecha, valor} directo segun endpoint
+    if (detalle.length && detalle[0].detalle) detalle = detalle[0].detalle;
+  } catch (e) {
+    log(`  usd_mayorista_monthly: BCRA var 5 fallo (${e.message}), salteo`);
+    return;
+  }
+  const byMonth = new Map();
+  for (const d of detalle) {
+    const fecha = String(d.fecha || "").slice(0, 10);
+    const valor = Number(d.valor);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !Number.isFinite(valor) || valor <= 0) continue;
+    const month = fecha.slice(0, 7) + "-01";
+    if (!byMonth.has(month)) byMonth.set(month, []);
+    byMonth.get(month).push({ fecha, valor });
+  }
+  const payload = [];
+  for (const [month, rows] of byMonth) {
+    rows.sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+    const avg = rows.reduce((s, r) => s + r.valor, 0) / rows.length;
+    payload.push({ month, avg_a3500: avg, eom_a3500: rows[rows.length - 1].valor, days: rows.length });
+  }
+  if (!payload.length) { log("  usd_mayorista_monthly: sin datos, salteo"); return; }
+  const { error } = await supabase.from("usd_mayorista_monthly").upsert(payload, { onConflict: "month" });
+  if (error) throw new Error(`upsert usd_mayorista_monthly: ${error.message}`);
+  log(`  usd_mayorista_monthly: ${payload.length} meses refrescados (${payload.map((p) => p.month.slice(0, 7)).join(", ")})`);
+}
+
 async function main() {
   log("rem-sync arrancando");
   const { survey, buf } = await findLatestSurvey();
@@ -243,6 +344,10 @@ async function main() {
 
   await upsertVariable("tipo_cambio", survey, tc);
   await upsertVariable("ipc", survey, ipc);
+
+  // Pantalla "REM vs Real": historial de encuestas + mayorista mensual real.
+  await upsertTcHistory(survey, tc);
+  await refreshMayoristaMonthly();
 
   log("rem-sync OK");
 }
