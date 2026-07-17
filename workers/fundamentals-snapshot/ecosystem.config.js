@@ -3,11 +3,11 @@ module.exports = {
     {
       name: "fundamentals-snapshot",
       script: "worker.js",
-      // Los fundamentals cambian por trimestre (earnings); semanal alcanza y
-      // sobra. Lunes 07:00 ART, antes de que abra el mercado local. El worker
-      // corre, hace el upsert y sale; PM2 lo revive el proximo lunes.
+      // Los fundamentals cambian por trimestre (earnings); quincenal alcanza y
+      // sobra. Dias 1 y 15 a las 07:00 ART, antes de que abra el mercado local.
+      // El worker corre, hace el upsert y sale; PM2 lo revive la proxima corrida.
       // TZ del VPS = America/Argentina.
-      cron_restart: "0 7 * * 1",
+      cron_restart: "0 7 1,15 * *",
       autorestart: false,
       instances: 1,
       exec_mode: "fork",
