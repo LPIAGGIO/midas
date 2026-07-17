@@ -27989,12 +27989,28 @@ function FundamentalsModule() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [showGlossary, setShowGlossary] = useState(false);
   const [fetchedAt, setFetchedAt] = useState(null);
+  const [source, setSource] = useState(null); // "snapshot" | "live"
 
   useEffect(() => {
     let alive = true; setData(null);
-    fetch(`/api/fundamentals?tickers=${encodeURIComponent(tickers)}${refreshTick ? `&_=${refreshTick}` : ""}`)
-      .then((r) => r.json()).then((j) => { if (alive) { setData(j.data || []); setFetchedAt(new Date()); } })
-      .catch(() => { if (alive) setData([]); });
+    const isDefault = tickers === FUND_UNIVERSE;
+    const forceLive = refreshTick > 0; // el botón ↻ Actualizar fuerza Yahoo en vivo
+    const goLive = () =>
+      fetch(`/api/fundamentals?tickers=${encodeURIComponent(tickers)}${refreshTick ? `&_=${refreshTick}` : ""}`)
+        .then((r) => r.json()).then((j) => { if (alive) { setData(j.data || []); setFetchedAt(new Date()); setSource("live"); } })
+        .catch(() => { if (alive) setData([]); });
+    // Universo por defecto: leo el snapshot semanal (worker fundamentals-snapshot),
+    // rápido y sin depender de que Yahoo responda. Tickers custom o ↻ → en vivo.
+    if (isDefault && !forceLive) {
+      supabase.from("fundamentals_snapshot").select("data,fetched_at").order("fetched_at", { ascending: false })
+        .then(({ data: snap }) => {
+          if (!alive) return;
+          if (snap && snap.length) { setData(snap.map((s) => s.data)); setFetchedAt(new Date(snap[0].fetched_at)); setSource("snapshot"); }
+          else goLive();
+        });
+    } else {
+      goLive();
+    }
     return () => { alive = false; };
   }, [tickers, refreshTick]);
 
@@ -28123,7 +28139,13 @@ function FundamentalsModule() {
         <button onClick={() => setTickers(input)} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.accent}`, background: "transparent", color: C.accent, borderRadius: 6 }}>Consultar</button>
         <button onClick={() => { setInput(FUND_UNIVERSE); setTickers(FUND_UNIVERSE); }} style={{ padding: "8px 12px", fontSize: 11, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6 }}>Reset</button>
         <button onClick={() => setRefreshTick((t) => t + 1)} disabled={!data} title="Volver a traer los datos de Yahoo" style={{ padding: "8px 12px", fontSize: 11, fontWeight: 600, cursor: data ? "pointer" : "default", border: `1px solid ${C.border}`, background: "transparent", color: data ? C.muted : C.dim, borderRadius: 6, whiteSpace: "nowrap" }}>↻ Actualizar</button>
-        {fetchedAt && <span style={{ fontSize: 10.5, color: C.dim, whiteSpace: "nowrap" }}>datos {fetchedAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</span>}
+        {fetchedAt && (
+          <span style={{ fontSize: 10.5, color: C.dim, whiteSpace: "nowrap" }}>
+            {source === "snapshot"
+              ? `snapshot semanal · ${fetchedAt.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} ${fetchedAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
+              : `en vivo · ${fetchedAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`}
+          </span>
+        )}
       </div>
 
       {!data ? (
