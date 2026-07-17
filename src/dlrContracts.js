@@ -12,10 +12,10 @@
  * Excluidos del registry:
  *   - DLR/...M (posiciones "Mayoristas" — duplican la curva, mismo precio)
  *   - DLR/{MES1}/{MES2} (rolls / spreads entre dos vencimientos)
- *   - ABR26 (vence el día del seed, días <= 0)
+ *   - contratos ya vencidos (se podan al refrescar los seeds)
  *
- * Seed actualizado al 30/04/2026 con datos de matbarofex.primary.ventures.
- * Spot mayorista (DLR MTR) al mismo timestamp: $1.381,8.
+ * Seed actualizado al 16/07/2026 con settlements de mtr_market_data (feed A3).
+ * Spot mayorista (A3500) al mismo día: $1.474,8.
  *
  * El registry sirve como fallback. La UI permite al usuario actualizar
  * los precios manualmente y los persiste en localStorage hasta que
@@ -58,24 +58,23 @@ function decodeDlrSuffix(suffix) {
   return { year, month, maturityDate: lastBusinessDayOfMonth(year, month) };
 }
 
-// Lista canónica de contratos vigentes al 30/04/2026 con sus precios seed.
-// Ticker, mes, año y precio "Ajuste Ant." de la captura matbarofex.primary.ventures.
+// Lista canónica de contratos con sus precios seed (= settlement A3 del
+// 16/07/2026, tomados de mtr_market_data). Los seeds son SOLO fallback si el
+// feed/worker no responde; la UI los pisa con el precio live. Al refrescarlos,
+// actualizar también DLR_SPOT_SEED y DLR_SEED_DATE.
+// MANTENIMIENTO: cuando A3 liste un contrato nuevo (hoy el último es ABR27),
+// agregarlo acá — las pantallas (curva, sintético, scalping) iteran este registry.
 const DLR_SEED_RAW = [
-  { suffix: "MAY26", priceSeed: 1416.0 },
-  { suffix: "JUN26", priceSeed: 1443.5 },
-  { suffix: "JUL26", priceSeed: 1474.0 },
-  { suffix: "AGO26", priceSeed: 1504.0 },
-  { suffix: "SEP26", priceSeed: 1535.0 },
-  { suffix: "OCT26", priceSeed: 1564.5 },
-  { suffix: "NOV26", priceSeed: 1594.5 },
-  { suffix: "DIC26", priceSeed: 1625.0 },
-  { suffix: "ENE27", priceSeed: 1655.0 },
-  { suffix: "FEB27", priceSeed: 1685.0 },
-  { suffix: "MAR27", priceSeed: 1717.0 },
-  // ABR27: no estaba en la captura del 30/04/2026 (no operaba aún). priceSeed
-  // extrapolado de la curva (~+32/mes desde MAR27). Es solo fallback: el worker
-  // mtr-market-data ya captura ABR27 y la UI lo pisa con el precio live.
-  { suffix: "ABR27", priceSeed: 1749.0 },
+  { suffix: "JUL26", priceSeed: 1483.0 },
+  { suffix: "AGO26", priceSeed: 1510.0 },
+  { suffix: "SEP26", priceSeed: 1536.0 },
+  { suffix: "OCT26", priceSeed: 1564.0 },
+  { suffix: "NOV26", priceSeed: 1594.0 },
+  { suffix: "DIC26", priceSeed: 1624.0 },
+  { suffix: "ENE27", priceSeed: 1654.0 },
+  { suffix: "FEB27", priceSeed: 1684.0 },
+  { suffix: "MAR27", priceSeed: 1715.0 },
+  { suffix: "ABR27", priceSeed: 1745.0 },
 ];
 
 /**
@@ -102,10 +101,10 @@ export const DLR_REGISTRY = DLR_SEED_RAW
  * Spot mayorista (BCRA Com. A 3500) al momento de la captura.
  * Se usa como fallback si /api/dolares no devuelve la casa "mayorista".
  */
-export const DLR_SPOT_SEED = 1381.8;
+export const DLR_SPOT_SEED = 1474.8;
 
 /** Fecha del seed (para mostrar en UI cuando no hay datos editados). */
-export const DLR_SEED_DATE = "2026-04-30";
+export const DLR_SEED_DATE = "2026-07-16";
 
 /**
  * Días desde el SETTLEMENT (T+1) hasta el vencimiento del futuro.

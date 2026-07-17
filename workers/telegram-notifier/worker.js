@@ -757,11 +757,36 @@ async function checkNewUsers() {
   } catch (e) { console.error("[checkNewUsers]", e.message); }
 }
 
+/* ─────────────── Serie diaria de riesgo país ─────────────── */
+// argentinadatos (que daba la serie histórica) murió en jul-2026; ámbito solo
+// publica el último valor. Logueamos acá el valor diario en riesgo_pais_history
+// para reconstruir la serie (la usa el Semáforo del Merval para la tendencia
+// 21 ruedas). Una vez por día (flag en memoria; upsert idempotente por fecha).
+let _rpLoggedDate = null;
+async function logRiesgoPais() {
+  try {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    if (_rpLoggedDate === today) return;
+    const r = await fetch("https://mercados.ambito.com//riesgopais/variacion", {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+    });
+    if (!r.ok) return;
+    const j = await r.json();
+    const valor = Number(String(j?.ultimo || "").replace(/\./g, "").replace(",", "."));
+    const m = String(j?.fecha || "").match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    const fecha = m ? `${m[3]}-${m[2]}-${m[1]}` : today;
+    if (!Number.isFinite(valor) || valor <= 0) return;
+    const { error } = await supabase.from("riesgo_pais_history").upsert({ fecha, valor }, { onConflict: "fecha" });
+    if (!error) { _rpLoggedDate = today; console.log(`[riesgo_pais] ${fecha} ${valor}`); }
+  } catch (e) { console.error("[logRiesgoPais]", e.message); }
+}
+
 /* ─────────────── Loop principal de alertas ─────────────── */
 
 async function alertLoop() {
   try {
     await checkNewUsers();
+    await logRiesgoPais();
     const { users } = await loadContext();
     if (!users.length) return;
     const fut = await loadFutures();

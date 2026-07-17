@@ -28654,13 +28654,14 @@ function SemaforoMervalModule() {
     let mounted = true;
     (async () => {
       try {
-        // La serie histórica de riesgo país murió con argentinadatos (jul-2026);
-        // ámbito solo da el último valor. rpTrend queda null (la pantalla lo
-        // maneja) hasta que tengamos una serie propia logueada.
-        const [dol, rpSerie] = await Promise.all([
+        // La serie histórica de riesgo país murió con argentinadatos (jul-2026).
+        // Desde entonces el worker telegram-notifier loguea el valor diario en
+        // riesgo_pais_history; la tendencia aparece sola cuando haya ≥21 ruedas.
+        const [dol, rpRows] = await Promise.all([
           fetch("/api/dolares").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-          Promise.resolve(null),
+          supabase.from("riesgo_pais_history").select("fecha,valor").order("fecha", { ascending: true }).limit(60).then(({ data }) => data).catch(() => null),
         ]);
+        const rpSerie = (rpRows || []).map((x) => ({ fecha: x.fecha, valor: Number(x.valor) }));
         let brecha = null, ccl = null, oficial = null;
         if (Array.isArray(dol)) {
           const find = (c) => { const x = dol.find((y) => (y.casa || "").toLowerCase() === c); return x ? Number(x.venta) : null; };
