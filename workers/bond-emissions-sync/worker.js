@@ -207,10 +207,12 @@ async function discoverLicitationUrls() {
   }
   info(`Seeds: ${SEED_PATHS.length} URLs precargadas`);
 
-  // 2. Discovery via buscador de gob.ar
+  // 2. Discovery via el listado de noticias de Economía. El /buscador viejo
+  // murió en 2026 (301 → jefatura/guiaosc → 403); el listado paginado
+  // /economia/noticias?page=N anda y trae los "resultado de la licitación"
+  // del Tesoro (~10 noticias por página, las licitaciones son 2-4 por mes).
   for (let page = 0; page < MAX_PAGES; page++) {
-    const desde = page * PAGE_SIZE;
-    const searchUrl = `${GOB_BASE}/buscador?cant=${PAGE_SIZE}&desde=${desde}&keywords=resultado%20licitacion%20lecap%20boncap`;
+    const searchUrl = `${GOB_BASE}/economia/noticias${page ? `?page=${page}` : ""}`;
     let html;
     try {
       html = await fetchText(searchUrl);
@@ -232,8 +234,9 @@ async function discoverLicitationUrls() {
         foundNew++;
       }
     }
-    info(`buscador page ${page}: ${matches.length} matches, ${foundNew} nuevas (total ${urls.size})`);
-    if (foundNew === 0 && page > 0) break;
+    info(`noticias page ${page}: ${matches.length} matches, ${foundNew} nuevas (total ${urls.size})`);
+    // No cortamos por página sin matches: en el listado general las
+    // licitaciones vienen intercaladas con otras noticias.
     await sleep(SLEEP_BETWEEN_FETCHES_MS);
   }
 

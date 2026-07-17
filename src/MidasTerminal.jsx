@@ -8895,11 +8895,15 @@ async function fetchArgentinaDatos() {
   if (_argentinaDatosCache) return _argentinaDatosCache;
   if (_argentinaDatosCachePromise) return _argentinaDatosCachePromise;
 
-  _argentinaDatosCachePromise = fetch("https://api.argentinadatos.com/v1/finanzas/indices/inflacion")
+  // argentinadatos.com murió (404 desde jul-2026): la inflación mensual ahora
+  // viene del BCRA (variable 27) vía el proxy /api/bcra.
+  _argentinaDatosCachePromise = fetch("/api/bcra?var=27")
     .then((r) => r.json())
-    .then((inflacionData) => {
-      const inflLast = Array.isArray(inflacionData) && inflacionData.length > 0
-        ? inflacionData[inflacionData.length - 1] : null;
+    .then((j) => {
+      const det = j?.results?.[0]?.detalle;
+      const inflLast = Array.isArray(det) && det.length
+        ? det.reduce((a, b) => (String(a.fecha) >= String(b.fecha) ? a : b))
+        : null;
 
       _argentinaDatosCache = {
         inflacionMensual: inflLast?.valor ?? null,           // ej: 2.6 (%)
@@ -21192,16 +21196,22 @@ async function fetchMacroIndicators() {
   if (_macroIndicatorsCachePromise) return _macroIndicatorsCachePromise;
 
   _macroIndicatorsCachePromise = (async () => {
+    // argentinadatos.com murió (404 desde jul-2026). Inflación viene del BCRA
+    // (vars 27 mensual / 28 interanual, detalle[0] = dato más reciente) y el
+    // riesgo país de ámbito vía el proxy /api/bcra?riesgo=1.
     const [riesgoData, inflMensualData, inflInterData] = await Promise.all([
-      fetch("https://api.argentinadatos.com/v1/finanzas/indices/riesgo-pais/ultimo").then((r) => r.ok ? r.json() : null).catch(() => null),
-      fetch("https://api.argentinadatos.com/v1/finanzas/indices/inflacion").then((r) => r.ok ? r.json() : null).catch(() => null),
-      fetch("https://api.argentinadatos.com/v1/finanzas/indices/inflacionInteranual").then((r) => r.ok ? r.json() : null).catch(() => null),
+      fetch("/api/bcra?riesgo=1").then((r) => r.ok ? r.json() : null).catch(() => null),
+      fetch("/api/bcra?var=27").then((r) => r.ok ? r.json() : null).catch(() => null),
+      fetch("/api/bcra?var=28").then((r) => r.ok ? r.json() : null).catch(() => null),
     ]);
 
-    const inflMensualLast = Array.isArray(inflMensualData) && inflMensualData.length > 0
-      ? inflMensualData[inflMensualData.length - 1] : null;
-    const inflInterLast = Array.isArray(inflInterData) && inflInterData.length > 0
-      ? inflInterData[inflInterData.length - 1] : null;
+    const bcraLast = (j) => {
+      const det = j?.results?.[0]?.detalle;
+      if (!Array.isArray(det) || !det.length) return null;
+      return det.reduce((a, b) => (String(a.fecha) >= String(b.fecha) ? a : b));
+    };
+    const inflMensualLast = bcraLast(inflMensualData);
+    const inflInterLast = bcraLast(inflInterData);
 
     _macroIndicatorsCache = {
       riesgoPais: riesgoData?.valor ?? null,
@@ -28644,9 +28654,12 @@ function SemaforoMervalModule() {
     let mounted = true;
     (async () => {
       try {
+        // La serie histórica de riesgo país murió con argentinadatos (jul-2026);
+        // ámbito solo da el último valor. rpTrend queda null (la pantalla lo
+        // maneja) hasta que tengamos una serie propia logueada.
         const [dol, rpSerie] = await Promise.all([
           fetch("/api/dolares").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-          fetch("https://api.argentinadatos.com/v1/finanzas/indices/riesgo-pais").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+          Promise.resolve(null),
         ]);
         let brecha = null, ccl = null, oficial = null;
         if (Array.isArray(dol)) {
