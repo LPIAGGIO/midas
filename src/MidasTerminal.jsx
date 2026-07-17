@@ -1244,9 +1244,19 @@ function MidasApp({ allowedModules = null }) {
                     globalAlerts.log.map((a) => (
                       <div key={a.id} className="flex items-center gap-2" style={{ padding: "8px 14px", borderTop: `1px solid ${C.border}`, fontSize: 11.5 }}>
                         <span style={{ color: C.dim, fontVariantNumeric: "tabular-nums" }}>{a.ts}</span>
-                        <span style={{ fontWeight: 700, fontSize: 9, color: a.kind === "down" ? C.red : C.green, border: `1px solid ${a.kind === "down" ? C.red : C.green}`, borderRadius: 3, padding: "1px 4px" }}>{a.kind === "down" ? "▼" : "▲"}</span>
-                        <span style={{ color: C.text, fontWeight: 600 }}>{a.ticker}</span>
-                        <span style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>@ {a.level}</span>
+                        {a.kind === "new_user" ? (
+                          <>
+                            <span style={{ fontWeight: 700, fontSize: 9, color: C.accent, border: `1px solid ${C.accent}`, borderRadius: 3, padding: "1px 4px" }}>NUEVO</span>
+                            <span style={{ color: C.text, fontWeight: 600 }}>Usuario nuevo</span>
+                            <span style={{ color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.msg}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ fontWeight: 700, fontSize: 9, color: a.kind === "down" ? C.red : C.green, border: `1px solid ${a.kind === "down" ? C.red : C.green}`, borderRadius: 3, padding: "1px 4px" }}>{a.kind === "down" ? "▼" : "▲"}</span>
+                            <span style={{ color: C.text, fontWeight: 600 }}>{a.ticker}</span>
+                            <span style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>@ {a.level}</span>
+                          </>
+                        )}
                       </div>
                     ))
                   )}
@@ -24619,6 +24629,36 @@ function useGlobalAlerts() {
       supabase.from("price_alerts").update({ triggered_at: new Date().toISOString() }).eq("id", a.id).then(() => {});
     }
   }, [consolidated, futPrices, d912, palerts, fire, muted]);
+
+  // Aviso de usuario nuevo — SOLO para admins. En el primer barrido se marcan los
+  // existentes como vistos (no ensucian la campana); solo los que aparezcan
+  // DESPUÉS entran al log y prenden el badge. Espeja el patrón de firedRef.
+  const nuSeen = useRef(new Set());
+  const nuSeeded = useRef(false);
+  const mutedRef = useRef(muted);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
+  useEffect(() => {
+    if (!user) { nuSeeded.current = false; nuSeen.current = new Set(); return; }
+    let cancelled = false, iv;
+    supabase.rpc("is_admin").then(({ data: adm }) => {
+      if (cancelled || !adm) return;
+      const poll = () =>
+        supabase.from("notification_log").select("id,body,created_at").eq("kind", "new_user").order("created_at", { ascending: false }).limit(30).then(({ data: rows }) => {
+          if (cancelled || !rows) return;
+          if (!nuSeeded.current) { rows.forEach((r) => nuSeen.current.add(r.id)); nuSeeded.current = true; return; }
+          const fresh = rows.filter((r) => !nuSeen.current.has(r.id)).reverse();
+          for (const r of fresh) {
+            nuSeen.current.add(r.id);
+            const ts = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+            if (!mutedRef.current) fire("🆕 Nuevo usuario en Midas", r.body || "Se registró un usuario");
+            setLog((l) => [{ id: "nu_" + r.id, ts, kind: "new_user", msg: r.body || "nuevo usuario" }, ...l].slice(0, 40));
+          }
+        });
+      poll();
+      iv = setInterval(poll, 30000);
+    });
+    return () => { cancelled = true; if (iv) clearInterval(iv); };
+  }, [user, fire]);
 
   return { log, unseen: Math.max(0, log.length - seen), markSeen: () => setSeen(log.length), clearLog: () => { setLog([]); setSeen(0); }, notifPerm, requestPerm, muted, toggleMute };
 }

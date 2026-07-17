@@ -730,10 +730,38 @@ async function evalFuturesCloseScheduled(users) {
   }
 }
 
+/* ─────────────── Aviso al admin de usuarios nuevos ─────────────── */
+// Cada perfil nuevo (no registrado en notification_log kind='new_user') dispara
+// un DM a TODOS los admins (admin_users) que tengan Telegram linkeado, y se
+// marca como avisado. Los preexistentes se backfillearon para no spamear.
+async function checkNewUsers() {
+  try {
+    const { data: admins } = await supabase.from("admin_users").select("user_id");
+    if (!admins || !admins.length) return;
+    const adminIds = admins.map((a) => a.user_id);
+    const { data: links } = await supabase.from("telegram_links").select("chat_id").in("user_id", adminIds);
+    const adminChats = [...new Set((links || []).map((l) => l.chat_id).filter(Boolean))];
+    if (!adminChats.length) return;
+    const { data: sent } = await supabase.from("notification_log").select("dedup_key").eq("kind", "new_user");
+    const known = new Set((sent || []).map((r) => r.dedup_key));
+    const { data: profiles } = await supabase.from("profiles").select("id, email, display_name, created_at").order("created_at", { ascending: true });
+    for (const p of profiles || []) {
+      if (known.has(p.id)) continue;
+      const who = p.display_name || p.email || p.id;
+      const extra = p.email && p.display_name ? ` (${p.email})` : "";
+      const msg = `🆕 <b>Nuevo usuario en Midas</b>\n${who}${extra}`;
+      for (const chat of adminChats) await sendMessage(chat, msg);
+      await supabase.from("notification_log").insert({ user_id: adminIds[0], kind: "new_user", dedup_key: p.id, title: "nuevo usuario", body: p.email || "" });
+      console.log(`[new_user] avisado admin: ${who}`);
+    }
+  } catch (e) { console.error("[checkNewUsers]", e.message); }
+}
+
 /* ─────────────── Loop principal de alertas ─────────────── */
 
 async function alertLoop() {
   try {
+    await checkNewUsers();
     const { users } = await loadContext();
     if (!users.length) return;
     const fut = await loadFutures();
