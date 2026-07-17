@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext, Fragment } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "./auth/AuthContext.jsx";
 import { supabase } from "./lib/supabase.js";
@@ -253,6 +253,7 @@ const NAV = [
     type: "group",
     children: [
       { id: "libro-operaciones", label: "Libro de operaciones", icon: BookOpen },
+      { id: "caja-tiempo", label: "Caja en el tiempo", icon: Activity },
       { id: "pnl-instrumento", label: "P&L por Instrumento", icon: BarChart3 },
       { id: "reporte-cartera", label: "Reporte de cartera", icon: FileText },
       { id: "montecarlo-cartera", label: "Monte Carlo · Cartera", icon: Activity },
@@ -1548,6 +1549,8 @@ function MidasApp({ allowedModules = null }) {
               />
             ) : active === "rem" ? (
               <RemTcModule key={active} />
+            ) : active === "caja-tiempo" ? (
+              <CajaTiempoModule key={active} />
             ) : active === "pnl-instrumento" ? (
               <PnlPorInstrumentoModule key={active} />
             ) : active === "reporte-cartera" ? (
@@ -30132,6 +30135,197 @@ El dividendo suele pagarse <strong style={{ color: C.muted }}>trimestral</strong
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Caja en el tiempo — reconstruye la cuenta (efectivo + tenencias) a
+// CUALQUIER fecha desde el libro de Cocos (libro_movimientos), con un slider
+// de días. Idea tomada de Aquila. Tenencias por costo promedio corrido
+// (venta descarga al promedio → el remanente conserva su costo); valuación
+// al cierre histórico de esa fecha: equity_daily_close (CEDEARs/acciones),
+// fci_quotes (VCP), daily_close_prices (bonos/letras). Si el valor a mercado
+// da >5× o <1/5 del costo se asume mismatch de escala y se cae al costo
+// (badge "(costo)"). Letras ya vencidas a la fecha T se excluyen (su
+// amortización entró a la caja como "Renta y Amortización", no como venta).
+// Futuros excluidos: liquidan diario por caja, el efectivo ya los captura.
+// ═══════════════════════════════════════════════════════════════════════
+function CajaTiempoModule() {
+  const { rows, loading } = useLibroMovimientos();
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+  const days = useMemo(() => {
+    if (!rows.length) return [];
+    let first = null;
+    for (const m of rows) { const d = m.fecha_ejecucion; if (d && (!first || d < first)) first = d; }
+    if (!first) return [];
+    const out = [];
+    const cur = new Date(first + "T12:00:00");
+    const end = new Date(todayStr + "T12:00:00");
+    while (cur <= end) { out.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1); }
+    return out;
+  }, [rows, todayStr]);
+
+  const [idx, setIdx] = useState(-1); // -1 = último día
+  const [step, setStep] = useState(1); // paso de las flechas: 1/7/30
+  const iSel = idx < 0 ? days.length - 1 : Math.min(idx, days.length - 1);
+  const T = days[iSel] || todayStr;
+
+  // Reconstrucción a T: caja por moneda + tenencias a costo promedio corrido.
+  const snap = useMemo(() => {
+    const cash = {};
+    const pos = new Map();
+    const asc = [...rows].sort((a, b) => (a.fecha_ejecucion || "").localeCompare(b.fecha_ejecucion || ""));
+    for (const m of asc) {
+      const liqDate = m.fecha_liquidacion || m.fecha_ejecucion;
+      if (liqDate && liqDate <= T) {
+        const cur = m.moneda === "USD" ? "USD" : (m.moneda || "ARS");
+        cash[cur] = (cash[cur] || 0) + (Number(m.total) || 0);
+      }
+      if (!m.fecha_ejecucion || m.fecha_ejecucion > T) continue;
+      const cat = m.categoria;
+      if (!["trade_cedear", "trade_otro", "trade_bono", "fci"].includes(cat) || !m.ticker) continue;
+      let type = cat === "trade_cedear" ? "cedear" : cat === "trade_otro" ? "stock" : cat === "fci" ? "fci" : "bond";
+      const scale = type === "fci" ? 1 / 1000 : 1;
+      const q = (Number(m.cantidad) || 0) * scale;
+      if (Math.abs(q) < 1e-12) continue;
+      const key = type + "|" + m.ticker;
+      const p = pos.get(key) || { type, ticker: m.ticker, qty: 0, cost: 0, first: m.fecha_ejecucion };
+      if (q > 0) { p.cost += q * (Number(m.precio) || 0); p.qty += q; }
+      else {
+        const avg = p.qty > 1e-12 ? p.cost / p.qty : Number(m.precio) || 0;
+        p.cost += q * avg; p.qty += q;
+      }
+      pos.set(key, p);
+    }
+    const holds = Array.from(pos.values()).filter((p) => Math.abs(p.qty) > 1e-9)
+      // Letras/bonos ya vencidos a T: su cobro entró a caja, la "tenencia" es fantasma.
+      .filter((p) => { if (p.type !== "bond") return true; const mat = parseLetraMaturity(p.ticker); return !mat || mat >= T; });
+    return { cash, holds };
+  }, [rows, T]);
+
+  // Precios históricos a T (últimos ≤T, ventana de 14 días para cubrir feriados).
+  const [px, setPx] = useState({});
+  const tickersKey = snap.holds.map((h) => h.type + h.ticker).sort().join(",");
+  useEffect(() => {
+    if (!snap.holds.length) { setPx({}); return; }
+    let cancel = false;
+    const t0 = new Date(T + "T12:00:00"); t0.setDate(t0.getDate() - 14);
+    const desde = t0.toISOString().slice(0, 10);
+    const tim = setTimeout(async () => {
+      const out = {};
+      const eq = snap.holds.filter((h) => h.type === "cedear" || h.type === "stock").map((h) => h.ticker);
+      const bo = snap.holds.filter((h) => h.type === "bond").map((h) => h.ticker);
+      const fc = snap.holds.filter((h) => h.type === "fci");
+      const jobs = [];
+      if (eq.length) jobs.push(supabase.from("equity_daily_close").select("ticker,close,trade_date").in("ticker", eq).lte("trade_date", T).gte("trade_date", desde).then(({ data }) => {
+        for (const r of data || []) { const k = "e|" + r.ticker; if (!out[k] || out[k].date < r.trade_date) out[k] = { price: Number(r.close), date: r.trade_date }; }
+      }));
+      if (bo.length) jobs.push(supabase.from("daily_close_prices").select("ticker,precio_cierre_hoy,precio_ultimo,trade_date").in("ticker", bo).lte("trade_date", T).gte("trade_date", desde).then(({ data }) => {
+        for (const r of data || []) { const k = "b|" + r.ticker; const v = Number(r.precio_cierre_hoy) || Number(r.precio_ultimo); if (v && (!out[k] || out[k].date < r.trade_date)) out[k] = { price: v, date: r.trade_date }; }
+      }));
+      if (fc.length) jobs.push(supabase.from("fci_quotes").select("fondo,vcp,fecha").lte("fecha", T).gte("fecha", desde).then(({ data }) => {
+        for (const h of fc) {
+          const fondo = (FCI_LEDGER_MAP[h.ticker] || h.ticker).split("|")[0];
+          for (const r of data || []) {
+            if ((r.fondo || "").toLowerCase().startsWith(fondo.toLowerCase().slice(0, 12))) {
+              const k = "f|" + h.ticker;
+              if (!out[k] || out[k].date < r.fecha) out[k] = { price: Number(r.vcp) * 1000, date: r.fecha };
+            }
+          }
+        }
+      }));
+      await Promise.all(jobs).catch(() => {});
+      if (!cancel) setPx(out);
+    }, 250); // debounce: el slider dispara muchos cambios seguidos
+    return () => { cancel = true; clearTimeout(tim); };
+  }, [T, tickersKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fmt$ = (n, cur = "ARS") => `${n < 0 ? "−" : ""}${cur === "USD" ? "US$" : "$"}${Math.abs(n).toLocaleString("es-AR", { maximumFractionDigits: cur === "USD" ? 2 : 0 })}`;
+  const valued = useMemo(() => snap.holds.map((h) => {
+    const k = (h.type === "fci" ? "f|" : h.type === "bond" ? "b|" : "e|") + h.ticker;
+    const hit = px[k];
+    let mkt = hit ? h.qty * hit.price : null;
+    let src = hit ? hit.date : null;
+    // Guard de escala: si mercado difiere >5× del costo, es mismatch de
+    // convención (bono por 100 VN, FCI ×1000) → mostrar costo.
+    if (mkt != null && h.cost > 0 && (mkt > h.cost * 5 || mkt < h.cost / 5)) { mkt = null; src = null; }
+    return { ...h, value: mkt ?? h.cost, atMarket: mkt != null, priceDate: src, res: mkt != null ? mkt - h.cost : 0 };
+  }).sort((a, b) => b.value - a.value), [snap.holds, px]);
+
+  const carteraVal = valued.reduce((s, h) => s + h.value, 0);
+  const totalARS = (snap.cash.ARS || 0) + carteraVal;
+  const fmtFecha = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "");
+  const move = (d) => setIdx(Math.max(0, Math.min(days.length - 1, iSel + d)));
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Caja en el tiempo</h1>
+      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 16px 0", maxWidth: 860 }}>
+        Tu cuenta de Cocos reconstruida a cualquier fecha desde el libro de movimientos: efectivo acumulado y tenencias valuadas al cierre de ese día. Mové el cursor o usá las flechas.
+      </p>
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando libro…</div>
+      ) : !days.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin movimientos. Importá la cuenta corriente de Cocos en Reportes → Libro de operaciones.</div>
+      ) : (
+        <>
+          <div className="flex items-center" style={{ gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+            <button onClick={() => move(-step)} style={{ padding: "4px 10px", fontSize: 13, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>◀</button>
+            <span style={{ fontSize: 15, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", minWidth: 100, textAlign: "center" }}>{fmtFecha(T)}</span>
+            <button onClick={() => move(step)} style={{ padding: "4px 10px", fontSize: 13, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>▶</button>
+            {[["Día", 1], ["Semana", 7], ["Mes", 30]].map(([l, s]) => (
+              <button key={l} onClick={() => setStep(s)} style={{ padding: "3px 9px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${step === s ? C.accent : C.border}`, background: step === s ? "rgba(124,156,255,0.12)" : "transparent", color: step === s ? C.accent : C.muted, borderRadius: 4 }}>{l}</button>
+            ))}
+            <button onClick={() => setIdx(-1)} style={{ padding: "3px 9px", fontSize: 10.5, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>Hoy</button>
+          </div>
+          <input type="range" min={0} max={days.length - 1} value={iSel} onChange={(e) => setIdx(Number(e.target.value))}
+            style={{ width: "100%", marginBottom: 16, accentColor: C.accent }} />
+
+          <div className="flex" style={{ gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+            {[["Efectivo ARS", fmt$(snap.cash.ARS || 0)], ["Efectivo USD", fmt$(snap.cash.USD || 0, "USD")], ["Cartera (contado)", fmt$(carteraVal)], ["Total ARS + cartera", fmt$(totalARS)]].map(([l, v]) => (
+              <div key={l} style={{ flex: "1 1 180px", border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "12px 14px" }}>
+                <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>{l}</div>
+                <div style={{ fontSize: 19, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ color: C.dim, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.1em", background: "rgba(255,255,255,0.02)" }}>
+                  <th style={{ textAlign: "left", padding: "8px 10px" }}>Tenencia al {fmtFecha(T)}</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px" }}>Cantidad</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px" }}>Costo</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px" }}>Valor a esa fecha</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px" }}>Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!valued.length ? (
+                  <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: C.muted }}>Sin tenencias de contado a esta fecha.</td></tr>
+                ) : valued.map((h) => (
+                  <tr key={h.type + h.ticker} style={{ borderTop: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "7px 10px" }}>
+                      <span style={{ color: C.text, fontWeight: 600 }}>{h.type === "fci" ? fciDisplayName(FCI_LEDGER_MAP[h.ticker] || h.ticker) : h.ticker}</span>{" "}
+                      <span style={{ fontSize: 9.5, color: C.dim }}>{h.type}{h.atMarket ? ` · cierre ${fmtFecha(h.priceDate)}` : " · (costo)"}</span>
+                    </td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.muted }}>{h.qty.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.muted }}>{fmt$(h.cost)}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.text, fontWeight: 600 }}>{fmt$(h.value)}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600, color: h.res > 0 ? C.green : h.res < 0 ? C.red : C.dim }}>{h.atMarket ? fmt$(h.res) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>
+            El efectivo suma todos los movimientos liquidados hasta la fecha (aportes, ventas, compras, ajustes de futuros, cauciones). Futuros no aparecen como tenencia: liquidan diario por caja. "(costo)" = sin cierre histórico confiable para ese papel en esa fecha. Las letras ya vencidas se excluyen (su cobro está en el efectivo).
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PnlPorInstrumentoModule() {
   const { positions, loading, error } = useUserPositions();
   const { movements: cashMovements } = useCashMovements();
@@ -30368,8 +30562,23 @@ function PnlPorInstrumentoModule() {
                     {v !== 0 ? `${fmtM(v)}${cur}` : "—"}
                   </td>
                 );
+                // "Si cerrás hoy" para futuros ABIERTOS (idea Aquila): neto de
+                // salida = MTM no realizado − derechos de mercado estimados de
+                // la salida (A3: USD 0,20/contrato + IVA 21%, al TC del propio
+                // futuro como proxy del A3500 — error <1%). Los derechos de
+                // ENTRADA ya están pagados en la caja real, no se restan acá.
+                let futClose = null;
+                if (r.type === "future" && r.open !== 0 && r.atMarket) {
+                  const fp = futurePrices[r.ticker] || {};
+                  const spotProxy = Number(fp.reference) || Number(fp.settlement) || Number(fp.price) || null;
+                  if (spotProxy) {
+                    const fee = Math.abs(r.open) * 0.20 * spotProxy * 1.21;
+                    futClose = { fee, neto: r.unrealized - fee };
+                  }
+                }
                 return (
-                  <tr key={r.type + r.ticker} style={{ borderTop: `1px solid ${C.border}` }}>
+                  <Fragment key={r.type + r.ticker}>
+                  <tr style={{ borderTop: `1px solid ${C.border}` }}>
                     <td style={{ padding: "7px 10px" }}>
                       <span style={{ color: C.text, fontWeight: 600 }}>{tickerLabel(r)}</span>{" "}
                       <span style={{ fontSize: 9.5, color: C.dim }}>{TYPE_LABEL[r.type] || r.type} · {r.ops} ops · {fmtFecha(r.first)} → {fmtFecha(r.last)}</span>
@@ -30387,6 +30596,15 @@ function PnlPorInstrumentoModule() {
                     {cell(r.unrealized, false)}
                     {cell(r.total, true)}
                   </tr>
+                  {futClose && (
+                    <tr>
+                      <td colSpan={9} style={{ padding: "0 10px 7px 10px", fontSize: 10.5, color: C.dim }}>
+                        ↳ Si cerrás hoy al precio actual: neto ≈ <b style={{ color: futClose.neto >= 0 ? C.green : C.red, fontVariantNumeric: "tabular-nums" }}>{fmtM(futClose.neto)}</b>
+                        {" "}(MTM {fmtM(r.unrealized)} − derechos de salida est. ${Math.round(futClose.fee).toLocaleString("es-AR")} · A3 USD 0,20/contrato + IVA; si cerrás el mismo día que abriste, la bonificación intradía del 50% lo achica)
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
