@@ -8440,13 +8440,37 @@ function useStockPrices() {
         setLoading(true);
         const bust = `?_=${Date.now()}`;
 
-        const [stocksRes, cedearsRes] = await Promise.all([
+        // Precio híbrido (idea Aquila): con BYMA cerrado el CEDEAR local queda
+        // congelado, pero el subyacente sigue operando en NY hasta las ~18 ART.
+        // Fuera de rueda traemos también el feed USA + CCL y valuamos los
+        // CEDEARs al TEÓRICO = USD × CCL ÷ ratio (source "teorico"). En rueda,
+        // manda el operado local como siempre.
+        const bymaOpen = isTradingDayAndMarketOpened();
+        const [stocksRes, cedearsRes, usaRes, dolRes] = await Promise.all([
           fetch(`/api/data912?type=acciones&_=${Date.now()}`),
           fetch(`/api/data912?type=cedears&_=${Date.now()}`),
+          bymaOpen ? Promise.resolve(null) : fetch(`/api/data912?type=usa&_=${Date.now()}`).catch(() => null),
+          bymaOpen ? Promise.resolve(null) : fetch(`/api/dolares`).catch(() => null),
         ]);
 
         const stocksArr = stocksRes.ok ? await stocksRes.json() : [];
         const cedearsArr = cedearsRes.ok ? await cedearsRes.json() : [];
+        let usdMap = null, ccl = null;
+        if (!bymaOpen && usaRes?.ok && dolRes?.ok) {
+          try {
+            const usaArr = await usaRes.json();
+            const dol = await dolRes.json();
+            const cclRow = Array.isArray(dol) ? dol.find((d) => (d.casa || "").toLowerCase() === "contadoconliqui") : null;
+            ccl = cclRow ? Number(cclRow.venta) || Number(cclRow.compra) : null;
+            if (ccl && Array.isArray(usaArr)) {
+              usdMap = {};
+              for (const it of usaArr) {
+                const p = Number(it?.c) || ((Number(it?.px_ask) > 0 && Number(it?.px_bid) > 0) ? (Number(it.px_ask) + Number(it.px_bid)) / 2 : null);
+                if (it?.symbol && p > 0) usdMap[String(it.symbol).trim().toUpperCase()] = p;
+              }
+            }
+          } catch { usdMap = null; }
+        }
 
         const map = {};
 
@@ -8492,6 +8516,28 @@ function useStockPrices() {
 
         for (const item of stocksArr) parseItem(item);
         for (const item of cedearsArr) parseItem(item);
+
+        // Override teórico fuera de rueda (solo CEDEARs con ratio conocido y
+        // subyacente en el feed USA). Guard ±12% vs el último local: si el
+        // teórico se va más que eso, es un ratio/subyacente mal mapeado — se
+        // conserva el precio local antes que valuar cualquier cosa.
+        if (usdMap && ccl) {
+          for (const item of cedearsArr) {
+            const tk = String(item?.symbol || "").trim().toUpperCase();
+            const cat = CEDEAR_CAT[tk];
+            const usd = cat ? usdMap[tk] : null;
+            const local = map[tk];
+            if (!cat || !usd || !local) continue;
+            const theo = (usd * ccl) / cat.r;
+            if (!(theo > 0) || theo > local.price * 1.12 || theo < local.price * 0.88) continue;
+            map[tk] = {
+              ...local,
+              price: theo,
+              source: "teorico",
+              changePct: local.previousClose > 0 ? (theo / local.previousClose - 1) * 100 : local.changePct,
+            };
+          }
+        }
 
         if (!mounted) return;
         const now = new Date().toISOString();
@@ -30329,7 +30375,29 @@ function CajaTiempoModule() {
 function PnlPorInstrumentoModule() {
   const { positions, loading, error } = useUserPositions();
   const { movements: cashMovements } = useCashMovements();
+  const { user } = useAuth();
   const [typeFilter, setTypeFilter] = useState("all");
+
+  // Tarifa efectiva REAL medida del propio libro de Cocos (idea Aquila): en vez
+  // de asumir el arancel de tabla, Σ(comisión+derechos+IVA) ÷ Σ|bruto| de todas
+  // las operaciones importadas. Es TU costo promedio por punta, con IVA.
+  const [tarifaEf, setTarifaEf] = useState(null);
+  useEffect(() => {
+    if (!user) return;
+    let cancel = false;
+    supabase.from("libro_movimientos").select("comision,ddmm,iva,monto_bruto,categoria").eq("user_id", user.id).limit(8000)
+      .then(({ data }) => {
+        if (cancel || !data || !data.length) return;
+        let fees = 0, vol = 0;
+        for (const m of data) {
+          if (!/^(trade_|futuro)/.test(m.categoria || "")) continue;
+          fees += Math.abs(Number(m.comision) || 0) + Math.abs(Number(m.ddmm) || 0) + Math.abs(Number(m.iva) || 0);
+          vol += Math.abs(Number(m.monto_bruto) || 0);
+        }
+        if (vol > 0 && fees > 0) setTarifaEf({ rate: fees / vol, fees, vol });
+      });
+    return () => { cancel = true; };
+  }, [user]);
 
   // Precios en vivo: sin esto el "no realizado" (P&L de lo abierto a mercado)
   // sale 0 y los instrumentos abiertos quedaban en "—". Mismos hooks que la
@@ -30525,7 +30593,14 @@ function PnlPorInstrumentoModule() {
       {/* Comisiones acumuladas — fila destacada arriba (lo que LP fue pagando). */}
       {comisiones !== 0 && (
         <div className="flex items-center justify-between" style={{ gap: 12, padding: "10px 14px", marginBottom: 12, border: `1px solid ${C.border}`, borderRadius: 6, background: "rgba(248,113,113,0.06)" }}>
-          <span style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Comisiones acumuladas <span style={{ fontSize: 10, color: C.dim, fontWeight: 400 }}>· derechos de mercado + IVA + aranceles</span></span>
+          <span style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>
+            Comisiones acumuladas <span style={{ fontSize: 10, color: C.dim, fontWeight: 400 }}>· derechos de mercado + IVA + aranceles</span>
+            {tarifaEf && (
+              <span style={{ display: "block", fontSize: 10.5, color: C.dim, fontWeight: 400, marginTop: 2 }}>
+                Tu tarifa efectiva real (medida del libro Cocos): <b style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>{(tarifaEf.rate * 100).toFixed(3)}%</b> por punta sobre ${Math.round(tarifaEf.vol / 1e6).toLocaleString("es-AR")}M operados
+              </span>
+            )}
+          </span>
           <span style={{ fontSize: 16, fontWeight: 700, color: C.red, fontVariantNumeric: "tabular-nums" }}>{fmtM(comisiones)}</span>
         </div>
       )}
