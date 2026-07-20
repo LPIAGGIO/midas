@@ -27996,7 +27996,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px", marginTop: compact ? 10 : 14 }}>
         <div className="flex" style={{ gap: compact ? 10 : 12, flexWrap: "wrap" }}>
           <Card label="Break-even (no perder)" value={fAr(breakeven)} color="#f59e0b" highlight
-            sub={avg != null ? `+${((breakeven / avg - 1) * 100).toFixed(2)}% sobre tu promedio` : ""} />
+            sub={avg != null ? `+${((breakeven / avg - 1) * 100).toFixed(2)}% sobre tu promedio · der.+IVA ≈ ${fAr0(totalCost * c + totalQty * breakeven * c)} (${fAr0(totalCost * c)} compra + ${fAr0(totalQty * breakeven * c)} venta)` : ""} />
           <Card label="Resultado neto total"
             value={hasSells ? fAr0(totalPnl) : "—"}
             color={hasSells ? (totalPnl > 0 ? C.green : totalPnl < 0 ? C.red : C.muted) : C.text}
