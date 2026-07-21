@@ -29910,7 +29910,10 @@ function ReporteCarteraModule() {
       if (!Number.isFinite(vAct) || !Number.isFinite(vIni)) continue;
       const rend = vAct - vIni;
       const rendPct = Math.abs(vIni) > 0 ? (rend / Math.abs(vIni)) * 100 : null;
-      const dias = g.firstDate ? Math.max(1, Math.round((Date.now() - new Date(g.firstDate + "T00:00:00").getTime()) / 86400000)) : null;
+      // Días CALENDARIO entre la fecha de compra y hoy (fecha ART), no
+      // Math.round sobre el reloj: eso sumaba +1 día a todo después del
+      // mediodía (34,9 → 35) y desinflaba/inflaba las TNA según la hora.
+      const dias = g.firstDate ? Math.max(1, Math.floor((new Date(getTodayStringAR() + "T00:00:00").getTime() - new Date(g.firstDate + "T00:00:00").getTime()) / 86400000)) : null;
       // TNA solo con >=30 días de tenencia: anualizar un retorno de pocos días
       // (ej. +10% en 4 días ×91) da un número sin sentido económico.
       const tna = (rendPct != null && dias && dias >= 30) ? (rendPct * 365) / dias : null;
