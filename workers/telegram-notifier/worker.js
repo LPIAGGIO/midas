@@ -596,9 +596,13 @@ async function buildFuturesSummary(userId, rawBy, fut) {
 function contadoRealizedToday(positions, dateStr) {
   const CONT = ["bond_ars", "bond_usd", "on", "stock", "cedear"];
   const byT = {};
+  // Clave broker|ticker: un round-trip cerrado en Cocos debe detectarse aunque
+  // el MISMO ticker siga abierto en IOL (antes se mezclaban los lotes de los
+  // dos brokers y el cierre de Cocos desaparecía del resumen).
   for (const p of positions || []) {
     if (!CONT.includes(p?.instrument_type) || !p.ticker) continue;
-    (byT[p.ticker] = byT[p.ticker] || []).push(p);
+    const key = (p.broker || "manual") + "|" + p.ticker;
+    (byT[key] = byT[key] || []).push(p);
   }
   const out = {};
   for (const [ticker, lotes] of Object.entries(byT)) {
@@ -676,16 +680,22 @@ async function buildEodSummary(userId, rawBy, fut) {
   //    (neto 0) — ej. SPCX. Sin esto, una ganancia intradia grande se perdia del total.
   //    Solo tickers en neto 0 (totalmente cerrados): el MTM de lo que sigue abierto
   //    ya va en Tenencias, así no se pisa.
+  // Neto por broker|ticker (misma clave que contadoRealizedToday): el cierre
+  // de un round-trip en Cocos cuenta aunque el ticker siga abierto en IOL.
   const netAll = {};
   for (const p of raw) {
     if (!["bond_ars", "bond_usd", "on", "stock", "cedear"].includes(p?.instrument_type) || !p.ticker) continue;
-    netAll[p.ticker] = (netAll[p.ticker] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+    const key = (p.broker || "manual") + "|" + p.ticker;
+    netAll[key] = (netAll[key] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
   }
   const realToday = contadoRealizedToday(raw, dateStr);
-  const rtEntries = Object.entries(realToday).filter(([t]) => Math.abs(netAll[t] || 0) < 1e-6);
+  const rtEntries = Object.entries(realToday).filter(([k]) => Math.abs(netAll[k] || 0) < 1e-6);
   if (rtEntries.length) {
     let subtotal = 0; const bl = [];
-    for (const [ticker, pnl] of rtEntries) { subtotal += pnl; bl.push(`• ${ticker}: ${money(pnl)}`); }
+    for (const [key, pnl] of rtEntries) {
+      const [bk, ticker] = key.split("|");
+      subtotal += pnl; bl.push(`• ${ticker}${bk && bk !== "manual" ? ` (${bk.toUpperCase()})` : ""}: ${money(pnl)}`);
+    }
     grand += subtotal;
     lines.push(`\n<b>Cerrado hoy (contado) — realizado</b>\n${bl.join("\n")}\nSubtotal: <b>${money(subtotal)}</b>`);
   }
