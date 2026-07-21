@@ -654,6 +654,10 @@ async function buildEodSummary(userId, rawBy, fut) {
     let subtotal = 0; const bl = [];
     for (const [ticker, net] of Object.entries(netByTicker)) {
       if (Math.abs(net) < 1e-6) continue;
+      // Letras/bonos YA VENCIDOS: no son tenencia (el cobro entró a la caja
+      // como Renta y Amortización); quedaban listados como "s/precio" eterno.
+      const mDays = daysToMaturity(maturityOf(ticker));
+      if (mDays != null && mDays < 0) continue;
       const d = d912[ticker];
       if (!d || d.c == null || d.pct == null) { bl.push(`• ${ticker}: s/precio`); continue; }
       const prev = d.c / (1 + d.pct / 100);
