@@ -27977,7 +27977,16 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
             <input value={tasaCauc} onChange={(e) => setTasaCauc(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
           </div>
           <div style={{ flex: "2 1 240px", fontSize: 10.5, color: C.dim, paddingBottom: 8 }}>
-            Cocos CEDEARs y acciones: 0 comisión, solo derechos de mercado + IVA, en cada pata. Costo por pata ≈ {(c * 100).toFixed(3)}%. <b>Días financiado</b>: si el trade no cierra intradía, días corridos entre la liquidación de la compra y la de la venta (overnight = 1; jueves→viernes = 3 por el finde). All-in de la caución = tasa + 4,07 pts (3% Cocos + 0,365% BYMA + IVA){nDias > 0 && fundAllInTna != null ? ` = ${fundAllInTna.toFixed(1)}% TNA ≈ ${fAr0(fundTotal)} de funding` : ""}.
+            Cocos CEDEARs y acciones: 0 comisión, solo derechos de mercado + IVA, en cada pata. Costo por pata ≈ {(c * 100).toFixed(3)}%. <b>Días financiado</b>: si el trade no cierra intradía, días corridos entre la liquidación de la compra y la de la venta (overnight = 1; jueves→viernes = 3 por el finde). La tasa que cargás es la PURA de mercado; los demás costos los suma Midas.
+            {nDias > 0 && fundAllInTna != null && (() => {
+              const base = totalCost * (nDias / 365);
+              const fInt = base * ((tCauc || 0) / 100), fCom = base * 0.03, fByma = base * 0.00365, fIva = (fCom + fByma) * 0.21;
+              return (
+                <span style={{ display: "block", marginTop: 5, color: C.muted }}>
+                  Funding {nDias}d = <b style={{ color: C.text }}>{fAr0(fInt + fCom + fByma + fIva)}</b>: interés mercado ({(tCauc || 0).toFixed(1)}%) {fAr0(fInt)} + comisión Cocos (3%) {fAr0(fCom)} + derechos y gtías BYMA (0,365%) {fAr0(fByma)} + IVA {fAr0(fIva)} · all-in {fundAllInTna.toFixed(2)}% TNA
+                </span>
+              );
+            })()}
           </div>
         </div>
       </div>
