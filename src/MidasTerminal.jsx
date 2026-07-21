@@ -27625,6 +27625,13 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
   const [iva, setIva] = useState("21");
   const [sells, setSells] = useState([{ qty: "", price: "" }]);
   const [simTicker, setSimTicker] = useState("");
+  // Financiación del descubierto (operatoria apalancada T1 de Cocos): si el
+  // trade no cierra intradía, del día que liquida la compra al que liquida la
+  // venta el rojo se cubre con caución tomadora. Días = corridos entre
+  // liquidaciones (overnight=1; jue→vie=3 por el finde). All-in = tasa mercado
+  // + 3% comisión Cocos + 0,365% BYMA, todo +21% IVA (validado con boleto real).
+  const [diasFin, setDiasFin] = useState("0");
+  const [tasaCauc, setTasaCauc] = useState("21");
 
   const pn = (v) => { const n = Number(String(v ?? "").trim().replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : null; };
   const dc = (v) => v.replace(/\./g, ",");  // tecla . → coma decimal (igual que Valuación CEDEAR)
@@ -27794,7 +27801,14 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
   const avg = totalQty > 0 ? totalCost / totalQty : null;
   const dPct = pn(derechos), iPct = pn(iva);
   const c = (dPct != null && iPct != null) ? (dPct / 100) * (1 + iPct / 100) : 0; // costo por pata (fracción del monto)
-  const breakeven = (avg != null && c < 1) ? (avg * (1 + c)) / (1 - c) : null;
+  // Funding: tasa all-in = tasa caución + (3% Cocos + 0,365% BYMA) × 1,21 IVA
+  // = tasa + 4,07 pts. Se aplica sobre el costo de la posición por día.
+  const nDias = pn(diasFin) || 0;
+  const tCauc = pn(tasaCauc);
+  const fundAllInTna = tCauc != null ? tCauc + (3 + 0.365) * 1.21 : null;
+  const fundFrac = (fundAllInTna != null && nDias > 0) ? (fundAllInTna / 100) * (nDias / 365) : 0; // fracción del costo
+  const fundTotal = totalCost * fundFrac;
+  const breakeven = (avg != null && c < 1) ? (avg * (1 + c) * (1 + fundFrac)) / (1 - c) : null;
 
   // Ventas parciales: cada línea consume del remanente; resultado acumulado.
   const setLot = (i, field, val) => setLots((ls) => ls.map((l, j) => (j === i ? { ...l, [field]: val } : l)));
@@ -27811,7 +27825,9 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
     if (q == null || q <= 0 || p == null || p <= 0 || avg == null) { lineSim.push(null); continue; }
     const n = Math.min(q, Math.max(0, remaining));
     const proceeds = n * p, sellComm = proceeds * c, costN = n * avg, buyComm = costN * c;
-    const pnl = proceeds - sellComm - costN - buyComm;
+    // El funding (caución del descubierto) se prorratea por papel vendido.
+    const fundN = totalQty > 0 ? fundTotal * (n / totalQty) : 0;
+    const pnl = proceeds - sellComm - costN - buyComm - fundN;
     remaining -= n; totalPnl += pnl; totalSellComm += sellComm; totalSold += n;
     lineSim.push({ n, pnl });
   }
@@ -27952,8 +27968,16 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
             <label style={labelStyle}>IVA % (s/ derechos)</label>
             <input value={iva} onChange={(e) => setIva(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
           </div>
+          <div style={{ flex: "1 1 130px", minWidth: 120 }}>
+            <label style={labelStyle}>Días financiado (caución)</label>
+            <input value={diasFin} onChange={(e) => setDiasFin(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
+          </div>
+          <div style={{ flex: "1 1 120px", minWidth: 110 }}>
+            <label style={labelStyle}>Tasa caución TNA %</label>
+            <input value={tasaCauc} onChange={(e) => setTasaCauc(dc(e.target.value))} inputMode="decimal" style={inputStyle} />
+          </div>
           <div style={{ flex: "2 1 240px", fontSize: 10.5, color: C.dim, paddingBottom: 8 }}>
-            Cocos CEDEARs y acciones: 0 comisión, solo derechos de mercado + IVA, en cada pata (compra y venta). Costo por pata ≈ {(c * 100).toFixed(3)}%. (Los derechos de mercado pueden diferir entre CEDEAR y acción — ajustá el % si hace falta.)
+            Cocos CEDEARs y acciones: 0 comisión, solo derechos de mercado + IVA, en cada pata. Costo por pata ≈ {(c * 100).toFixed(3)}%. <b>Días financiado</b>: si el trade no cierra intradía, días corridos entre la liquidación de la compra y la de la venta (overnight = 1; jueves→viernes = 3 por el finde). All-in de la caución = tasa + 4,07 pts (3% Cocos + 0,365% BYMA + IVA){nDias > 0 && fundAllInTna != null ? ` = ${fundAllInTna.toFixed(1)}% TNA ≈ ${fAr0(fundTotal)} de funding` : ""}.
           </div>
         </div>
       </div>
@@ -27996,7 +28020,7 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: compact ? "12px 13px" : "16px 18px", marginTop: compact ? 10 : 14 }}>
         <div className="flex" style={{ gap: compact ? 10 : 12, flexWrap: "wrap" }}>
           <Card label="Break-even (no perder)" value={fAr(breakeven)} color="#f59e0b" highlight
-            sub={avg != null ? `+${((breakeven / avg - 1) * 100).toFixed(2)}% sobre tu promedio · der.+IVA ≈ ${fAr0(totalCost * c + totalQty * breakeven * c)} (${fAr0(totalCost * c)} compra + ${fAr0(totalQty * breakeven * c)} venta)` : ""} />
+            sub={avg != null ? `+${((breakeven / avg - 1) * 100).toFixed(2)}% sobre tu promedio · der.+IVA ≈ ${fAr0(totalCost * c + totalQty * breakeven * c)} (${fAr0(totalCost * c)} compra + ${fAr0(totalQty * breakeven * c)} venta)${fundTotal > 0 ? ` + caución ${fAr0(fundTotal)} (${nDias}d)` : ""}` : ""} />
           <Card label="Resultado neto total"
             value={hasSells ? fAr0(totalPnl) : "—"}
             color={hasSells ? (totalPnl > 0 ? C.green : totalPnl < 0 ? C.red : C.muted) : C.text}
