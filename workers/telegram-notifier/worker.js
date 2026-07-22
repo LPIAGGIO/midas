@@ -868,6 +868,94 @@ async function cmdMomentum(chatId) {
     `📈 <b>Momentum IOL</b>\n${rows.join("\n")}\n\nValor: <b>${money0(totAct)}</b> · Costo: ${money0(totIni)}\nResultado: <b>${rend >= 0 ? "+" : "−"}${money0(rend)} (${rendPct >= 0 ? "+" : ""}${rendPct.toFixed(2)}%)</b>`);
 }
 
+// /portfolio — la cartera COMPLETA separada por broker: contado con precio
+// live, FCI a VCP, futuros (MTM del día, no suman valor: van por margen) y
+// cauciones. Total general + P&L del día en $ y %.
+async function cmdPortfolio(chatId) {
+  const userId = await userByChat(chatId);
+  if (!userId) { await sendMessage(chatId, "No estas vinculado. Vincula desde Midas → Configuracion → Notificaciones."); return; }
+  const { data: pos } = await supabase.from("positions")
+    .select("ticker,broker,instrument_type,operation_type,quantity,entry_price")
+    .eq("user_id", userId);
+  if (!pos || !pos.length) { await sendMessage(chatId, "Sin posiciones."); return; }
+  const d912 = await loadData912();
+  const fut = await loadFutures();
+  const m0 = (n) => `$${Math.round(Math.abs(n)).toLocaleString("es-AR")}`;
+  const sgn = (n) => `${n >= 0 ? "+" : "−"}${m0(n)}`;
+
+  // FCI: último y anteúltimo VCP por fondo (para valor y variación del día).
+  const fciNames = [...new Set(pos.filter((p) => p.instrument_type === "fci").map((p) => (p.ticker || "").split("|")[0]))];
+  const fciVcp = {};
+  for (const name of fciNames) {
+    const { data: q } = await supabase.from("fci_quotes").select("fecha,vcp").eq("fondo", name).order("fecha", { ascending: false }).limit(2);
+    if (q && q.length) fciVcp[name] = { last: Number(q[0].vcp), prev: q[1] ? Number(q[1].vcp) : null };
+  }
+
+  // Agrupar por broker|tipo|ticker (neto + costo de compras).
+  const agg = {};
+  for (const p of pos) {
+    const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+    const key = `${p.broker || "manual"}|${p.instrument_type}|${p.ticker}`;
+    const a = agg[key] || (agg[key] = { broker: p.broker || "manual", type: p.instrument_type, ticker: p.ticker, net: 0, cost: 0 });
+    a.net += q;
+    if (q > 0) a.cost += q * (Number(p.entry_price) || 0);
+  }
+
+  const byBroker = {};
+  let grandVal = 0, grandDay = 0;
+  for (const a of Object.values(agg)) {
+    if (Math.abs(a.net) < 1e-9) continue;
+    const B = byBroker[a.broker] || (byBroker[a.broker] = { lines: [], futLines: [], val: 0, day: 0 });
+    if (a.type === "future") {
+      const cur = fut.price[a.ticker] ?? fut.settle[a.ticker] ?? null;
+      const ref = fut.reference[a.ticker] ?? null;
+      const day = (cur != null && ref != null) ? (cur - ref) * a.net * 1000 : null;
+      if (day != null) { B.day += day; grandDay += day; }
+      B.futLines.push(`• ${a.ticker} neto ${a.net > 0 ? "+" : ""}${a.net}: día ${day != null ? sgn(day) : "s/precio"}`);
+      continue;
+    }
+    if (a.type === "caucion") {
+      // Caución: capital con signo (colocadora suma, tomadora resta). El interés
+      // devengado fino queda para Midas web.
+      const cap = a.cost || a.net;
+      B.lines.push(`• Caución: ${sgn(cap)}`);
+      B.val += cap; grandVal += cap;
+      continue;
+    }
+    if (a.type === "fci") {
+      const name = (a.ticker || "").split("|")[0];
+      const v = fciVcp[name];
+      const val = v ? a.net * v.last : a.cost;
+      const day = (v && v.prev) ? a.net * (v.last - v.prev) : 0;
+      B.val += val; B.day += day; grandVal += val; grandDay += day;
+      B.lines.push(`• ${name.replace(/ - Clase.*/, "")} (FCI): ${m0(val)}${v && v.prev ? ` (${((v.last / v.prev - 1) * 100).toFixed(2)}% día)` : ""}`);
+      continue;
+    }
+    // Contado: cedear/stock/bond/on/letra
+    if (a.net <= 0) continue;
+    const d = d912[a.ticker];
+    const per100 = ["bond_ars", "bond_usd", "on"].includes(a.type) ? 100 : 1;
+    if (!d || d.c == null) { B.lines.push(`• ${a.ticker} ×${a.net}: s/precio`); continue; }
+    const val = (a.net * d.c) / per100;
+    const prev = d.pct != null ? d.c / (1 + d.pct / 100) : null;
+    const day = prev != null ? (a.net * (d.c - prev)) / per100 : 0;
+    B.val += val; B.day += day; grandVal += val; grandDay += day;
+    B.lines.push(`• ${a.ticker} ×${a.net}: ${m0(val)}${d.pct != null ? ` (${d.pct >= 0 ? "+" : ""}${d.pct.toFixed(2)}%)` : ""}`);
+  }
+
+  const parts = [`💼 <b>Portfolio</b>`];
+  for (const [bk, B] of Object.entries(byBroker).sort()) {
+    if (!B.lines.length && !B.futLines.length) continue;
+    parts.push(`\n<b>${bk.toUpperCase()}</b>`);
+    if (B.lines.length) parts.push(B.lines.join("\n"));
+    if (B.futLines.length) parts.push(`<i>Futuros (MTM, van por margen):</i>\n${B.futLines.join("\n")}`);
+    parts.push(`Subtotal: <b>${m0(B.val)}</b> · día ${sgn(B.day)}`);
+  }
+  const dayPct = grandVal > 0 ? (grandDay / grandVal) * 100 : 0;
+  parts.push(`\n<b>TOTAL: ${m0(grandVal)}</b>\nDía: <b>${sgn(grandDay)} (${dayPct >= 0 ? "+" : ""}${dayPct.toFixed(2)}%)</b>\n<i>El total no incluye caja ni el nocional de futuros; el día de futuros sí está en el P&L.</i>`);
+  await sendMessage(chatId, parts.join("\n"));
+}
+
 async function cmdDlr(chatId) {
   const fut = await loadFutures();
   const fronts = frontDlr(fut, 3);
@@ -1060,6 +1148,7 @@ async function handleUpdate(u) {
   }
   if (text.startsWith("/pnl") || text.startsWith("/resumen")) { await cmdPnl(chatId); return; }
   if (text.startsWith("/momentum") || text.startsWith("/cartera")) { await cmdMomentum(chatId); return; }
+  if (text.startsWith("/portfolio")) { await cmdPortfolio(chatId); return; }
   if (text.startsWith("/futuros")) { await cmdFuturos(chatId); return; }
   if (text.startsWith("/rfx")) { await cmdRfx(chatId); return; }
   if (text.startsWith("/dlr")) { await cmdDlr(chatId); return; }
@@ -1068,7 +1157,7 @@ async function handleUpdate(u) {
   if (text.startsWith("/dolar") || text.startsWith("/dólar")) { await cmdDolar(chatId); return; }
   if (text.startsWith("/ping")) { await sendMessage(chatId, "pong"); return; }
   if (text.startsWith("/help")) {
-    await sendMessage(chatId, "Comandos:\n/pnl — resumen del dia (todo)\n/momentum — cartera momentum IOL: valor y resultado\n/futuros — todos los futuros DLR: precio y variacion del dia\n/rfx — tus futuros en cartera (long/short)\n/dolar — cotizaciones de los distintos dolares\n/dlr — dolar futuro del frente + spread\n/mep — mejor bono para comprar/vender USD\n/canje — desarbitrajes MEP\n/stop — pausar\n/start &lt;codigo&gt; — vincular\n\nLa activacion y preferencias se manejan en Midas → Configuracion → Notificaciones.");
+    await sendMessage(chatId, "Comandos:\n/pnl — resumen del dia (todo)\n/portfolio — cartera completa por broker con total y % del dia\n/momentum — cartera momentum IOL: valor y resultado\n/futuros — todos los futuros DLR: precio y variacion del dia\n/rfx — tus futuros en cartera (long/short)\n/dolar — cotizaciones de los distintos dolares\n/dlr — dolar futuro del frente + spread\n/mep — mejor bono para comprar/vender USD\n/canje — desarbitrajes MEP\n/stop — pausar\n/start &lt;codigo&gt; — vincular\n\nLa activacion y preferencias se manejan en Midas → Configuracion → Notificaciones.");
     return;
   }
 }
