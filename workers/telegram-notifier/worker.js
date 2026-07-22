@@ -835,6 +835,39 @@ async function cmdPnl(chatId) {
   await sendMessage(chatId, await buildEodSummary(userId, positionsBy, fut));
 }
 
+// /momentum — la cartera momentum real (CEDEARs en IOL): valor actual vs costo,
+// papel por papel, con precios live de data912.
+async function cmdMomentum(chatId) {
+  const userId = await userByChat(chatId);
+  if (!userId) { await sendMessage(chatId, "No estas vinculado. Vincula desde Midas → Configuracion → Notificaciones."); return; }
+  const { data: pos } = await supabase.from("positions")
+    .select("ticker,operation_type,quantity,entry_price")
+    .eq("user_id", userId).eq("broker", "iol").eq("instrument_type", "cedear");
+  if (!pos || !pos.length) { await sendMessage(chatId, "Sin posiciones CEDEAR en IOL."); return; }
+  const agg = {};
+  for (const p of pos) {
+    const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+    const a = agg[p.ticker] || (agg[p.ticker] = { net: 0, cost: 0 });
+    a.net += q;
+    if (q > 0) a.cost += q * (Number(p.entry_price) || 0);
+  }
+  const d912 = await loadData912();
+  const money0 = (n) => `$${Math.round(Math.abs(n)).toLocaleString("es-AR")}`;
+  let totAct = 0, totIni = 0; const rows = [];
+  for (const [tk, a] of Object.entries(agg).sort()) {
+    if (a.net <= 0) continue;
+    const px = d912[tk]?.c;
+    const act = px != null ? a.net * px : a.cost;
+    totAct += act; totIni += a.cost;
+    const pct = a.cost > 0 ? ((act / a.cost - 1) * 100) : null;
+    rows.push(`• ${tk} ×${a.net}: ${money0(act)}${pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : " (s/precio)"}`);
+  }
+  const rend = totAct - totIni;
+  const rendPct = totIni > 0 ? (rend / totIni) * 100 : 0;
+  await sendMessage(chatId,
+    `📈 <b>Momentum IOL</b>\n${rows.join("\n")}\n\nValor: <b>${money0(totAct)}</b> · Costo: ${money0(totIni)}\nResultado: <b>${rend >= 0 ? "+" : "−"}${money0(rend)} (${rendPct >= 0 ? "+" : ""}${rendPct.toFixed(2)}%)</b>`);
+}
+
 async function cmdDlr(chatId) {
   const fut = await loadFutures();
   const fronts = frontDlr(fut, 3);
@@ -1026,6 +1059,7 @@ async function handleUpdate(u) {
     return;
   }
   if (text.startsWith("/pnl") || text.startsWith("/resumen")) { await cmdPnl(chatId); return; }
+  if (text.startsWith("/momentum") || text.startsWith("/cartera")) { await cmdMomentum(chatId); return; }
   if (text.startsWith("/futuros")) { await cmdFuturos(chatId); return; }
   if (text.startsWith("/rfx")) { await cmdRfx(chatId); return; }
   if (text.startsWith("/dlr")) { await cmdDlr(chatId); return; }
@@ -1034,7 +1068,7 @@ async function handleUpdate(u) {
   if (text.startsWith("/dolar") || text.startsWith("/dólar")) { await cmdDolar(chatId); return; }
   if (text.startsWith("/ping")) { await sendMessage(chatId, "pong"); return; }
   if (text.startsWith("/help")) {
-    await sendMessage(chatId, "Comandos:\n/pnl — resumen del dia (todo)\n/futuros — todos los futuros DLR: precio y variacion del dia\n/rfx — tus futuros en cartera (long/short)\n/dolar — cotizaciones de los distintos dolares\n/dlr — dolar futuro del frente + spread\n/mep — mejor bono para comprar/vender USD\n/canje — desarbitrajes MEP\n/stop — pausar\n/start &lt;codigo&gt; — vincular\n\nLa activacion y preferencias se manejan en Midas → Configuracion → Notificaciones.");
+    await sendMessage(chatId, "Comandos:\n/pnl — resumen del dia (todo)\n/momentum — cartera momentum IOL: valor y resultado\n/futuros — todos los futuros DLR: precio y variacion del dia\n/rfx — tus futuros en cartera (long/short)\n/dolar — cotizaciones de los distintos dolares\n/dlr — dolar futuro del frente + spread\n/mep — mejor bono para comprar/vender USD\n/canje — desarbitrajes MEP\n/stop — pausar\n/start &lt;codigo&gt; — vincular\n\nLa activacion y preferencias se manejan en Midas → Configuracion → Notificaciones.");
     return;
   }
 }
