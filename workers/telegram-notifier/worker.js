@@ -933,6 +933,9 @@ async function cmdPortfolio(chatId) {
     }
     // Contado: cedear/stock/bond/on/letra
     if (a.net <= 0) continue;
+    // Letras/bonos ya vencidos: no son tenencia (el cobro está en la caja).
+    const mDays = daysToMaturity(maturityOf(a.ticker));
+    if (mDays != null && mDays < 0) continue;
     const d = d912[a.ticker];
     const per100 = ["bond_ars", "bond_usd", "on"].includes(a.type) ? 100 : 1;
     if (!d || d.c == null) { B.lines.push(`• ${a.ticker} ×${a.net}: s/precio`); continue; }
