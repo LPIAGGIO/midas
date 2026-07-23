@@ -24855,6 +24855,21 @@ function TvAlertasModule() {
                     <tr key={a.id} style={{ opacity: a.triggered_at ? 0.45 : 1 }}>
                       <td style={{ ...tdd, fontWeight: 700, color: /(COMPRA|soporte)/i.test(a.nota || "") ? C.green : /(venta|resistencia|vender|stop|salir|ganancia)/i.test(a.nota || "") ? C.red : a.dir === "down" ? C.red : C.green }}>
                         {/(stop|salir)/i.test(a.nota || "") ? "▼ STOP LOSS" : /(COMPRA|soporte|piso)/i.test(a.nota || "") ? "▼ COMPRAR" : /(venta|resistencia|vender|ganancia)/i.test(a.nota || "") ? "▲ VENDER" : a.dir === "down" ? "▼ baje" : "▲ suba"}
+                        {(() => {
+                          // Horizonte del nivel: diario/estructural → TRADE (más largo);
+                          // solo horario → SCALP (para ahora). Derivado de la nota del bot.
+                          const n = a.nota || "";
+                          const hz = /(diario|estructural|año|piso|swing)/i.test(n) ? "TRADE" : /horario/i.test(n) ? "SCALP" : null;
+                          if (!hz) return null;
+                          return (
+                            <span style={{
+                              marginLeft: 6, fontSize: 8, fontWeight: 700, letterSpacing: "0.08em",
+                              padding: "1px 5px", borderRadius: 3, verticalAlign: "middle",
+                              color: hz === "SCALP" ? "#f59e0b" : C.accent,
+                              border: `1px solid ${hz === "SCALP" ? "#f59e0b55" : C.accent + "55"}`,
+                            }}>{hz}</span>
+                          );
+                        })()}
                       </td>
                       <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{targetUsd != null ? `USD ${Number(targetUsd).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
                       <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{`$ ${Math.round(targetArs).toLocaleString("es-AR")}`}</td>

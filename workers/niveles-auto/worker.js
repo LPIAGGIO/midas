@@ -1,25 +1,29 @@
 /**
- * Worker niveles-auto: análisis técnico automático de papeles → alertas BOT
+ * Worker niveles-auto v5: análisis técnico automático de papeles → alertas BOT
  * en la pantalla "Alertas TV · Bot" de Midas.
  *
- * Dos disparadores:
- *  1. MANUAL (pre-compra): filas pending en tv_analysis_queue (las carga LP
- *     desde la pantalla ANTES de comprar → le dice a cuánto conviene entrar).
- *  2. PORTFOLIO (post-compra): posiciones cedear/stock NUEVAS (últimas 24h)
- *     de cualquier broker EXCEPTO 'iol' (el test de momentum no se toca),
- *     que no tengan ya un análisis en la cola.
+ * Disparador: 100% MANUAL — filas pending en tv_analysis_queue (LP encola papel
+ * por papel desde la pantalla). El escaneo de portfolio se desactivó (23/07).
  *
- * Para cada ticker: velas del subyacente USA vía Yahoo (diario 1y + 60m 1mes),
- * pivotes con confirmación (misma lógica que el Pine "Midas Niveles Auto"):
- *  - Soporte diario  → alerta dir=down "zona de COMPRA"
- *  - Resistencia diaria → alerta dir=up "venta / tomar ganancia"
- *  - Niveles horarios como afinación si están más cerca del precio.
- * Conversión a ARS: usd × CCL ÷ ratio, con ratio DERIVADO en vivo del feed
- * (data912: cedear ARS vs subyacente USD) — sin mapa hardcodeado.
+ * Motor v5 (24/07): en vez de "el último pivote", el bot construye ZONAS:
+ *  - Junta TODOS los pivotes confirmados (diario 1y lb=5 + 60m 1mes lb=5) y
+ *    los agrupa en zonas de ±0,6%. Una zona con 3 toques vale más que una
+ *    mecha suelta.
+ *  - Cada zona se puntúa (score 1-10): toques, volumen del pivote vs SMA20,
+ *    confluencia con EMA 21/50/200 diaria, confluencia diario+horario.
+ *  - Contexto: régimen de mercado (SPY y QQQ vs EMA50 → risk_on/off/mixto),
+ *    RSI14 del papel, y distancia a earnings (aviso si <7 días).
+ *  - Kit: entrada (zona soporte más cercana) + STOP LOSS (piso de la zona
+ *    inferior o 1×ATR) + take profit (zona resistencia) con R:R calculado.
+ *    Si la entrada cercana es solo horaria (scalp) y hay zona diaria más
+ *    abajo, emite también la entrada swing.
+ *  - FEEDBACK LOOP: cada nivel emitido se registra en nivel_track y una
+ *    pasada horaria mide qué hizo el precio 1/5/10 ruedas después y si tocó.
+ *    En unos meses eso dice qué tipos de nivel del bot funcionan de verdad.
  *
- * Idempotente: no duplica alertas AUTO no disparadas del mismo ticker+nivel;
- * al recalcular, borra las AUTO viejas no disparadas y crea las nuevas.
- * Schedule: PM2 cron cada 5 min, lun-vie 10:00-18:55 ART (ecosystem.config.js).
+ * Conversión a ARS: usd × CCL ÷ ratio (ratio derivado en vivo del feed).
+ * Idempotente: borra las AUTO no disparadas del ticker antes de recrear.
+ * PM2 PERSISTENTE: cola cada 60s las 24hs; tracks cada 60 min.
  */
 require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
@@ -32,10 +36,10 @@ const supabase = createClient(SUPABASE_URL, KEY, { auth: { persistSession: false
 
 const log = (...a) => console.log(`[${new Date().toISOString()}]`, ...a);
 const UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" };
-const LB = 5; // barras de confirmación del pivote (igual que el Pine)
+const LB = 5;        // barras de confirmación del pivote (igual que el Pine)
+const ZONE_TOL = 0.006; // ±0,6%: pivotes a esa distancia son la misma zona
 
 // Acciones argentinas → su ADR en NYSE (ratio = acciones locales por ADR).
-// El nivel se calcula sobre el ADR (más líquido) y se traduce: local = adr_usd × CCL ÷ ratio.
 const ARG_ADR = {
   YPFD: { adr: "YPF", r: 1 }, GGAL: { adr: "GGAL", r: 10 }, PAMP: { adr: "PAM", r: 25 },
   BMA: { adr: "BMA", r: 10 }, CEPU: { adr: "CEPU", r: 10 }, EDN: { adr: "EDN", r: 20 },
@@ -44,9 +48,7 @@ const ARG_ADR = {
   TECO2: { adr: "TEO", r: 5 },
 };
 
-// Contexto fundamental del ticker (Yahoo quoteSummary, mismo baile cookie+crumb
-// del worker fundamentals-snapshot): próxima fecha de earnings + target promedio
-// de analistas + recomendación. Se guarda en ticker_context para la pantalla.
+/* ───────── Yahoo: auth (para quoteSummary) y velas ───────── */
 let _yAuth = null;
 async function yahooAuth() {
   if (_yAuth) return _yAuth;
@@ -60,6 +62,9 @@ async function yahooAuth() {
   return _yAuth;
 }
 const yraw = (x) => (x && typeof x === "object" && "raw" in x ? x.raw : (typeof x === "number" ? x : null));
+
+// Contexto fundamental: earnings + target analistas. Upsertea ticker_context
+// para la pantalla Y devuelve los datos (el kit los usa para el aviso).
 async function tickerContext(symUsa, tk) {
   try {
     const a = await yahooAuth();
@@ -67,14 +72,15 @@ async function tickerContext(symUsa, tk) {
     const r = await fetch(u, { headers: { ...UA, Cookie: a.cookie } });
     const j = await r.json();
     const res = j?.quoteSummary?.result?.[0];
-    if (!res) return;
+    if (!res) return null;
     const eDates = res.calendarEvents?.earnings?.earningsDate || [];
     const eRaw = yraw(eDates[0]);
     const earnings = eRaw ? new Date(eRaw * 1000).toISOString().slice(0, 10) : null;
     const target = yraw(res.financialData?.targetMeanPrice);
     const reco = res.financialData?.recommendationKey || null;
     await supabase.from("ticker_context").upsert({ ticker: tk, earnings_date: earnings, target_mean: target, recommendation: reco, updated_at: new Date().toISOString() }, { onConflict: "ticker" });
-  } catch (e) { log(`[contexto ${tk}] ${e.message}`); }
+    return { earnings, target };
+  } catch (e) { log(`[contexto ${tk}] ${e.message}`); return null; }
 }
 
 async function yahooCandles(sym, interval, range) {
@@ -85,14 +91,18 @@ async function yahooCandles(sym, interval, range) {
   const q = res.indicators?.quote?.[0] || {};
   const out = [];
   for (let i = 0; i < (res.timestamp || []).length; i++) {
-    if (q.high?.[i] != null && q.low?.[i] != null && q.close?.[i] != null) out.push({ h: q.high[i], l: q.low[i], c: q.close[i] });
+    if (q.high?.[i] != null && q.low?.[i] != null && q.close?.[i] != null) {
+      out.push({ t: new Date(res.timestamp[i] * 1000).toISOString().slice(0, 10), h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume?.[i] || 0 });
+    }
   }
   return out.length ? out : null;
 }
 
-// Último pivote confirmado (máximo local con LB barras a cada lado).
-function pivots(candles, lb = LB) {
-  let res = null, sop = null;
+/* ───────── Motor de zonas ───────── */
+// TODOS los pivotes confirmados (no solo el último), con volumen relativo
+// del pivote vs la SMA20 de volumen previa (¿el mercado defendió el nivel?).
+function allPivots(candles, lb, tf) {
+  const his = [], los = [];
   for (let i = lb; i < candles.length - lb; i++) {
     let isHi = true, isLo = true;
     for (let k = i - lb; k <= i + lb; k++) {
@@ -100,14 +110,82 @@ function pivots(candles, lb = LB) {
       if (candles[k].l < candles[i].l) isLo = false;
       if (!isHi && !isLo) break;
     }
-    if (isHi) res = candles[i].h;
-    if (isLo) sop = candles[i].l;
+    if (!isHi && !isLo) continue;
+    const from = Math.max(0, i - 20);
+    const win = candles.slice(from, i);
+    const avg = win.reduce((s, c) => s + c.v, 0) / Math.max(1, win.length);
+    const vr = avg > 0 ? candles[i].v / avg : 1;
+    if (isHi) his.push({ p: candles[i].h, i, tf, vr });
+    if (isLo) los.push({ p: candles[i].l, i, tf, vr });
   }
-  return { res, sop };
+  return { his, los };
 }
 
-async function main(scanPortfolio = true) {
-  // CCL + feeds para ratio en vivo
+// Agrupa pivotes en zonas de ±tol. Una zona junta toques de ambas temporalidades.
+function clusterZones(pivs, tol = ZONE_TOL) {
+  const sorted = [...pivs].sort((a, b) => a.p - b.p);
+  const zones = [];
+  for (const pv of sorted) {
+    const z = zones[zones.length - 1];
+    if (z && Math.abs(pv.p - z.avg) / z.avg <= tol) {
+      z.members.push(pv);
+      z.avg = z.members.reduce((s, m) => s + m.p, 0) / z.members.length;
+    } else zones.push({ avg: pv.p, members: [pv] });
+  }
+  return zones.map((z) => ({
+    lo: Math.min(...z.members.map((m) => m.p)),
+    hi: Math.max(...z.members.map((m) => m.p)),
+    avg: z.avg,
+    touches: z.members.length,
+    hasD: z.members.some((m) => m.tf === "d"),
+    hasH: z.members.some((m) => m.tf === "h"),
+    volMax: Math.max(...z.members.map((m) => m.vr || 1)),
+  }));
+}
+
+function emaOf(closes, n) {
+  if (closes.length < n) return null;
+  const k = 2 / (n + 1);
+  let e = closes.slice(0, n).reduce((s, x) => s + x, 0) / n;
+  for (let i = n; i < closes.length; i++) e = closes[i] * k + e * (1 - k);
+  return e;
+}
+function rsi14(closes) {
+  if (closes.length < 15) return null;
+  let g = 0, l = 0;
+  for (let i = closes.length - 14; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) g += d; else l -= d;
+  }
+  return g + l === 0 ? 50 : Math.round((100 * g) / (g + l));
+}
+
+// Score 1-10 de una zona: toques + volumen + confluencia EMA + confluencia TF.
+function scoreZone(z, emas) {
+  let s = 3;
+  if (z.touches >= 3) s += 2; else if (z.touches === 2) s += 1;
+  if (z.volMax >= 1.5) s += 2; else if (z.volMax >= 1.2) s += 1;
+  const emaHit = Object.entries(emas)
+    .filter(([, v]) => v != null && Math.abs(v - z.avg) / z.avg <= 0.007)
+    .map(([n]) => "EMA" + n);
+  if (emaHit.length) s += 2;
+  if (z.hasD && z.hasH) s += 1;
+  return { score: Math.min(10, s), emaHit };
+}
+
+// Régimen de mercado: SPY y QQQ contra su EMA50. Comprar soportes con el
+// mercado en cascada es el error caro — el kit lo advierte.
+async function marketRegime() {
+  try {
+    const [spy, qqq] = await Promise.all([yahooCandles("SPY", "1d", "6mo"), yahooCandles("QQQ", "1d", "6mo")]);
+    const above = (cs) => { const c = cs.map((x) => x.c); const e = emaOf(c, 50); return e != null && c[c.length - 1] >= e; };
+    const a = above(spy), b = above(qqq);
+    return a && b ? "risk_on" : !a && !b ? "risk_off" : "mixto";
+  } catch { return null; }
+}
+
+/* ───────── Análisis principal ───────── */
+async function main() {
   const [dolRes, usaRes, cedRes] = await Promise.all([
     fetch("https://dolarapi.com/v1/dolares/contadoconliqui", { headers: UA }).then((r) => r.json()).catch(() => null),
     fetch("https://data912.com/live/usa_stocks", { headers: UA }).then((r) => r.json()).catch(() => []),
@@ -119,8 +197,7 @@ async function main(scanPortfolio = true) {
   for (const it of usaRes || []) if (it?.symbol && Number(it.c) > 0) usdPx[it.symbol.toUpperCase()] = Number(it.c);
   for (const it of cedRes || []) if (it?.symbol && Number(it.c) > 0) arsPx[it.symbol.toUpperCase()] = Number(it.c);
 
-  // 1. Cola manual pendiente — colapsando duplicados por usuario+ticker (si LP
-  // encoló dos veces el mismo papel, se analiza UNA vez y se marcan todos).
+  // Cola manual pendiente, colapsando duplicados por usuario+ticker.
   const { data: queue } = await supabase.from("tv_analysis_queue").select("*").eq("status", "pending").limit(20);
   const seen = new Set();
   const jobs = [];
@@ -134,48 +211,71 @@ async function main(scanPortfolio = true) {
     seen.add(key);
     jobs.push({ ...q, ticker: tk });
   }
-
-  // Escaneo automático de posiciones: DESACTIVADO a pedido de LP (23/07).
-  // Un import de Cocos marcaría todo el portfolio como "nuevo" y dispararía
-  // análisis masivos. El flujo es 100% manual: LP encola papel por papel desde
-  // la pantalla (buscador / selector de cartera). scanPortfolio queda ignorado.
-  void scanPortfolio;
-
   if (!jobs.length) return;
+
+  const regime = await marketRegime();
 
   for (const job of jobs) {
     const tk = job.ticker;
     try {
-      // Resolver el símbolo a analizar: CEDEAR/acción USA directo; acción
-      // argentina con ADR → el ADR; sin ADR → la especie local .BA (en ARS).
       const adrInfo = ARG_ADR[tk] || null;
       const symUsa = adrInfo ? adrInfo.adr : tk;
+      let sym = symUsa;
       let daily = await yahooCandles(symUsa, "1d", "1y");
       let hourly = daily ? await yahooCandles(symUsa, "60m", "1mo") : null;
       let modo = adrInfo ? "adr" : "usa";
       if (!daily) {
-        daily = await yahooCandles(tk + ".BA", "1d", "1y");
-        hourly = daily ? await yahooCandles(tk + ".BA", "60m", "1mo") : null;
+        sym = tk + ".BA";
+        daily = await yahooCandles(sym, "1d", "1y");
+        hourly = daily ? await yahooCandles(sym, "60m", "1mo") : null;
         modo = "local_ars";
         if (!daily) throw new Error("sin velas Yahoo (ni USA, ni ADR, ni .BA)");
       }
-      const d = pivots(daily, LB);
-      const h = hourly ? pivots(hourly, LB) : { res: null, sop: null };
-      // Nivel ESTRUCTURAL: pivote grande (confirmación 20) sobre el año entero —
-      // los "850 de MU": la zona de batalla que el pivote corto no ve.
-      const big = pivots(daily, 20);
-      const spot = modo === "usa" ? (usdPx[tk] ?? daily[daily.length - 1].c) : daily[daily.length - 1].c;
 
-      // Contexto fundamental (earnings + target analistas) en paralelo, no bloquea.
-      tickerContext(symUsa, tk).catch(() => {});
+      const closes = daily.map((c) => c.c);
+      const spot = modo === "usa" ? (usdPx[tk] ?? closes[closes.length - 1]) : closes[closes.length - 1];
+      const emas = { 21: emaOf(closes, 21), 50: emaOf(closes, 50), 200: emaOf(closes, 200) };
+      const rsi = rsi14(closes);
+      const ctx = await tickerContext(symUsa, tk);
 
-      // Nivel de compra = soporte más CERCANO por debajo del precio (el horario
-      // afina si está entre el diario y el precio). Venta = resistencia más
-      // cercana por encima.
-      const sops = [d.sop, h.sop].filter((x) => x != null && x < spot);
-      const ress = [d.res, h.res].filter((x) => x != null && x > spot);
-      const buyLvl = sops.length ? Math.max(...sops) : null;
-      const sellLvl = ress.length ? Math.min(...ress) : null;
+      // Pivotes de las dos temporalidades → zonas. Estructurales aparte (lb=20).
+      const dp = allPivots(daily, LB, "d");
+      const hp = hourly ? allPivots(hourly, LB, "h") : { his: [], los: [] };
+      const supZ = clusterZones([...dp.los, ...hp.los]);
+      const resZ = clusterZones([...dp.his, ...hp.his]);
+      const bigP = allPivots(daily, 20, "d");
+      const bigSup = clusterZones(bigP.los);
+      const bigRes = clusterZones(bigP.his);
+
+      // ATR14 diario para el stop sin pivote y para el aviso de rango.
+      let atr = 0;
+      for (let i = Math.max(1, daily.length - 14); i < daily.length; i++) {
+        atr += Math.max(daily[i].h - daily[i].l, Math.abs(daily[i].h - daily[i - 1].c), Math.abs(daily[i].l - daily[i - 1].c));
+      }
+      atr /= Math.min(14, daily.length - 1);
+      const yrHigh = Math.max(...daily.map((c) => c.h));
+      const yrLow = Math.min(...daily.map((c) => c.l));
+
+      // Entrada: zona soporte más cercana debajo del precio (alerta en el techo
+      // de la zona = primer contacto). Venta: zona resistencia más cercana (piso).
+      const buysBelow = supZ.filter((z) => z.hi < spot * 0.999);
+      const buyZone = buysBelow.length ? buysBelow[buysBelow.length - 1] : null;
+      const sellsAbove = resZ.filter((z) => z.lo > spot * 1.001);
+      const sellZone = sellsAbove.length ? sellsAbove[0] : null;
+      // Entrada swing extra: si la cercana es SOLO horaria y hay una zona con
+      // pata diaria >1,5% más abajo, también vale mostrarla (scalp vs trade).
+      let swingZone = null;
+      if (buyZone && !buyZone.hasD) {
+        const deeper = buysBelow.filter((z) => z.hasD && z.hi < buyZone.lo * 0.985);
+        if (deeper.length) swingZone = deeper[deeper.length - 1];
+      }
+      // Stop: piso de la siguiente zona debajo de la entrada, o 1×ATR.
+      let stopLvl = null, stopWhy = "";
+      if (buyZone) {
+        const below = buysBelow.filter((z) => z.hi < buyZone.lo * 0.995);
+        if (below.length) { const z = below[below.length - 1]; stopLvl = z.lo; stopWhy = `piso de zona ${z.touches} toque${z.touches > 1 ? "s" : ""}`; }
+        else { stopLvl = buyZone.hi - atr; stopWhy = "1×ATR diario"; }
+      }
 
       // Conversión a ARS según el modo.
       let toArs, usdShown;
@@ -188,68 +288,87 @@ async function main(scanPortfolio = true) {
         toArs = (usd) => Math.round((usd * ccl) / adrInfo.r);
         usdShown = (x) => Math.round(x * 100) / 100;
       } else {
-        toArs = (ars) => Math.round(ars); // niveles ya en pesos (.BA)
+        toArs = (ars) => Math.round(ars);
         usdShown = () => null;
       }
 
-      // Limpiar alertas AUTO previas NO disparadas de este ticker/usuario
-      // (LIKE 'AUTO%' cubre el formato viejo "AUTO análisis:" y el nuevo "AUTO ·")
       await supabase.from("price_alerts").delete().eq("user_id", job.user_id).eq("ticker", tk).eq("origen", "tv").is("triggered_at", null).like("nota", "AUTO%");
 
       const unit = modo === "local_ars" ? "$" : "US$";
-      const mk = (lvl, dir, nota) => ({
-        user_id: job.user_id, ticker: tk, price: toArs(lvl),
-        dir, nota, usd_ref: usdShown(lvl), canal: "screen", origen: "tv",
-      });
       const fmt = (x) => x.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      // ATR14 diario: para el stop cuando no hay pivote inferior cerca.
-      let atr = 0;
-      for (let i = Math.max(1, daily.length - 14); i < daily.length; i++) {
-        atr += Math.max(daily[i].h - daily[i].l, Math.abs(daily[i].h - daily[i - 1].c), Math.abs(daily[i].l - daily[i - 1].c));
-      }
-      atr /= Math.min(14, daily.length - 1);
-      const yrHigh = Math.max(...daily.map((c) => c.h));
+      const fmt1 = (x) => x.toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      const tfLabel = (z) => (z.hasD && z.hasH ? "diario+horario" : z.hasD ? "diario" : "horario");
+      const zoneTag = (z, sc) => `${z.touches} toque${z.touches > 1 ? "s" : ""}${z.volMax >= 1.5 ? " · vol alto" : ""}${sc.emaHit.length ? " · " + sc.emaHit.join("+") : ""} · score ${sc.score}/10`;
 
-      const rows = [];
-      // 1. Entrada
-      if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO · soporte ${unit}${fmt(buyLvl)} · pivote ${buyLvl === d.sop ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""} · zona de COMPRA`));
-      // 2. Stop de esa entrada: el siguiente nivel confirmado por debajo, o 1×ATR.
-      if (buyLvl) {
-        const below = [d.sop, h.sop, big.sop].filter((x) => x != null && x < buyLvl * 0.995);
-        const stop = below.length ? Math.max(...below) : buyLvl - atr;
-        if (stop > 0 && stop < buyLvl) {
-          rows.push(mk(stop, "down", `AUTO · STOP LOSS ${unit}${fmt(stop)} si comprás en ${fmt(buyLvl)} · ${below.length ? "pivote inferior" : "1×ATR diario"}`));
+      // Avisos de contexto (van en la nota de entrada, una sola vez).
+      const warns = [];
+      if (ctx?.earnings) {
+        const dEarn = Math.round((new Date(ctx.earnings) - Date.now()) / 86400000);
+        if (dEarn >= 0 && dEarn <= 7) warns.push(`OJO earnings ${ctx.earnings.slice(8, 10)}/${ctx.earnings.slice(5, 7)}`);
+      }
+      if (regime === "risk_off") warns.push("OJO mercado débil (SPY y QQQ bajo EMA50)");
+      if (rsi != null && rsi <= 30) warns.push(`RSI ${rsi} sobrevendido`);
+      const warnTxt = warns.length ? " · " + warns.join(" · ") : "";
+
+      const rows = [], tracks = [];
+      const mk = (lvl, dir, nota, tipo, extra = {}) => {
+        rows.push({ user_id: job.user_id, ticker: tk, price: toArs(lvl), dir, nota, usd_ref: usdShown(lvl), canal: "screen", origen: "tv" });
+        tracks.push({ user_id: job.user_id, ticker: tk, sym, tipo, dir, level: Math.round(lvl * 100) / 100, spot: Math.round(spot * 100) / 100, regime, rsi, ...extra });
+      };
+
+      // 1. Entrada principal
+      if (buyZone) {
+        const sc = scoreZone(buyZone, emas);
+        const rr = sellZone && stopLvl && buyZone.hi - stopLvl > 0 ? Math.round(((sellZone.lo - buyZone.hi) / (buyZone.hi - stopLvl)) * 10) / 10 : null;
+        const rrTxt = rr != null ? ` · R:R ${fmt1(rr)}${rr < 1.2 ? " flaco" : rr >= 2.5 ? " bueno" : ""}` : "";
+        mk(buyZone.hi, "down", `AUTO · soporte ${unit}${fmt(buyZone.hi)} · ${tfLabel(buyZone)} · ${zoneTag(buyZone, sc)}${rrTxt}${warnTxt} · zona de COMPRA`, buyZone.hasD ? "soporte-diario" : "soporte-horario", { score: sc.score, touches: buyZone.touches, rr });
+        // 2. Stop de esa entrada
+        if (stopLvl && stopLvl > 0 && stopLvl < buyZone.hi) {
+          mk(stopLvl, "down", `AUTO · STOP LOSS ${unit}${fmt(stopLvl)} si comprás en ${fmt(buyZone.hi)} · ${stopWhy}`, "stop", { score: null, touches: null });
+        }
+        // 2b. Entrada swing (zona diaria más abajo) — para trade, no scalp.
+        if (swingZone) {
+          const sc2 = scoreZone(swingZone, emas);
+          mk(swingZone.hi, "down", `AUTO · soporte ${unit}${fmt(swingZone.hi)} · diario · ${zoneTag(swingZone, sc2)} · zona de COMPRA swing`, "soporte-diario", { score: sc2.score, touches: swingZone.touches });
         }
       }
-      // 3. Take profit / línea de momentum: la resistencia cercana con doble lectura.
-      if (sellLvl) {
-        const above = [big.res, yrHigh].filter((x) => x != null && x > sellLvl * 1.005);
+      // 3. Take profit / venta con lectura de breakout
+      if (sellZone) {
+        const sc = scoreZone(sellZone, emas);
+        const above = [...bigRes.filter((z) => z.lo > sellZone.hi * 1.005).map((z) => z.lo), yrHigh > sellZone.hi * 1.005 ? yrHigh : null].filter((x) => x != null);
         const nextUp = above.length ? Math.min(...above) : null;
-        rows.push(mk(sellLvl, "up", `AUTO · resistencia ${unit}${fmt(sellLvl)} · take profit / venta${nextUp ? ` · si la rompe: momentum hacia ${unit}${fmt(nextUp)}` : ""}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
+        const hotRsi = rsi != null && rsi >= 70 ? ` · RSI ${rsi} sobrecomprado` : "";
+        mk(sellZone.lo, "up", `AUTO · resistencia ${unit}${fmt(sellZone.lo)} · ${tfLabel(sellZone)} · ${zoneTag(sellZone, sc)}${hotRsi} · take profit / venta${nextUp ? ` · si la rompe: momentum hacia ${unit}${fmt(nextUp)}` : ""}`, "resistencia", { score: sc.score, touches: sellZone.touches });
       }
-      // Estructurales: solo si están al menos 3% más allá del nivel corto (si no, duplican).
-      if (big.sop != null && big.sop < spot && (!buyLvl || big.sop < buyLvl * 0.97)) {
-        rows.push(mk(big.sop, "down", `AUTO · soporte ESTRUCTURAL ${unit}${fmt(big.sop)} · pivote mayor del año`));
+      // 4. Estructurales (lb=20), solo si no duplican los niveles cortos.
+      const bigS = bigSup.filter((z) => z.hi < spot && (!buyZone || z.hi < buyZone.lo * 0.97));
+      if (bigS.length) {
+        const z = bigS[bigS.length - 1];
+        const sc = scoreZone(z, emas);
+        mk(z.hi, "down", `AUTO · soporte ESTRUCTURAL ${unit}${fmt(z.hi)} · pivote mayor del año · ${zoneTag(z, sc)}`, "estructural-sop", { score: sc.score, touches: z.touches });
       }
-      // Sin NINGÚN soporte debajo (papel haciendo mínimos nuevos): fallback al
-      // mínimo de 52 semanas como referencia de piso — y si el precio YA está
-      // ahí, no hay red: eso también es información.
-      if (!buyLvl && (big.sop == null || big.sop >= spot)) {
-        const yrLow = Math.min(...daily.map((c) => c.l));
-        if (yrLow < spot * 0.995) {
-          rows.push(mk(yrLow, "down", `AUTO · piso del año ${unit}${fmt(yrLow)} · mínimo 52 semanas (sin soporte de pivote debajo: mínimos nuevos)`));
-        }
+      const bigR = bigRes.filter((z) => z.lo > spot && (!sellZone || z.lo > sellZone.hi * 1.03));
+      if (bigR.length) {
+        const z = bigR[0];
+        const sc = scoreZone(z, emas);
+        mk(z.lo, "up", `AUTO · resistencia ESTRUCTURAL ${unit}${fmt(z.lo)} · pivote mayor del año · ${zoneTag(z, sc)}`, "estructural-res", { score: sc.score, touches: z.touches });
       }
-      if (big.res != null && big.res > spot && (!sellLvl || big.res > sellLvl * 1.03)) {
-        rows.push(mk(big.res, "up", `AUTO · resistencia ESTRUCTURAL ${unit}${fmt(big.res)} · pivote mayor del año`));
+      // 5. Sin soporte debajo (mínimos nuevos): piso de 52 semanas como referencia.
+      if (!buyZone && !bigS.length && yrLow < spot * 0.995) {
+        mk(yrLow, "down", `AUTO · piso del año ${unit}${fmt(yrLow)} · mínimo 52 semanas (sin soporte de pivote debajo: mínimos nuevos)${warnTxt}`, "piso-anio", { score: null, touches: null });
       }
-      if (rows.length) { const { error } = await supabase.from("price_alerts").insert(rows); if (error) throw new Error(error.message); }
+
+      if (rows.length) {
+        const { error } = await supabase.from("price_alerts").insert(rows);
+        if (error) throw new Error(error.message);
+        await supabase.from("nivel_track").insert(tracks).then(({ error: e2 }) => { if (e2) log(`[track ${tk}] ${e2.message}`); });
+      }
 
       await supabase.from("tv_analysis_queue").update({
         status: "done", processed_at: new Date().toISOString(),
-        result: { modo, spot, buy: buyLvl, sell: sellLvl, daily: d, hourly: h, ccl },
+        result: { modo, spot, regime, rsi, buy: buyZone?.hi ?? null, sell: sellZone?.lo ?? null, ccl },
       }).eq("id", job.id);
-      log(`${tk} [${modo}]: compra ${buyLvl ? buyLvl.toFixed(2) : "-"} / venta ${sellLvl ? sellLvl.toFixed(2) : "-"}`);
+      log(`${tk} [${modo}] rgm=${regime} rsi=${rsi}: compra ${buyZone ? buyZone.hi.toFixed(2) : "-"} / venta ${sellZone ? sellZone.lo.toFixed(2) : "-"} (${rows.length} alertas)`);
     } catch (e) {
       await supabase.from("tv_analysis_queue").update({ status: "error", processed_at: new Date().toISOString(), result: { error: e.message } }).eq("id", job.id);
       log(`${tk} ERROR: ${e.message}`);
@@ -257,24 +376,53 @@ async function main(scanPortfolio = true) {
   }
 }
 
-// Loop persistente: la COLA manual se procesa SIEMPRE (cada 60s, 24/7 — LP
-// puede pedir un análisis un domingo a la noche y lo tiene en un minuto).
-// El escaneo de posiciones nuevas corre solo en horario ampliado de mercado.
-function inMarketWindow() {
-  const ar = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
-  const dow = ar.getDay(), hr = ar.getHours();
-  return dow >= 1 && dow <= 5 && hr >= 10 && hr < 19;
+/* ───────── Feedback loop: medir qué hizo el precio después de cada nivel ───────── */
+async function updateTracks() {
+  const { data: open } = await supabase.from("nivel_track").select("*").eq("done", false).limit(500);
+  if (!open?.length) return;
+  // Toques intradía exactos: si la alerta correspondiente disparó en pantalla.
+  const { data: fired } = await supabase.from("price_alerts").select("ticker,user_id,dir,usd_ref,price,triggered_at").not("triggered_at", "is", null).eq("origen", "tv");
+  const bySym = new Map();
+  for (const t of open) { if (!bySym.has(t.sym)) bySym.set(t.sym, []); bySym.get(t.sym).push(t); }
+  for (const [sym, tracks] of bySym) {
+    let candles = null;
+    try { candles = await yahooCandles(sym, "1d", "3mo"); } catch { /* siguiente pasada */ }
+    if (!candles) continue;
+    for (const t of tracks) {
+      const created = String(t.created_at).slice(0, 10);
+      const after = candles.filter((c) => c.t > created);
+      const upd = {};
+      // ¿Tocó? — por velas diarias posteriores, o por la alerta disparada en vivo.
+      if (!t.touched) {
+        const lvl = Number(t.level);
+        const hitBar = after.find((c) => (t.dir === "down" ? c.l <= lvl : c.h >= lvl));
+        const hitAlert = (fired || []).find((f) => f.ticker === t.ticker && f.user_id === t.user_id && f.dir === t.dir &&
+          (f.usd_ref != null ? Math.abs(Number(f.usd_ref) - lvl) < 0.01 : Math.abs(Number(f.price) - lvl) < 1) &&
+          new Date(f.triggered_at) >= new Date(t.created_at));
+        if (hitBar || hitAlert) { upd.touched = true; upd.touched_at = hitAlert ? f0(hitAlert.triggered_at) : new Date(hitBar.t + "T21:00:00Z").toISOString(); }
+      }
+      if (t.px_after_1 == null && after.length >= 1) upd.px_after_1 = after[0].c;
+      if (t.px_after_5 == null && after.length >= 5) upd.px_after_5 = after[4].c;
+      if (t.px_after_10 == null && after.length >= 10) { upd.px_after_10 = after[9].c; upd.done = true; }
+      if (Object.keys(upd).length) await supabase.from("nivel_track").update(upd).eq("id", t.id);
+    }
+  }
+  log(`tracks: ${open.length} abiertos revisados`);
 }
+const f0 = (x) => new Date(x).toISOString();
 
+/* ───────── Loop persistente ───────── */
 async function loop() {
-  log("niveles-auto persistente arrancando (cola cada 60s; portfolio solo en mercado)");
-  let lastPortfolioScan = 0;
+  log("niveles-auto v5 arrancando (cola cada 60s; feedback tracks cada 60 min)");
+  let lastTracks = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
-      const scanPortfolio = inMarketWindow() && Date.now() - lastPortfolioScan > 5 * 60 * 1000;
-      await main(scanPortfolio);
-      if (scanPortfolio) lastPortfolioScan = Date.now();
+      await main();
+      if (Date.now() - lastTracks > 60 * 60 * 1000) {
+        await updateTracks().catch((e) => log("[tracks]", e.message));
+        lastTracks = Date.now();
+      }
     } catch (e) { console.error("[loop]", e.message); }
     await new Promise((r) => setTimeout(r, 60 * 1000));
   }
