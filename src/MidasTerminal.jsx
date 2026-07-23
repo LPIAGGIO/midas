@@ -24741,7 +24741,7 @@ function TvAlertasModule() {
                   <td colSpan={9} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
                     {tik}
                     {(usaPx[tik] != null || livePx[tik]?.price != null) && <span style={{ color: C.dim, fontWeight: 400 }}> · valor actual:</span>}
-                    {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> USD {Number(usaPx[tik]).toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
+                    {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> USD {Number(usaPx[tik]).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
                     {livePx[tik]?.price != null && <span style={{ color: C.text, fontWeight: 600 }}>{usaPx[tik] != null ? " · " : " "}ARS {Math.round(livePx[tik].price).toLocaleString("es-AR")}</span>}
                   </td>
                 </tr>,
@@ -24762,11 +24762,11 @@ function TvAlertasModule() {
                       <td style={{ ...tdd, fontWeight: 700, color: /(COMPRA|soporte)/i.test(a.nota || "") ? C.green : /(venta|resistencia|vender|stop|salir|ganancia)/i.test(a.nota || "") ? C.red : a.dir === "down" ? C.red : C.green }}>
                         {/(COMPRA|soporte)/i.test(a.nota || "") ? "▼ COMPRAR" : /(venta|resistencia|vender|ganancia)/i.test(a.nota || "") ? "▲ VENDER" : /(stop|salir)/i.test(a.nota || "") ? "▼ SALIR" : a.dir === "down" ? "▼ baje" : "▲ suba"}
                       </td>
-                      <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{targetUsd != null ? `USD ${Number(targetUsd).toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—"}</td>
+                      <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{targetUsd != null ? `USD ${Number(targetUsd).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
                       <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{`$ ${Math.round(targetArs).toLocaleString("es-AR")}`}</td>
-                      <td style={{ ...numc, color: colU }}>{dUsd == null ? "—" : `${dUsd >= 0 ? "+" : "−"}${Math.abs(dUsd).toFixed(2)}`}</td>
+                      <td style={{ ...numc, color: colU }}>{dUsd == null ? "—" : `${dUsd >= 0 ? "+" : "−"}${Math.abs(dUsd).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</td>
                       <td style={{ ...numc, color: colA }}>{dArs == null ? "—" : `${dArs >= 0 ? "+" : "−"}${f$(Math.abs(dArs)).slice(1)}`}</td>
-                      <td style={{ ...numc, color: colA != C.dim ? colA : colU }}>{(dArsPct ?? dUsdPct) == null ? "—" : `${(dArsPct ?? dUsdPct) >= 0 ? "+" : "−"}${Math.abs(dArsPct ?? dUsdPct).toFixed(2)}%`}</td>
+                      <td style={{ ...numc, color: colA != C.dim ? colA : colU }}>{(dArsPct ?? dUsdPct) == null ? "—" : `${(dArsPct ?? dUsdPct) >= 0 ? "+" : "−"}${Math.abs(dArsPct ?? dUsdPct).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</td>
                       <td style={{ ...tdd, color: C.muted, fontFamily: "inherit", maxWidth: 230, overflow: "hidden", textOverflow: "ellipsis" }}>
                         {(a.nota || "—").replace(/^AUTO análisis:\s*/i, "").replace(/^AUTO ·\s*/i, "").replace(/zona de COMPRA — /i, "").replace(/ — venta\/tomar ganancia/i, "").replace(/^\((pivote[^)]*)\)$/i, "$1")}
                       </td>

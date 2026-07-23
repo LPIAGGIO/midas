@@ -158,9 +158,10 @@ async function main(scanPortfolio = true) {
         user_id: job.user_id, ticker: tk, price: toArs(lvl),
         dir, nota, usd_ref: usdShown(lvl), canal: "screen", origen: "tv",
       });
+      const fmt = (x) => x.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const rows = [];
-      if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO · soporte ${unit}${buyLvl.toFixed(2)} · pivote ${buyLvl === d.sop ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
-      if (sellLvl) rows.push(mk(sellLvl, "up", `AUTO · resistencia ${unit}${sellLvl.toFixed(2)} · pivote ${sellLvl === d.res ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
+      if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO · soporte ${unit}${fmt(buyLvl)} · pivote ${buyLvl === d.sop ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
+      if (sellLvl) rows.push(mk(sellLvl, "up", `AUTO · resistencia ${unit}${fmt(sellLvl)} · pivote ${sellLvl === d.res ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
       if (rows.length) { const { error } = await supabase.from("price_alerts").insert(rows); if (error) throw new Error(error.message); }
 
       await supabase.from("tv_analysis_queue").update({
