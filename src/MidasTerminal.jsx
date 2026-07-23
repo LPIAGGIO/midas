@@ -24563,17 +24563,29 @@ function TvAlertasModule() {
   const inp = { padding: "7px 10px", fontSize: 13, fontWeight: 600, color: C.text, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
   const lbl = { fontSize: 9.5, color: C.dim, display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.1em" };
   const f$ = (n) => `$${Math.round(n).toLocaleString("es-AR")}`;
+  // Estilos calcados del Reporte de cartera (misma familia visual).
+  const th = { padding: "6px 8px", fontSize: 10, fontWeight: 600, color: C.dim, textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" };
+  const tdd = { padding: "5px 8px", fontSize: 11.5, color: C.text, borderBottom: `1px solid ${C.border}`, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+  const numc = { ...tdd, textAlign: "right" };
 
   return (
-    <div style={{ padding: "24px 32px", maxWidth: 980, margin: "0 auto" }}>
-      <div className="flex items-start justify-between" style={{ gap: 12, flexWrap: "wrap" }}>
+    <div style={{ padding: "24px 32px", maxWidth: 1280, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, margin: 0 }}>Alertas TV · Bot</h1>
-          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 16px 0", maxWidth: 780 }}>
-            Los niveles entran SOLOS desde TradingView (webhook de tus alertas/estrategias Pine) y suenan acá mientras operás — no van a Telegram. CCL de referencia: <b style={{ color: C.text }}>{ccl ? f$(ccl) : "…"}</b>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Alertas TV · Bot</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
+            Los niveles entran solos desde TradingView (webhook de tus alertas/estrategias Pine) y suenan acá mientras operás — no van a Telegram. Precios en vivo.
           </p>
         </div>
-        <button onClick={() => setShowForm((v) => !v)} style={{ padding: "6px 12px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: showForm ? C.accent : C.muted, borderRadius: 4, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{showForm ? "▾ ocultar carga manual" : "▸ carga manual"}</button>
+        <div className="flex items-center" style={{ gap: 14 }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em" }}>CCL</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums" }}>
+              {ccl != null ? f$(ccl) : "—"}
+            </div>
+          </div>
+          <button onClick={() => setShowForm((v) => !v)} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: showForm ? C.accent : C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>{showForm ? "▾ Ocultar carga manual" : "＋ Carga manual"}</button>
+        </div>
       </div>
       {showForm && (<>
       <div className="flex" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
@@ -24610,69 +24622,72 @@ function TvAlertasModule() {
         </span>
       </div>
       </>)}
-      {!rows ? <div style={{ color: C.muted, fontSize: 12, padding: 20 }}>Cargando…</div> : (
-        <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, background: C.panel, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace" }}>
+      {!rows ? <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando niveles…</div> : !rows.length ? (
+        <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin niveles todavía. Las alertas de TradingView entran solas por webhook; para clavar uno a mano, usá "Carga manual".</div>
+      ) : (
+        <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
             <thead>
-              <tr style={{ color: C.dim, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.1em", background: "rgba(255,255,255,0.02)" }}>
-                <th style={{ textAlign: "left", padding: "8px 10px" }}>Ticker</th>
-                <th style={{ textAlign: "center", padding: "8px 4px" }}>Dir</th>
-                <th style={{ textAlign: "right", padding: "8px 10px" }}>Está en USD</th>
-                <th style={{ textAlign: "right", padding: "8px 10px" }}>Target USD</th>
-                <th style={{ textAlign: "right", padding: "8px 10px" }}>Está en ARS</th>
-                <th style={{ textAlign: "right", padding: "8px 10px" }}>Target ARS</th>
-                <th style={{ textAlign: "right", padding: "8px 10px" }}>Falta USD</th>
-                <th style={{ textAlign: "right", padding: "8px 8px" }}>%</th>
-                <th style={{ textAlign: "right", padding: "8px 10px" }}>Falta ARS</th>
-                <th style={{ textAlign: "right", padding: "8px 8px" }}>%</th>
-                <th style={{ textAlign: "left", padding: "8px 10px" }}>Nota / acción</th>
-                <th style={{ textAlign: "center", padding: "8px 6px" }}>Origen</th>
-                <th style={{ textAlign: "right", padding: "8px 10px" }}>Estado</th>
-                <th />
+              <tr>
+                <th style={{ ...th, textAlign: "left" }}>Dir</th>
+                <th style={{ ...th, textAlign: "right" }}>Está en USD</th>
+                <th style={{ ...th, textAlign: "right" }}>Target USD</th>
+                <th style={{ ...th, textAlign: "right" }}>Está en ARS</th>
+                <th style={{ ...th, textAlign: "right" }}>Target ARS</th>
+                <th style={{ ...th, textAlign: "right" }}>Falta USD</th>
+                <th style={{ ...th, textAlign: "right" }}>%</th>
+                <th style={{ ...th, textAlign: "right" }}>Falta ARS</th>
+                <th style={{ ...th, textAlign: "right" }}>%</th>
+                <th style={{ ...th, textAlign: "left" }}>Nota / acción</th>
+                <th style={{ ...th, textAlign: "center" }}>Origen</th>
+                <th style={{ ...th, textAlign: "right" }}>Estado</th>
+                <th style={th} />
               </tr>
             </thead>
             <tbody>
-              {!rows.length && (
-                <tr style={{ borderTop: `1px solid ${C.border}` }}>
-                  <td colSpan={14} style={{ padding: "26px 14px", textAlign: "center", color: C.muted, fontSize: 12 }}>Sin niveles todavía. Las alertas de TradingView entran solas por webhook; si necesitás clavar un nivel a mano, usá "carga manual" arriba.</td>
-                </tr>
-              )}
-              {rows.map((a) => {
-                const targetArs = Number(a.price);
-                const curArs = livePx[a.ticker]?.price ?? null;
-                const targetUsd = a.usd_ref ? Number(a.usd_ref) : null;
-                const curUsd = usaPx[a.ticker] ?? null;
-                const dArs = curArs != null ? targetArs - curArs : null;
-                const dArsPct = curArs > 0 ? (dArs / curArs) * 100 : null;
-                const dUsd = (targetUsd != null && curUsd != null) ? targetUsd - curUsd : null;
-                const dUsdPct = (dUsd != null && curUsd > 0) ? (dUsd / curUsd) * 100 : null;
-                const colA = dArs == null ? C.dim : dArs >= 0 ? C.green : C.red;
-                const colU = dUsd == null ? C.dim : dUsd >= 0 ? C.green : C.red;
-                const num = { padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
-                const fU = (n) => `US$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-                return (
-                  <tr key={a.id} style={{ borderTop: `1px solid ${C.border}`, opacity: a.triggered_at ? 0.45 : 1 }}>
-                    <td style={{ padding: "8px 10px", color: "#fbbf24", fontWeight: 700 }}>{a.ticker}</td>
-                    <td style={{ padding: "8px 4px", textAlign: "center", fontWeight: 700, color: a.dir === "down" ? C.red : C.green }}>{a.dir === "down" ? "▼" : "▲"}</td>
-                    <td style={{ ...num, color: C.text }}>{curUsd != null ? fU(curUsd) : "—"}</td>
-                    <td style={{ ...num, color: "#f59e0b", fontWeight: 700 }}>{targetUsd != null ? fU(targetUsd) : "—"}</td>
-                    <td style={{ ...num, color: C.text }}>{curArs != null ? f$(curArs) : "—"}</td>
-                    <td style={{ ...num, color: "#f59e0b", fontWeight: 700 }}>{f$(targetArs)}</td>
-                    <td style={{ ...num, color: colU, fontWeight: 600 }}>{dUsd == null ? "—" : `${dUsd >= 0 ? "+" : "−"}${Math.abs(dUsd).toFixed(2)}`}</td>
-                    <td style={{ ...num, padding: "8px 8px", color: colU, fontWeight: 600 }}>{dUsdPct == null ? "—" : `${dUsdPct >= 0 ? "+" : "−"}${Math.abs(dUsdPct).toFixed(2)}%`}</td>
-                    <td style={{ ...num, color: colA, fontWeight: 600 }}>{dArs == null ? "—" : `${dArs >= 0 ? "+" : "−"}${f$(Math.abs(dArs)).slice(1)}`}</td>
-                    <td style={{ ...num, padding: "8px 8px", color: colA, fontWeight: 600 }}>{dArsPct == null ? "—" : `${dArsPct >= 0 ? "+" : "−"}${Math.abs(dArsPct).toFixed(2)}%`}</td>
-                    <td style={{ padding: "8px 10px", color: C.muted, fontSize: 11.5, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "inherit" }}>{a.nota || "—"}</td>
-                    <td style={{ padding: "8px 6px", textAlign: "center" }}>
-                      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: a.origen === "tv" ? C.accent : C.dim, border: `1px solid ${a.origen === "tv" ? C.accent : C.border}`, borderRadius: 3, padding: "1px 6px" }}>{a.origen === "tv" ? "BOT" : "MANUAL"}</span>
-                    </td>
-                    <td style={{ ...num, fontSize: 10.5, color: a.triggered_at ? C.dim : C.green }}>{a.triggered_at ? "DISPARADA" : "ARMADA"}</td>
-                    <td style={{ padding: "8px 8px", textAlign: "right" }}>
-                      <button onClick={() => del(a.id)} style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 10 }}>✕</button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {Object.entries(rows.reduce((m, a) => { (m[a.ticker] = m[a.ticker] || []).push(a); return m; }, {})).flatMap(([tik, items]) => [
+                <tr key={tik + "_hdr"} style={{ background: C.deep }}>
+                  <td colSpan={13} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
+                    {tik} <span style={{ color: C.dim, fontWeight: 400 }}>({items.length})</span>
+                    {usaPx[tik] != null && <span style={{ color: C.muted, fontWeight: 400 }}> · US${Number(usaPx[tik]).toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
+                    {livePx[tik]?.price != null && <span style={{ color: C.muted, fontWeight: 400 }}> · {f$(livePx[tik].price)}</span>}
+                  </td>
+                </tr>,
+                ...items.map((a) => {
+                  const targetArs = Number(a.price);
+                  const curArs = livePx[a.ticker]?.price ?? null;
+                  const targetUsd = a.usd_ref ? Number(a.usd_ref) : null;
+                  const curUsd = usaPx[a.ticker] ?? null;
+                  const dArs = curArs != null ? targetArs - curArs : null;
+                  const dArsPct = curArs > 0 ? (dArs / curArs) * 100 : null;
+                  const dUsd = (targetUsd != null && curUsd != null) ? targetUsd - curUsd : null;
+                  const dUsdPct = (dUsd != null && curUsd > 0) ? (dUsd / curUsd) * 100 : null;
+                  const colA = dArs == null ? C.dim : dArs >= 0 ? C.green : C.red;
+                  const colU = dUsd == null ? C.dim : dUsd >= 0 ? C.green : C.red;
+                  const fU = (n) => `US$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+                  return (
+                    <tr key={a.id} style={{ opacity: a.triggered_at ? 0.45 : 1 }}>
+                      <td style={{ ...tdd, fontWeight: 600, color: a.dir === "down" ? C.red : C.green }}>{a.dir === "down" ? "▼ baje" : "▲ suba"}</td>
+                      <td style={numc}>{curUsd != null ? fU(curUsd) : "—"}</td>
+                      <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{targetUsd != null ? fU(targetUsd) : "—"}</td>
+                      <td style={numc}>{curArs != null ? f$(curArs) : "—"}</td>
+                      <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{f$(targetArs)}</td>
+                      <td style={{ ...numc, color: colU }}>{dUsd == null ? "—" : `${dUsd >= 0 ? "+" : "−"}${Math.abs(dUsd).toFixed(2)}`}</td>
+                      <td style={{ ...numc, color: colU }}>{dUsdPct == null ? "—" : `${dUsdPct >= 0 ? "+" : "−"}${Math.abs(dUsdPct).toFixed(2)}%`}</td>
+                      <td style={{ ...numc, color: colA }}>{dArs == null ? "—" : `${dArs >= 0 ? "+" : "−"}${f$(Math.abs(dArs)).slice(1)}`}</td>
+                      <td style={{ ...numc, color: colA }}>{dArsPct == null ? "—" : `${dArsPct >= 0 ? "+" : "−"}${Math.abs(dArsPct).toFixed(2)}%`}</td>
+                      <td style={{ ...tdd, color: C.muted, fontFamily: "inherit", maxWidth: 230, overflow: "hidden", textOverflow: "ellipsis" }}>{a.nota || "—"}</td>
+                      <td style={{ ...tdd, textAlign: "center" }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: a.origen === "tv" ? C.accent : C.dim, border: `1px solid ${a.origen === "tv" ? C.accent : C.border}`, borderRadius: 3, padding: "1px 6px" }}>{a.origen === "tv" ? "BOT" : "MANUAL"}</span>
+                      </td>
+                      <td style={{ ...numc, fontSize: 10.5, color: a.triggered_at ? C.dim : C.green }}>{a.triggered_at ? "disparada" : "armada"}</td>
+                      <td style={{ ...tdd, textAlign: "right" }}>
+                        <button onClick={() => del(a.id)} style={{ width: 20, height: 20, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 10, lineHeight: 1 }}>✕</button>
+                      </td>
+                    </tr>
+                  );
+                }),
+              ])}
             </tbody>
           </table>
         </div>
