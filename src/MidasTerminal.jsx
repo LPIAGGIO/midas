@@ -24805,7 +24805,9 @@ function TvAlertasModule() {
                 // BAJA (los niveles inmediatos, no los estructurales — si no,
                 // soporte del año vs resistencia del año da un % gigante).
                 const vivas = items.filter((x) => !x.triggered_at);
-                const buys = vivas.filter((x) => x.dir === "down" && /(COMPRA|soporte|piso)/i.test(x.nota || ""));
+                // Los STOP se excluyen: la nota del stop puede decir "piso de
+                // zona" y colarse como nivel de compra (inflaba el potencial).
+                const buys = vivas.filter((x) => x.dir === "down" && !/(stop|salir)/i.test(x.nota || "") && /(COMPRA|soporte|piso)/i.test(x.nota || ""));
                 const sells = vivas.filter((x) => x.dir === "up" && /(venta|resistencia|ganancia)/i.test(x.nota || ""));
                 const val = (x) => Number(x.usd_ref) || Number(x.price);
                 const buy = buys.length ? buys.reduce((a, b) => (val(b) > val(a) ? b : a)) : null;
@@ -24859,7 +24861,8 @@ function TvAlertasModule() {
                           // Horizonte del nivel: diario/estructural → TRADE (más largo);
                           // solo horario → SCALP (para ahora). Derivado de la nota del bot.
                           const n = a.nota || "";
-                          const hz = /(diario|estructural|año|piso|swing)/i.test(n) ? "TRADE" : /horario/i.test(n) ? "SCALP" : null;
+                          // Los STOP no llevan horizonte (un stop no es un trade).
+                          const hz = /(stop|salir)/i.test(n) ? null : /(diario|estructural|año|piso|swing)/i.test(n) ? "TRADE" : /horario/i.test(n) ? "SCALP" : null;
                           if (!hz) return null;
                           return (
                             <span style={{
