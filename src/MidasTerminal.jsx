@@ -781,6 +781,7 @@ function MidasApp({ allowedModules = null }) {
     } catch { fallback(); }
   }, [cedearPip]);
   const globalAlerts = useGlobalAlerts();
+  const onlineCount = useOnlinePresence();
   const [bellOpen, setBellOpen] = useState(false);
   const bellRef = useRef(null);
   useEffect(() => {
@@ -1180,6 +1181,9 @@ function MidasApp({ allowedModules = null }) {
                 }}
               >
                 {marketOpen ? "Mercado Abierto" : "Mercado Cerrado"}
+                {onlineCount != null && (
+                  <span style={{ color: C.accent, fontWeight: 600 }}> · {onlineCount} usuario{onlineCount === 1 ? "" : "s"}</span>
+                )}
               </span>
             </div>
           </div>
@@ -24989,6 +24993,24 @@ function flowBeep() {
 /* Chequeo GLOBAL de alertas — corre siempre (montado en MidasTerminal), dispara
  * sonido + notificación del SO en cualquier pantalla, y mantiene el log + el
  * contador para la campanita del header. */
+// Presencia: cada sesión logueada late (upsert) cada 60s en user_presence; el
+// conteo de conectados (últimos 2 min) lo devuelve online_users_count(), que
+// SOLO responde número a admins (al resto null → no se muestra nada).
+function useOnlinePresence() {
+  const { user } = useAuth();
+  const [count, setCount] = useState(null);
+  useEffect(() => {
+    if (!user) { setCount(null); return; }
+    let cancel = false;
+    const beat = () => supabase.from("user_presence").upsert({ user_id: user.id, last_seen: new Date().toISOString() }, { onConflict: "user_id" }).then(() => {});
+    const poll = () => supabase.rpc("online_users_count").then(({ data }) => { if (!cancel) setCount(typeof data === "number" ? data : null); });
+    beat(); poll();
+    const iv = setInterval(() => { beat(); poll(); }, 60000);
+    return () => { cancel = true; clearInterval(iv); };
+  }, [user]);
+  return count;
+}
+
 function useGlobalAlerts() {
   const { user } = useAuth();
   const { positions } = useUserPositions();
