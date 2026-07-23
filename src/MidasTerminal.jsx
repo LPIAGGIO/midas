@@ -168,6 +168,7 @@ const NAV = [
     type: "single",
     requiresAuth: true,  // Si no hay sesión, muestra wall de login
   },
+  { id: "alertas-tv", label: "Alertas TV", icon: LineChart, type: "single", requiresAuth: true },
   { id: "importaciones", label: "Importaciones", icon: Upload, type: "single", requiresAuth: true },
   {
     // Trading automatizado / estrategias bot. Reservado para futuros
@@ -1549,6 +1550,8 @@ function MidasApp({ allowedModules = null }) {
               />
             ) : active === "rem" ? (
               <RemTcModule key={active} />
+            ) : active === "alertas-tv" ? (
+              <TvAlertasModule key={active} />
             ) : active === "caja-tiempo" ? (
               <CajaTiempoModule key={active} />
             ) : active === "pnl-instrumento" ? (
@@ -24501,6 +24504,108 @@ function AlertAdd({ onAdd }) {
 // mismas que se cargan por instrumento en Flujo de Posiciones; acá se ven/cargan
 // todas juntas.
 // ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+// Alertas TV — niveles TÉCNICOS sacados del análisis en TradingView (sobre el
+// ticker USA), traducidos a pesos: CEDEAR = USD × CCL ÷ ratio. Con nota de qué
+// nivel es. Disparan EN PANTALLA (motor global + sonido), NO por Telegram
+// (canal='screen'; el bot queda para P&L/portfolio/dólar).
+// ═══════════════════════════════════════════════════════════════════════
+function TvAlertasModule() {
+  const { user } = useAuth();
+  const { fx } = useDashboardFx();
+  const ccl = fx?.ccl?.mid ?? null;
+  const [rows, setRows] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [tkr, setTkr] = useState("");
+  const [usd, setUsd] = useState("");
+  const [dir, setDir] = useState("up");
+  const [nota, setNota] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    let c = false;
+    supabase.from("price_alerts").select("id,ticker,price,dir,nota,usd_ref,triggered_at,created_at").eq("user_id", user.id).eq("canal", "screen").order("created_at", { ascending: false })
+      .then(({ data }) => { if (!c) setRows(data || []); });
+    return () => { c = true; };
+  }, [user, tick]);
+
+  const T = tkr.trim().toUpperCase();
+  const cat = CEDEAR_CAT[T];
+  const usdN = Number(String(usd).replace(",", "."));
+  const arsLevel = (cat && ccl && usdN > 0) ? (usdN * ccl) / cat.r : null;
+
+  const add = async () => {
+    if (!user || !arsLevel) return;
+    setSaving(true);
+    await supabase.from("price_alerts").insert({ user_id: user.id, ticker: T, price: Math.round(arsLevel), dir, nota: nota.trim() || null, usd_ref: usdN, canal: "screen" });
+    setSaving(false); setUsd(""); setNota(""); setTick((t) => t + 1);
+  };
+  const del = async (id) => { await supabase.from("price_alerts").delete().eq("id", id); setTick((t) => t + 1); };
+
+  const inp = { padding: "9px 11px", fontSize: 13, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
+  const f$ = (n) => `$${Math.round(n).toLocaleString("es-AR")}`;
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 980, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, margin: 0 }}>Alertas TV</h1>
+      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 16px 0", maxWidth: 820 }}>
+        Niveles técnicos del análisis en TradingView (sobre el ticker USA), traducidos al CEDEAR: <b>USD × CCL ÷ ratio</b>. Suenan acá en Midas mientras operás — no van a Telegram. CCL de referencia: <b style={{ color: C.text }}>{ccl ? f$(ccl) : "…"}</b>
+      </p>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginBottom: 18 }}>
+        <div className="flex" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: "0 1 120px" }}>
+            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Ticker</label>
+            <input value={tkr} onChange={(e) => setTkr(e.target.value)} placeholder="MU" style={{ ...inp, width: "100%", textTransform: "uppercase" }} />
+          </div>
+          <div style={{ flex: "0 1 140px" }}>
+            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Nivel USD (chart USA)</label>
+            <input value={usd} onChange={(e) => setUsd(e.target.value)} placeholder="970" inputMode="decimal" style={{ ...inp, width: "100%" }} />
+          </div>
+          <div style={{ flex: "0 0 auto" }}>
+            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Cuando</label>
+            <div className="flex" style={{ gap: 6 }}>
+              {[["up", "▲ suba"], ["down", "▼ baje"]].map(([v, l]) => (
+                <button key={v} onClick={() => setDir(v)} style={{ padding: "9px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${dir === v ? (v === "up" ? C.green : C.red) : C.border}`, background: "transparent", color: dir === v ? (v === "up" ? C.green : C.red) : C.muted }}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ flex: "2 1 220px" }}>
+            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Nota técnica</label>
+            <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="resistencia diario US$970" style={{ ...inp, width: "100%" }} />
+          </div>
+          <button onClick={add} disabled={!arsLevel || saving} style={{ padding: "9px 16px", fontSize: 12, fontWeight: 700, cursor: arsLevel ? "pointer" : "default", border: `1px solid ${arsLevel ? C.accent : C.border}`, background: arsLevel ? "rgba(124,156,255,0.12)" : "transparent", color: arsLevel ? C.accent : C.dim, borderRadius: 6 }}>+ Crear</button>
+        </div>
+        <div style={{ fontSize: 11.5, color: C.muted, marginTop: 10 }}>
+          {T && !cat ? <span style={{ color: C.red }}>"{T}" no está en el catálogo de CEDEARs.</span>
+            : arsLevel ? <>≈ <b style={{ color: "#f59e0b", fontSize: 14 }}>{f$(arsLevel)}</b> por CEDEAR ({T} ratio {cat.r}:1 · US${usdN} × CCL {f$(ccl)}). La alerta se arma sobre ese precio en pesos.</>
+            : "Cargá ticker y nivel USD para ver la conversión."}
+        </div>
+      </div>
+      {!rows ? <div style={{ color: C.muted, fontSize: 12, padding: 20 }}>Cargando…</div> : !rows.length ? (
+        <div style={{ color: C.muted, fontSize: 12.5, padding: 24, textAlign: "center", border: `1px dashed ${C.border}`, borderRadius: 8 }}>Sin niveles cargados. El flujo: análisis en TradingView (ticker USA) → nivel USD acá → Midas te avisa en pantalla al cruzarlo.</div>
+      ) : (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+          {rows.map((a) => (
+            <div key={a.id} className="flex items-center" style={{ gap: 12, padding: "10px 14px", borderBottom: `1px solid ${C.border}`, opacity: a.triggered_at ? 0.5 : 1 }}>
+              <span style={{ fontWeight: 700, fontSize: 10, color: a.dir === "down" ? C.red : C.green, border: `1px solid ${a.dir === "down" ? C.red : C.green}`, borderRadius: 3, padding: "1px 5px" }}>{a.dir === "down" ? "▼" : "▲"}</span>
+              <span style={{ color: C.text, fontWeight: 700, minWidth: 52 }}>{a.ticker}</span>
+              <span style={{ color: "#f59e0b", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{f$(Number(a.price))}</span>
+              {a.usd_ref && <span style={{ color: C.dim, fontSize: 11 }}>US${Number(a.usd_ref)}</span>}
+              <span style={{ color: C.muted, fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nota || ""}</span>
+              <span style={{ fontSize: 10.5, color: a.triggered_at ? C.dim : C.green }}>{a.triggered_at ? "disparada" : "armada"}</span>
+              <button onClick={() => del(a.id)} style={{ width: 24, height: 24, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 11 }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <p style={{ fontSize: 10.5, color: C.dim, marginTop: 12, lineHeight: 1.5 }}>
+        El precio en pesos queda FIJO al crear la alerta (con el CCL de ese momento). Si el CCL se mueve fuerte, recreá el nivel. Estas alertas no van a Telegram; las básicas (P&L, portfolio, dólar) siguen por el bot.
+      </p>
+    </div>
+  );
+}
+
 function AlertasModule() {
   const { byTicker, addAlertDir, removeAlert } = usePriceAlerts();
   const [tk, setTk] = useState("");
@@ -24654,6 +24759,9 @@ function useGlobalAlerts() {
   const futureTickers = useMemo(() => consolidated.filter((p) => p.type === "future").map((p) => p.ticker), [consolidated]);
   const { prices: futPrices } = useFuturePrices(futureTickers);
   const d912 = useFlowData912();
+  // Precios de TODO el mercado (no solo cartera): las Alertas TV pueden ser de
+  // tickers que no tenés en posición — sin esto nunca dispararían.
+  const { prices: gStockPx } = useStockPrices();
 
   const [log, setLog] = useState([]);
   const [seen, setSeen] = useState(0); // alertas ya vistas (para el badge)
@@ -24678,7 +24786,7 @@ function useGlobalAlerts() {
     for (const p of consolidated) { const live = flowResolve(p, futPrices, d912); if (live && live.price != null) priceOf[p.ticker] = live.price; }
     const ts = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     for (const a of palerts) {
-      const price = priceOf[a.ticker];
+      const price = priceOf[a.ticker] ?? gStockPx[a.ticker]?.price ?? null;
       if (price == null || firedRef.current.has(a.id)) continue;
       const hit = a.dir === "up" ? price >= a.price : price <= a.price;
       if (!hit) continue;
@@ -24687,7 +24795,7 @@ function useGlobalAlerts() {
       setLog((l) => [{ id: a.id + "_" + Date.now(), ts, ticker: a.ticker, kind: a.dir, price, level: a.price }, ...l].slice(0, 40));
       supabase.from("price_alerts").update({ triggered_at: new Date().toISOString() }).eq("id", a.id).then(() => {});
     }
-  }, [consolidated, futPrices, d912, palerts, fire, muted]);
+  }, [consolidated, futPrices, d912, palerts, fire, muted, gStockPx]);
 
   // Aviso de usuario nuevo — SOLO para admins. En el primer barrido se marcan los
   // existentes como vistos (no ensucian la campana); solo los que aparezcan

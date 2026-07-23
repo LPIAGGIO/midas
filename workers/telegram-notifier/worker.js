@@ -323,8 +323,10 @@ async function evalPriceAlerts(users, fut) {
   const subs = users.filter((u) => prefOn(u.prefs, "price_alerts", true));
   if (!subs.length) return;
   const ids = subs.map((u) => u.userId);
+  // canal='screen' (Alertas TV): disparan SOLO en la pantalla de Midas, el bot
+  // no las toca (y tampoco las reclama — el front las marca al cruzar).
   const { data: alerts } = await supabase.from("price_alerts")
-    .select("id,user_id,ticker,price,dir").is("triggered_at", null).in("user_id", ids);
+    .select("id,user_id,ticker,price,dir,canal").is("triggered_at", null).in("user_id", ids).neq("canal", "screen");
   if (!alerts || !alerts.length) return;
   const chatBy = Object.fromEntries(subs.map((u) => [u.userId, u.chatId]));
   let d912 = null;
