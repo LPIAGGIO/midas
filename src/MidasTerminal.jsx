@@ -24736,13 +24736,25 @@ function TvAlertasModule() {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(rows.reduce((m, a) => { (m[a.ticker] = m[a.ticker] || []).push(a); return m; }, {})).flatMap(([tik, items]) => [
+              {Object.entries(rows.reduce((m, a) => { (m[a.ticker] = m[a.ticker] || []).push(a); return m; }, {})).flatMap(([tik, items]) => {
+                // Potencial del trade: % entre el nivel de compra (soporte) y el
+                // de venta (resistencia) del par vigente (no disparadas).
+                const vivas = items.filter((x) => !x.triggered_at);
+                const buy = vivas.find((x) => x.dir === "down" && /(COMPRA|soporte)/i.test(x.nota || ""));
+                const sell = vivas.find((x) => x.dir === "up" && /(venta|resistencia|ganancia)/i.test(x.nota || ""));
+                const bV = buy ? (Number(buy.usd_ref) || Number(buy.price)) : null;
+                const sV = sell ? (Number(sell.usd_ref) || Number(sell.price)) : null;
+                const potencial = (bV && sV && bV > 0 && ((buy.usd_ref && sell.usd_ref) || (!buy.usd_ref && !sell.usd_ref))) ? ((sV / bV) - 1) * 100 : null;
+                return [
                 <tr key={tik + "_hdr"} style={{ background: C.deep }}>
                   <td colSpan={9} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
                     {tik}
                     {(usaPx[tik] != null || livePx[tik]?.price != null) && <span style={{ color: C.dim, fontWeight: 400 }}> · valor actual:</span>}
                     {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> USD {Number(usaPx[tik]).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
                     {livePx[tik]?.price != null && <span style={{ color: C.text, fontWeight: 600 }}>{usaPx[tik] != null ? " · " : " "}ARS {Math.round(livePx[tik].price).toLocaleString("es-AR")}</span>}
+                    {potencial != null && potencial > 0 && (
+                      <span style={{ color: C.dim, fontWeight: 400 }}> · potencial compra→venta: <b style={{ color: C.green, fontWeight: 700 }}>+{potencial.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</b></span>
+                    )}
                   </td>
                 </tr>,
                 ...items.map((a) => {
@@ -24780,7 +24792,7 @@ function TvAlertasModule() {
                     </tr>
                   );
                 }),
-              ])}
+              ];})}
             </tbody>
           </table>
         </div>
