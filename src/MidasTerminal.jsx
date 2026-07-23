@@ -24544,7 +24544,8 @@ function TvAlertasModule() {
   };
   const del = async (id) => { await supabase.from("price_alerts").delete().eq("id", id); setTick((t) => t + 1); };
 
-  const inp = { padding: "9px 11px", fontSize: 13, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
+  const inp = { padding: "7px 10px", fontSize: 13, fontWeight: 600, color: C.text, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" };
+  const lbl = { fontSize: 9.5, color: C.dim, display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.1em" };
   const f$ = (n) => `$${Math.round(n).toLocaleString("es-AR")}`;
 
   return (
@@ -24553,44 +24554,40 @@ function TvAlertasModule() {
       <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 16px 0", maxWidth: 820 }}>
         Niveles técnicos del análisis en TradingView (sobre el ticker USA), traducidos al CEDEAR: <b>USD × CCL ÷ ratio</b>. Suenan acá en Midas mientras operás — no van a Telegram. CCL de referencia: <b style={{ color: C.text }}>{ccl ? f$(ccl) : "…"}</b>
       </p>
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "16px 18px", marginBottom: 18 }}>
-        <div className="flex" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ flex: "0 1 120px" }}>
-            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Ticker</label>
-            <input value={tkr} onChange={(e) => setTkr(e.target.value)} placeholder="MU" style={{ ...inp, width: "100%", textTransform: "uppercase" }} />
-          </div>
-          <div style={{ flex: "0 1 140px" }}>
-            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Nivel USD (chart USA)</label>
-            <input value={usd} onChange={(e) => setUsd(e.target.value)} placeholder="970" inputMode="decimal" style={{ ...inp, width: "100%" }} />
-          </div>
-          <div style={{ flex: "0 0 auto" }}>
-            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Cuando</label>
-            <div className="flex" style={{ gap: 6 }}>
-              {[["up", "▲ suba"], ["down", "▼ baje"]].map(([v, l]) => (
-                <button key={v} onClick={() => setDir(v)} style={{ padding: "9px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${dir === v ? (v === "up" ? C.green : C.red) : C.border}`, background: "transparent", color: dir === v ? (v === "up" ? C.green : C.red) : C.muted }}>{l}</button>
-              ))}
-            </div>
-          </div>
-          <div style={{ flex: "2 1 220px" }}>
-            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Nota técnica / acción</label>
-            <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="resistencia diario US$970 — vender acá" style={{ ...inp, width: "100%" }} />
-            <div className="flex" style={{ gap: 5, marginTop: 5, flexWrap: "wrap" }}>
-              {["comprar acá", "vender acá", "tomar ganancia", "stop / salir"].map((chip) => (
-                <button key={chip} onClick={() => setNota(nota ? `${nota} — ${chip}` : chip)} style={{ padding: "2px 8px", fontSize: 10, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 10 }}>{chip}</button>
-              ))}
-            </div>
-          </div>
-          <button onClick={add} disabled={!arsLevel || saving} style={{ padding: "9px 16px", fontSize: 12, fontWeight: 700, cursor: arsLevel ? "pointer" : "default", border: `1px solid ${arsLevel ? C.accent : C.border}`, background: arsLevel ? "rgba(124,156,255,0.12)" : "transparent", color: arsLevel ? C.accent : C.dim, borderRadius: 6 }}>+ Crear</button>
+      <div className="flex" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
+        <div style={{ flex: "0 1 110px" }}>
+          <label style={lbl}>Ticker</label>
+          <input value={tkr} onChange={(e) => setTkr(e.target.value)} placeholder="MU" style={{ ...inp, width: "100%", textTransform: "uppercase" }} />
         </div>
-        <div style={{ fontSize: 11.5, color: C.muted, marginTop: 10 }}>
-          {T && !cat ? <span style={{ color: C.red }}>"{T}" no está en el catálogo de CEDEARs.</span>
-            : arsLevel ? <>≈ <b style={{ color: "#f59e0b", fontSize: 14 }}>{f$(arsLevel)}</b> por CEDEAR ({T} ratio {cat.r}:1 · US${usdN} × CCL {f$(ccl)}). La alerta se arma sobre ese precio en pesos.</>
-            : "Cargá ticker y nivel USD para ver la conversión."}
+        <div style={{ flex: "0 1 130px" }}>
+          <label style={lbl}>Nivel USD</label>
+          <input value={usd} onChange={(e) => setUsd(e.target.value)} placeholder="970" inputMode="decimal" style={{ ...inp, width: "100%" }} />
         </div>
+        <div style={{ flex: "0 0 auto" }}>
+          <label style={lbl}>Cuando</label>
+          <div className="flex" style={{ gap: 4 }}>
+            {[["up", "▲ suba"], ["down", "▼ baje"]].map(([v, l]) => (
+              <button key={v} onClick={() => setDir(v)} style={{ padding: "7px 11px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 4, border: `1px solid ${dir === v ? (v === "up" ? C.green : C.red) : C.border}`, background: dir === v ? (v === "up" ? "rgba(52,211,153,0.08)" : "rgba(248,113,113,0.08)") : "transparent", color: dir === v ? (v === "up" ? C.green : C.red) : C.muted, fontFamily: "'JetBrains Mono', monospace" }}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ flex: "2 1 240px" }}>
+          <label style={lbl}>Nota técnica / acción</label>
+          <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="resistencia diario US$970 — vender acá" style={{ ...inp, width: "100%" }} />
+        </div>
+        <button onClick={add} disabled={!arsLevel || saving} style={{ padding: "7px 16px", fontSize: 11.5, fontWeight: 700, cursor: arsLevel ? "pointer" : "default", border: `1px solid ${arsLevel ? C.accent : C.border}`, background: "transparent", color: arsLevel ? C.accent : C.dim, borderRadius: 4, fontFamily: "'JetBrains Mono', monospace" }}>+ CREAR</button>
       </div>
-      {!rows ? <div style={{ color: C.muted, fontSize: 12, padding: 20 }}>Cargando…</div> : !rows.length ? (
-        <div style={{ color: C.muted, fontSize: 12.5, padding: 24, textAlign: "center", border: `1px dashed ${C.border}`, borderRadius: 8 }}>Sin niveles cargados. El flujo: análisis en TradingView (ticker USA) → nivel USD acá → Midas te avisa en pantalla al cruzarlo.</div>
-      ) : (
+      <div className="flex items-center" style={{ gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {["comprar acá", "vender acá", "tomar ganancia", "stop / salir"].map((chip) => (
+          <button key={chip} onClick={() => setNota(nota ? `${nota} — ${chip}` : chip)} style={{ padding: "3px 10px", fontSize: 10, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 3, textTransform: "uppercase", letterSpacing: "0.05em" }}>{chip}</button>
+        ))}
+        <span style={{ fontSize: 11.5, color: C.muted, fontFamily: "'JetBrains Mono', monospace" }}>
+          {T && !cat ? <span style={{ color: C.red }}>"{T}" no está en el catálogo de CEDEARs.</span>
+            : arsLevel ? <>≈ <b style={{ color: "#f59e0b", fontSize: 13 }}>{f$(arsLevel)}</b> por CEDEAR · {T} ratio {cat.r}:1 · US${usdN} × CCL {f$(ccl)}</>
+            : "cargá ticker y nivel USD para ver la conversión"}
+        </span>
+      </div>
+      {!rows ? <div style={{ color: C.muted, fontSize: 12, padding: 20 }}>Cargando…</div> : (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, background: C.panel, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace" }}>
             <thead>
@@ -24608,6 +24605,11 @@ function TvAlertasModule() {
               </tr>
             </thead>
             <tbody>
+              {!rows.length && (
+                <tr style={{ borderTop: `1px solid ${C.border}` }}>
+                  <td colSpan={10} style={{ padding: "26px 14px", textAlign: "center", color: C.muted, fontSize: 12 }}>Sin niveles cargados. Análisis en TradingView (ticker USA) → nivel USD acá → Midas te avisa en pantalla al cruzarlo.</td>
+                </tr>
+              )}
               {rows.map((a) => {
                 const target = Number(a.price);
                 const cur = livePx[a.ticker]?.price ?? null;
