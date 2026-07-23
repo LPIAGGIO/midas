@@ -92,7 +92,7 @@ async function yahooCandles(sym, interval, range) {
   const out = [];
   for (let i = 0; i < (res.timestamp || []).length; i++) {
     if (q.high?.[i] != null && q.low?.[i] != null && q.close?.[i] != null) {
-      out.push({ t: new Date(res.timestamp[i] * 1000).toISOString().slice(0, 10), h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume?.[i] || 0 });
+      out.push({ ts: res.timestamp[i], t: new Date(res.timestamp[i] * 1000).toISOString().slice(0, 10), o: q.open?.[i] ?? q.close[i], h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume?.[i] || 0 });
     }
   }
   return out.length ? out : null;
@@ -173,6 +173,98 @@ function scoreZone(z, emas) {
   return { score: Math.min(10, s), emaHit };
 }
 
+/* ───────── Señales de velas y volumen (v6) ─────────
+ * Un patrón de velas suelto es ruido; el MISMO patrón sobre una zona con
+ * toques es confirmación. Los detectores solo se reportan si la vela operó
+ * cerca de la zona del kit. */
+function candlePattern(cs, i) {
+  const c = cs[i];
+  if (!c) return null;
+  const body = Math.abs(c.c - c.o), range = c.h - c.l;
+  if (!(range > 0)) return null;
+  const upperW = c.h - Math.max(c.c, c.o), lowerW = Math.min(c.c, c.o) - c.l;
+  const p = cs[i - 1];
+  if (p) {
+    const pBody = Math.abs(p.c - p.o);
+    if (pBody > 0 && body > pBody) {
+      if (c.c > c.o && p.c < p.o && c.c >= Math.max(p.o, p.c) && c.o <= Math.min(p.o, p.c)) return { k: "envolvente alcista", bull: true };
+      if (c.c < c.o && p.c > p.o && c.o >= Math.max(p.o, p.c) && c.c <= Math.min(p.o, p.c)) return { k: "envolvente bajista", bull: false };
+    }
+  }
+  if (lowerW >= 2 * body && upperW <= body && c.c >= c.l + range * 0.6) return { k: "martillo", bull: true };
+  if (upperW >= 2 * body && lowerW <= body && c.c <= c.l + range * 0.4) return { k: "estrella fugaz", bull: false };
+  if (body <= range * 0.1) return { k: "doji (indecisión)", bull: null };
+  return null;
+}
+// Patrón en las últimas 2 velas, solo si esa vela tocó/rozó la zona (±1,5%).
+function patternAtZone(cs, zone, side) {
+  for (const i of [cs.length - 1, cs.length - 2]) {
+    const pat = candlePattern(cs, i);
+    if (!pat) continue;
+    const c = cs[i];
+    const near = side === "sup" ? c.l <= zone.hi * 1.015 : c.h >= zone.lo * 0.985;
+    const fits = side === "sup" ? pat.bull !== false : pat.bull !== true;
+    if (near && fits) return { ...pat, when: i === cs.length - 1 ? "hoy" : "ayer" };
+  }
+  return null;
+}
+// RSI por barra (media simple 14) para buscar divergencias en los pivotes.
+function rsiSeries(closes) {
+  const out = new Array(closes.length).fill(null);
+  for (let i = 14; i < closes.length; i++) {
+    let g = 0, l = 0;
+    for (let k = i - 13; k <= i; k++) { const d = closes[k] - closes[k - 1]; if (d > 0) g += d; else l -= d; }
+    out[i] = g + l === 0 ? 50 : (100 * g) / (g + l);
+  }
+  return out;
+}
+// Divergencia clásica entre los dos últimos pivotes: precio hace mínimo más
+// bajo con RSI más alto (alcista) / máximo más alto con RSI más bajo (bajista).
+function divergences(dLos, dHis, rsiArr) {
+  let bull = false, bear = false;
+  const lo = dLos.slice(-2), hi = dHis.slice(-2);
+  if (lo.length === 2 && rsiArr[lo[0].i] != null && rsiArr[lo[1].i] != null) bull = lo[1].p < lo[0].p && rsiArr[lo[1].i] > rsiArr[lo[0].i] + 2;
+  if (hi.length === 2 && rsiArr[hi[0].i] != null && rsiArr[hi[1].i] != null) bear = hi[1].p > hi[0].p && rsiArr[hi[1].i] < rsiArr[hi[0].i] - 2;
+  return { bull, bear };
+}
+// Estructura de tendencia por pivotes diarios: HH+HL / LL+LH / rango.
+function estructuraDe(dLos, dHis) {
+  if (dLos.length < 2 || dHis.length < 2) return "rango";
+  const hl = dLos[dLos.length - 1].p > dLos[dLos.length - 2].p;
+  const hh = dHis[dHis.length - 1].p > dHis[dHis.length - 2].p;
+  const ll = dLos[dLos.length - 1].p < dLos[dLos.length - 2].p;
+  const lh = dHis[dHis.length - 1].p < dHis[dHis.length - 2].p;
+  return hh && hl ? "alcista" : ll && lh ? "bajista" : "rango";
+}
+// Gaps de apertura sin llenar (imanes de precio).
+function openGaps(daily) {
+  const gaps = [];
+  for (let i = 1; i < daily.length; i++) {
+    const p = daily[i - 1], c = daily[i];
+    if (c.l > p.h) gaps.push({ lo: p.h, hi: c.l, i, up: true });
+    else if (c.h < p.l) gaps.push({ lo: c.h, hi: p.l, i, up: false });
+  }
+  return gaps.filter((g) => {
+    for (let k = g.i + 1; k < daily.length; k++) {
+      if (g.up && daily[k].l <= g.lo) return false;
+      if (!g.up && daily[k].h >= g.hi) return false;
+    }
+    return true;
+  });
+}
+// POC: el precio donde más volumen operó en el año (50 bins, hlc3 ponderado).
+function pocOf(daily) {
+  const lo = Math.min(...daily.map((c) => c.l)), hi = Math.max(...daily.map((c) => c.h));
+  if (!(hi > lo)) return null;
+  const bins = new Array(50).fill(0);
+  for (const c of daily) {
+    const px = (c.h + c.l + c.c) / 3;
+    bins[Math.min(49, Math.max(0, Math.floor(((px - lo) / (hi - lo)) * 50)))] += c.v;
+  }
+  const bi = bins.indexOf(Math.max(...bins));
+  return lo + ((bi + 0.5) / 50) * (hi - lo);
+}
+
 // Régimen de mercado: SPY y QQQ contra su EMA50. Comprar soportes con el
 // mercado en cascada es el error caro — el kit lo advierte.
 async function marketRegime() {
@@ -247,6 +339,15 @@ async function main() {
       const bigSup = clusterZones(bigP.los);
       const bigRes = clusterZones(bigP.his);
 
+      // Señales v6: divergencias RSI, estructura de tendencia, gaps y POC.
+      const rsiArr = rsiSeries(closes);
+      const div = divergences(dp.los, dp.his, rsiArr);
+      const estr = estructuraDe(dp.los, dp.his);
+      const gaps = openGaps(daily);
+      const poc = pocOf(daily);
+      const gapUp = gaps.filter((g) => g.lo > spot && (g.lo - spot) / spot <= 0.15).sort((a, b) => a.lo - b.lo)[0] || null;
+      const gapDn = gaps.filter((g) => g.hi < spot && (spot - g.hi) / spot <= 0.15).sort((a, b) => b.hi - a.hi)[0] || null;
+
       // ATR14 diario para el stop sin pivote y para el aviso de rango.
       let atr = 0;
       for (let i = Math.max(1, daily.length - 14); i < daily.length; i++) {
@@ -307,21 +408,31 @@ async function main() {
         if (dEarn >= 0 && dEarn <= 7) warns.push(`OJO earnings ${ctx.earnings.slice(8, 10)}/${ctx.earnings.slice(5, 7)}`);
       }
       if (regime === "risk_off") warns.push("OJO mercado débil (SPY y QQQ bajo EMA50)");
+      if (estr === "bajista") warns.push("estructura bajista: soportes frágiles");
       if (rsi != null && rsi <= 30) warns.push(`RSI ${rsi} sobrevendido`);
       const warnTxt = warns.length ? " · " + warns.join(" · ") : "";
 
       const rows = [], tracks = [];
       const mk = (lvl, dir, nota, tipo, extra = {}) => {
         rows.push({ user_id: job.user_id, ticker: tk, price: toArs(lvl), dir, nota, usd_ref: usdShown(lvl), canal: "screen", origen: "tv" });
-        tracks.push({ user_id: job.user_id, ticker: tk, sym, tipo, dir, level: Math.round(lvl * 100) / 100, spot: Math.round(spot * 100) / 100, regime, rsi, ...extra });
+        tracks.push({ user_id: job.user_id, ticker: tk, sym, tipo, dir, level: Math.round(lvl * 100) / 100, spot: Math.round(spot * 100) / 100, regime, rsi, estructura: estr, ...extra });
       };
 
-      // 1. Entrada principal
+      // 1. Entrada principal — señales de velas/divergencia/POC ajustan el score.
       if (buyZone) {
         const sc = scoreZone(buyZone, emas);
+        const sig = [];
+        const pat = patternAtZone(daily, buyZone, "sup") || (hourly ? patternAtZone(hourly, buyZone, "sup") : null);
+        if (pat) { sig.push(`${pat.k} ${pat.when}`); if (pat.bull) sc.score += 1; }
+        if (div.bull) { sig.push("divergencia RSI alcista"); sc.score += 1; }
+        if (poc && Math.abs(poc - buyZone.avg) / buyZone.avg <= 0.01) { sig.push("es el POC del año"); sc.score += 1; }
+        if (estr === "alcista") sc.score += 1; else if (estr === "bajista") sc.score -= 1;
+        sc.score = Math.max(1, Math.min(10, sc.score));
+        const sigTxt = sig.length ? " · " + sig.join(" · ") : "";
+        const gapTxt = gapDn ? ` · gap abierto abajo ${fmt(gapDn.lo)}-${fmt(gapDn.hi)} (imán)` : "";
         const rr = sellZone && stopLvl && buyZone.hi - stopLvl > 0 ? Math.round(((sellZone.lo - buyZone.hi) / (buyZone.hi - stopLvl)) * 10) / 10 : null;
         const rrTxt = rr != null ? ` · R:R ${fmt1(rr)}${rr < 1.2 ? " flaco" : rr >= 2.5 ? " bueno" : ""}` : "";
-        mk(buyZone.hi, "down", `AUTO · soporte ${unit}${fmt(buyZone.hi)} · ${tfLabel(buyZone)} · ${zoneTag(buyZone, sc)}${rrTxt}${warnTxt} · zona de COMPRA`, buyZone.hasD ? "soporte-diario" : "soporte-horario", { score: sc.score, touches: buyZone.touches, rr });
+        mk(buyZone.hi, "down", `AUTO · soporte ${unit}${fmt(buyZone.hi)} · ${tfLabel(buyZone)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}${rrTxt}${gapTxt}${warnTxt} · zona de COMPRA`, buyZone.hasD ? "soporte-diario" : "soporte-horario", { score: sc.score, touches: buyZone.touches, rr, senales: sig.join(",") || null });
         // 2. Stop de esa entrada
         if (stopLvl && stopLvl > 0 && stopLvl < buyZone.hi) {
           mk(stopLvl, "down", `AUTO · STOP LOSS ${unit}${fmt(stopLvl)} si comprás en ${fmt(buyZone.hi)} · ${stopWhy}`, "stop", { score: null, touches: null });
@@ -332,13 +443,30 @@ async function main() {
           mk(swingZone.hi, "down", `AUTO · soporte ${unit}${fmt(swingZone.hi)} · diario · ${zoneTag(swingZone, sc2)} · zona de COMPRA swing`, "soporte-diario", { score: sc2.score, touches: swingZone.touches });
         }
       }
-      // 3. Take profit / venta con lectura de breakout
+      // 3. Take profit / venta con lectura de breakout + señales bajistas.
       if (sellZone) {
         const sc = scoreZone(sellZone, emas);
+        const sig = [];
+        const pat = patternAtZone(daily, sellZone, "res") || (hourly ? patternAtZone(hourly, sellZone, "res") : null);
+        if (pat) { sig.push(`${pat.k} ${pat.when}`); if (pat.bull === false) sc.score += 1; }
+        if (div.bear) { sig.push("divergencia RSI bajista"); sc.score += 1; }
+        if (poc && Math.abs(poc - sellZone.avg) / sellZone.avg <= 0.01) { sig.push("es el POC del año"); sc.score += 1; }
+        sc.score = Math.max(1, Math.min(10, sc.score));
+        const sigTxt = sig.length ? " · " + sig.join(" · ") : "";
         const above = [...bigRes.filter((z) => z.lo > sellZone.hi * 1.005).map((z) => z.lo), yrHigh > sellZone.hi * 1.005 ? yrHigh : null].filter((x) => x != null);
         const nextUp = above.length ? Math.min(...above) : null;
+        const gapTxt = gapUp ? ` · gap abierto arriba ${fmt(gapUp.lo)}-${fmt(gapUp.hi)} (imán)` : "";
         const hotRsi = rsi != null && rsi >= 70 ? ` · RSI ${rsi} sobrecomprado` : "";
-        mk(sellZone.lo, "up", `AUTO · resistencia ${unit}${fmt(sellZone.lo)} · ${tfLabel(sellZone)} · ${zoneTag(sellZone, sc)}${hotRsi} · take profit / venta${nextUp ? ` · si la rompe: momentum hacia ${unit}${fmt(nextUp)}` : ""}`, "resistencia", { score: sc.score, touches: sellZone.touches });
+        mk(sellZone.lo, "up", `AUTO · resistencia ${unit}${fmt(sellZone.lo)} · ${tfLabel(sellZone)} · ${zoneTag(sellZone, sc)}${sigTxt}${hotRsi} · take profit / venta${nextUp ? ` · si la rompe: momentum hacia ${unit}${fmt(nextUp)}` : ""}${gapTxt}`, "resistencia", { score: sc.score, touches: sellZone.touches, senales: sig.join(",") || null });
+      }
+      // 3b. POC como nivel propio si no duplica los del kit (±1,5%).
+      if (poc && Math.abs(poc - spot) / spot >= 0.015 && Math.abs(poc - spot) / spot <= 0.12) {
+        const dupB = buyZone && Math.abs(poc - buyZone.hi) / buyZone.hi < 0.015;
+        const dupS = sellZone && Math.abs(poc - sellZone.lo) / sellZone.lo < 0.015;
+        if (!dupB && !dupS) {
+          if (poc < spot) mk(poc, "down", `AUTO · POC ${unit}${fmt(poc)} · mayor volumen del año · soporte por volumen`, "poc", {});
+          else mk(poc, "up", `AUTO · POC ${unit}${fmt(poc)} · mayor volumen del año · resistencia por volumen`, "poc", {});
+        }
       }
       // 4. Estructurales (lb=20), solo si no duplican los niveles cortos.
       const bigS = bigSup.filter((z) => z.hi < spot && (!buyZone || z.hi < buyZone.lo * 0.97));
@@ -411,14 +539,48 @@ async function updateTracks() {
 }
 const f0 = (x) => new Date(x).toISOString();
 
+/* ───────── Confirmación post-toque (filtro de falsas rupturas) ─────────
+ * Cuando una alerta AUTO dispara, la campana dice "tocó" — pero comprar la
+ * mecha no es lo mismo que comprar el rebote confirmado. Esta pasada mira
+ * cómo CERRÓ la vela del toque (60m para niveles horarios, diaria para el
+ * resto) y le agrega el veredicto a la nota: defensa validada / ruptura. */
+async function confirmTouches() {
+  const { data: fired } = await supabase.from("price_alerts").select("id,ticker,dir,usd_ref,price,nota,triggered_at")
+    .eq("origen", "tv").not("triggered_at", "is", null).like("nota", "AUTO%");
+  const todo = (fired || []).filter((a) => !/· cierre:/.test(a.nota || ""));
+  for (const a of todo) {
+    try {
+      const adr = ARG_ADR[a.ticker];
+      const sym = adr ? adr.adr : (a.usd_ref != null ? a.ticker : a.ticker + ".BA");
+      const lvl = a.usd_ref != null ? Number(a.usd_ref) : Number(a.price);
+      const isHourly = /horario/i.test(a.nota || "") && !/diario\+horario/i.test(a.nota || "");
+      const cs = await yahooCandles(sym, isHourly ? "60m" : "1d", isHourly ? "5d" : "1mo");
+      if (!cs || cs.length < 2) continue;
+      const trig = new Date(a.triggered_at).getTime() / 1000;
+      const idx = cs.findIndex((c, i) => c.ts <= trig && (i === cs.length - 1 || cs[i + 1].ts > trig));
+      if (idx < 0 || idx >= cs.length - 1) continue; // la vela del toque todavía no cerró
+      const close = cs[idx].c;
+      let verdict;
+      if (a.dir === "down") verdict = close >= lvl ? "cerró ARRIBA del nivel → defensa validada" : "cerró ABAJO del nivel → ruptura, cuidado";
+      else verdict = close > lvl ? "cerró ARRIBA del nivel → ruptura validada, momentum" : "cerró ABAJO del nivel → falso quiebre";
+      await supabase.from("price_alerts").update({ nota: `${a.nota} · cierre: ${verdict}` }).eq("id", a.id);
+      log(`confirmación ${a.ticker} ${lvl}: ${verdict}`);
+    } catch (e) { log(`[confirm ${a.ticker}] ${e.message}`); }
+  }
+}
+
 /* ───────── Loop persistente ───────── */
 async function loop() {
-  log("niveles-auto v5 arrancando (cola cada 60s; feedback tracks cada 60 min)");
-  let lastTracks = 0;
+  log("niveles-auto v6 arrancando (cola 60s; confirmaciones 10 min; tracks 60 min)");
+  let lastTracks = 0, lastConfirm = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       await main();
+      if (Date.now() - lastConfirm > 10 * 60 * 1000) {
+        await confirmTouches().catch((e) => log("[confirm]", e.message));
+        lastConfirm = Date.now();
+      }
       if (Date.now() - lastTracks > 60 * 60 * 1000) {
         await updateTracks().catch((e) => log("[tracks]", e.message));
         lastTracks = Date.now();
