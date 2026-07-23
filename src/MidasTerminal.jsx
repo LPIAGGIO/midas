@@ -24523,6 +24523,28 @@ function TvAlertasModule() {
   const [nota, setNota] = useState("");
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false); // manual = fallback, colapsado
+  // Análisis automático pre-compra: encolá un ticker y el worker niveles-auto
+  // (VPS, cada 5 min en mercado) calcula soporte/resistencia y crea las
+  // alertas BOT — "a cuánto conviene comprar" antes de poner la orden.
+  const [anaTk, setAnaTk] = useState("");
+  const [anaMsg, setAnaMsg] = useState(null);
+  const [anaQueue, setAnaQueue] = useState([]);
+  useEffect(() => {
+    if (!user) return;
+    let c = false;
+    const load = () => supabase.from("tv_analysis_queue").select("ticker,status,result,created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(6)
+      .then(({ data }) => { if (!c) setAnaQueue(data || []); });
+    load();
+    const iv = setInterval(load, 30000);
+    return () => { c = true; clearInterval(iv); };
+  }, [user, tick]);
+  const analizar = async () => {
+    const t = anaTk.trim().toUpperCase();
+    if (!t || !user) return;
+    await supabase.from("tv_analysis_queue").insert({ user_id: user.id, ticker: t, source: "manual" });
+    setAnaMsg(`${t} encolado — el bot lo analiza en el próximo ciclo (≤5 min en horario de mercado)`);
+    setAnaTk(""); setTick((x) => x + 1);
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -24586,6 +24608,23 @@ function TvAlertasModule() {
           </div>
           <button onClick={() => setShowForm((v) => !v)} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: showForm ? C.accent : C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>{showForm ? "▾ Ocultar carga manual" : "＋ Carga manual"}</button>
         </div>
+      </div>
+
+      {/* Análisis automático PRE-COMPRA: cargás el papel ANTES de comprar y el
+          bot te dice a cuánto conviene entrar (soporte) y dónde tomar ganancia. */}
+      <div className="flex items-center" style={{ gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em" }}>Analizar papel</span>
+        <input value={anaTk} onChange={(e) => setAnaTk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") analizar(); }} placeholder="NVDA"
+          style={{ width: 110, padding: "6px 10px", fontSize: 12.5, fontWeight: 600, color: C.text, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase" }} />
+        <button onClick={analizar} disabled={!anaTk.trim()} style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, cursor: anaTk.trim() ? "pointer" : "default", border: `1px solid ${anaTk.trim() ? C.accent : C.border}`, background: anaTk.trim() ? "rgba(124,156,255,0.12)" : "transparent", color: anaTk.trim() ? C.accent : C.dim, borderRadius: 6 }}>🤖 Analizar</button>
+        <span style={{ fontSize: 11, color: C.muted }}>
+          {anaMsg || "el bot calcula soporte (zona de compra) y resistencia, y arma las alertas solo"}
+        </span>
+        {anaQueue.filter((q) => q.status !== "done").slice(0, 3).map((q, i) => (
+          <span key={i} style={{ fontSize: 10, color: q.status === "error" ? C.red : "#f59e0b", border: `1px solid ${C.border}`, borderRadius: 3, padding: "2px 7px", fontFamily: "'JetBrains Mono', monospace" }}>
+            {q.ticker} · {q.status === "pending" ? "en cola…" : "error"}
+          </span>
+        ))}
       </div>
       {showForm && (<>
       <div className="flex" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
