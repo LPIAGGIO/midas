@@ -24739,7 +24739,7 @@ function TvAlertasModule() {
               {Object.entries(rows.reduce((m, a) => { (m[a.ticker] = m[a.ticker] || []).push(a); return m; }, {})).flatMap(([tik, items]) => [
                 <tr key={tik + "_hdr"} style={{ background: C.deep }}>
                   <td colSpan={9} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
-                    {tik} <span style={{ color: C.dim, fontWeight: 400 }}>({items.length})</span>
+                    {tik}
                     {(usaPx[tik] != null || livePx[tik]?.price != null) && <span style={{ color: C.dim, fontWeight: 400 }}> · valor actual:</span>}
                     {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> USD {Number(usaPx[tik]).toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
                     {livePx[tik]?.price != null && <span style={{ color: C.text, fontWeight: 600 }}>{usaPx[tik] != null ? " · " : " "}ARS {Math.round(livePx[tik].price).toLocaleString("es-AR")}</span>}
