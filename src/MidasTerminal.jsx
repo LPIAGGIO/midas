@@ -24763,8 +24763,8 @@ function TvAlertasModule() {
                       <td style={{ ...tdd, fontWeight: 700, color: /COMPRA/i.test(a.nota || "") ? C.green : /(venta|resistencia|vender|stop|salir|ganancia)/i.test(a.nota || "") ? C.red : a.dir === "down" ? C.red : C.green }}>
                         {/COMPRA/i.test(a.nota || "") ? "▼ COMPRAR ACÁ" : /(venta|resistencia|vender|ganancia)/i.test(a.nota || "") ? "▲ VENDER ACÁ" : /(stop|salir)/i.test(a.nota || "") ? "▼ SALIR ACÁ" : a.dir === "down" ? "▼ baje" : "▲ suba"}
                       </td>
-                      <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{targetUsd != null ? fU(targetUsd) : "—"}</td>
-                      <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{f$(targetArs)}</td>
+                      <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{targetUsd != null ? `USD ${Number(targetUsd).toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—"}</td>
+                      <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{`$ ${Math.round(targetArs).toLocaleString("es-AR")}`}</td>
                       <td style={{ ...numc, color: colU }}>{dUsd == null ? "—" : `${dUsd >= 0 ? "+" : "−"}${Math.abs(dUsd).toFixed(2)}`}</td>
                       <td style={{ ...numc, color: colA }}>{dArs == null ? "—" : `${dArs >= 0 ? "+" : "−"}${f$(Math.abs(dArs)).slice(1)}`}</td>
                       <td style={{ ...numc, color: colA != C.dim ? colA : colU }}>{(dArsPct ?? dUsdPct) == null ? "—" : `${(dArsPct ?? dUsdPct) >= 0 ? "+" : "−"}${Math.abs(dArsPct ?? dUsdPct).toFixed(2)}%`}</td>
