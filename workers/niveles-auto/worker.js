@@ -123,19 +123,11 @@ async function main(scanPortfolio = true) {
   const { data: queue } = await supabase.from("tv_analysis_queue").select("*").eq("status", "pending").limit(20);
   const jobs = (queue || []).map((q) => ({ ...q, ticker: q.ticker.toUpperCase().trim() }));
 
-  // 2. Posiciones nuevas (24h) de brokers != iol, sin análisis previo
-  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const { data: newPos } = !scanPortfolio ? { data: [] } : await supabase.from("positions")
-    .select("user_id,ticker,broker,created_at")
-    .in("instrument_type", ["cedear", "stock"]).neq("broker", "iol").gte("created_at", since);
-  for (const p of newPos || []) {
-    const tk = (p.ticker || "").toUpperCase().trim();
-    if (!tk || jobs.some((j) => j.ticker === tk && j.user_id === p.user_id)) continue;
-    const { data: prev } = await supabase.from("tv_analysis_queue").select("id").eq("user_id", p.user_id).eq("ticker", tk).gte("created_at", since).limit(1);
-    if (prev && prev.length) continue;
-    const { data: ins } = await supabase.from("tv_analysis_queue").insert({ user_id: p.user_id, ticker: tk, source: "portfolio" }).select().single();
-    if (ins) jobs.push(ins);
-  }
+  // Escaneo automático de posiciones: DESACTIVADO a pedido de LP (23/07).
+  // Un import de Cocos marcaría todo el portfolio como "nuevo" y dispararía
+  // análisis masivos. El flujo es 100% manual: LP encola papel por papel desde
+  // la pantalla (buscador / selector de cartera). scanPortfolio queda ignorado.
+  void scanPortfolio;
 
   if (!jobs.length) return;
 
