@@ -24710,6 +24710,12 @@ function TvAlertasModule() {
         </select>
         <button onClick={() => analizar()} disabled={!anaTk.trim()} style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, cursor: anaTk.trim() ? "pointer" : "default", border: `1px solid ${anaTk.trim() ? C.accent : C.border}`, background: anaTk.trim() ? "rgba(124,156,255,0.12)" : "transparent", color: anaTk.trim() ? C.accent : C.dim, borderRadius: 6 }}>🤖 Analizar</button>
         <button onClick={() => { setTick((x) => x + 1); setAnaMsg(`lista actualizada ${new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} — si no ves cambios, el bot aún no procesó nada nuevo`); }} title="Refrescar la lista ya" style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer", fontSize: 13 }}>↻</button>
+        <button onClick={async () => {
+          if (!user || !rows?.length) return;
+          if (!window.confirm(`¿Borrar las ${rows.length} alertas de la pantalla? (Las de Telegram no se tocan.)`)) return;
+          await supabase.from("price_alerts").delete().eq("user_id", user.id).eq("canal", "screen");
+          setAnaMsg("todas las alertas borradas"); setTick((x) => x + 1);
+        }} disabled={!rows?.length} title="Borrar todas las alertas de esta pantalla" style={{ padding: "6px 12px", fontSize: 10.5, fontWeight: 600, cursor: rows?.length ? "pointer" : "default", border: `1px solid ${rows?.length ? C.red : C.border}`, background: "transparent", color: rows?.length ? C.red : C.dim, borderRadius: 6, whiteSpace: "nowrap" }}>🗑 Borrar todas</button>
         <span style={{ fontSize: 11, color: C.muted }}>
           {anaMsg || "el bot calcula soporte (zona de compra) y resistencia, y arma las alertas solo — responde en ≤1 min a cualquier hora"}
         </span>
