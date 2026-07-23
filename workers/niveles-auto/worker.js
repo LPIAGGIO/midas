@@ -202,9 +202,31 @@ async function main(scanPortfolio = true) {
         dir, nota, usd_ref: usdShown(lvl), canal: "screen", origen: "tv",
       });
       const fmt = (x) => x.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      // ATR14 diario: para el stop cuando no hay pivote inferior cerca.
+      let atr = 0;
+      for (let i = Math.max(1, daily.length - 14); i < daily.length; i++) {
+        atr += Math.max(daily[i].h - daily[i].l, Math.abs(daily[i].h - daily[i - 1].c), Math.abs(daily[i].l - daily[i - 1].c));
+      }
+      atr /= Math.min(14, daily.length - 1);
+      const yrHigh = Math.max(...daily.map((c) => c.h));
+
       const rows = [];
-      if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO · soporte ${unit}${fmt(buyLvl)} · pivote ${buyLvl === d.sop ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
-      if (sellLvl) rows.push(mk(sellLvl, "up", `AUTO · resistencia ${unit}${fmt(sellLvl)} · pivote ${sellLvl === d.res ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
+      // 1. Entrada
+      if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO · soporte ${unit}${fmt(buyLvl)} · pivote ${buyLvl === d.sop ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""} · zona de COMPRA`));
+      // 2. Stop de esa entrada: el siguiente nivel confirmado por debajo, o 1×ATR.
+      if (buyLvl) {
+        const below = [d.sop, h.sop, big.sop].filter((x) => x != null && x < buyLvl * 0.995);
+        const stop = below.length ? Math.max(...below) : buyLvl - atr;
+        if (stop > 0 && stop < buyLvl) {
+          rows.push(mk(stop, "down", `AUTO · STOP LOSS ${unit}${fmt(stop)} si comprás en ${fmt(buyLvl)} · ${below.length ? "pivote inferior" : "1×ATR diario"}`));
+        }
+      }
+      // 3. Take profit / línea de momentum: la resistencia cercana con doble lectura.
+      if (sellLvl) {
+        const above = [big.res, yrHigh].filter((x) => x != null && x > sellLvl * 1.005);
+        const nextUp = above.length ? Math.min(...above) : null;
+        rows.push(mk(sellLvl, "up", `AUTO · resistencia ${unit}${fmt(sellLvl)} · take profit / venta${nextUp ? ` · si la rompe: momentum hacia ${unit}${fmt(nextUp)}` : ""}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
+      }
       // Estructurales: solo si están al menos 3% más allá del nivel corto (si no, duplican).
       if (big.sop != null && big.sop < spot && (!buyLvl || big.sop < buyLvl * 0.97)) {
         rows.push(mk(big.sop, "down", `AUTO · soporte ESTRUCTURAL ${unit}${fmt(big.sop)} · pivote mayor del año`));
