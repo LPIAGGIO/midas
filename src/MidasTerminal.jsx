@@ -10926,15 +10926,34 @@ function preTodayContadoAgg(positions, todayStr) {
     .filter((p) => p && p.instrument_type !== "future" && p.ticker && p.entry_date && p.entry_date < todayStr)
     .sort((a, b) => (a.entry_date || "").localeCompare(b.entry_date || "") || String(a.created_at || "").localeCompare(String(b.created_at || "")));
   const agg = new Map();
+  // El walk tiene que sobrevivir posiciones que CRUZAN CERO: las ops de un
+  // mismo día llegan del import con el mismo created_at (orden intradía real
+  // desconocido), así que una venta puede procesarse "antes" de la compra que
+  // la respalda y la posición queda momentáneamente short. La versión anterior
+  // no lo bancaba: al recomprar tras un cruce, sumaba TODO el costo de la
+  // recompra sobre las pocas unidades netas (bug MU 23/07: 100 papeles
+  // arrastrados con costo $361M → ganancia del día +362M fantasma).
   for (const p of preOps) {
     const tk = (p.ticker || "").toUpperCase();
     const a = agg.get(tk) || { qty: 0, value: 0 };
     const q = Number(p.quantity) || 0, px = Number(p.entry_price) || 0;
-    if (p.operation_type === "sell") {
-      const avg = a.qty > 0 ? a.value / a.qty : px;
-      a.value -= avg * Math.min(q, Math.max(a.qty, 0));
-      a.qty -= q;
-    } else { a.value += q * px; a.qty += q; }
+    const s = p.operation_type === "sell" ? -q : q;
+    if (a.qty === 0 || (a.qty > 0) === (s > 0)) {
+      // amplía (o abre) posición en el mismo signo: suma a costo
+      a.qty += s; a.value += s * px;
+    } else {
+      const closing = Math.min(Math.abs(s), Math.abs(a.qty));
+      const avg = a.value / a.qty; // costo promedio por unidad (signo-consistente)
+      const opening = Math.abs(s) - closing;
+      if (opening > 0) {
+        // cruzó cero: lo que sobra abre posición nueva al precio de la op
+        a.qty = s > 0 ? opening : -opening;
+        a.value = a.qty * px;
+      } else {
+        a.qty += s;
+        a.value += (s > 0 ? closing : -closing) * avg; // saca lo cerrado a avg
+      }
+    }
     agg.set(tk, a);
   }
   return agg;
