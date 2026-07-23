@@ -24513,6 +24513,7 @@ function AlertAdd({ onAdd }) {
 function TvAlertasModule() {
   const { user } = useAuth();
   const { fx } = useDashboardFx();
+  const { prices: livePx } = useStockPrices();
   const ccl = fx?.ccl?.mid ?? null;
   const [rows, setRows] = useState(null);
   const [tick, setTick] = useState(0);
@@ -24571,8 +24572,13 @@ function TvAlertasModule() {
             </div>
           </div>
           <div style={{ flex: "2 1 220px" }}>
-            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Nota técnica</label>
-            <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="resistencia diario US$970" style={{ ...inp, width: "100%" }} />
+            <label style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 5 }}>Nota técnica / acción</label>
+            <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="resistencia diario US$970 — vender acá" style={{ ...inp, width: "100%" }} />
+            <div className="flex" style={{ gap: 5, marginTop: 5, flexWrap: "wrap" }}>
+              {["comprar acá", "vender acá", "tomar ganancia", "stop / salir"].map((chip) => (
+                <button key={chip} onClick={() => setNota(nota ? `${nota} — ${chip}` : chip)} style={{ padding: "2px 8px", fontSize: 10, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 10 }}>{chip}</button>
+              ))}
+            </div>
           </div>
           <button onClick={add} disabled={!arsLevel || saving} style={{ padding: "9px 16px", fontSize: 12, fontWeight: 700, cursor: arsLevel ? "pointer" : "default", border: `1px solid ${arsLevel ? C.accent : C.border}`, background: arsLevel ? "rgba(124,156,255,0.12)" : "transparent", color: arsLevel ? C.accent : C.dim, borderRadius: 6 }}>+ Crear</button>
         </div>
@@ -24586,17 +24592,34 @@ function TvAlertasModule() {
         <div style={{ color: C.muted, fontSize: 12.5, padding: 24, textAlign: "center", border: `1px dashed ${C.border}`, borderRadius: 8 }}>Sin niveles cargados. El flujo: análisis en TradingView (ticker USA) → nivel USD acá → Midas te avisa en pantalla al cruzarlo.</div>
       ) : (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
-          {rows.map((a) => (
-            <div key={a.id} className="flex items-center" style={{ gap: 12, padding: "10px 14px", borderBottom: `1px solid ${C.border}`, opacity: a.triggered_at ? 0.5 : 1 }}>
-              <span style={{ fontWeight: 700, fontSize: 10, color: a.dir === "down" ? C.red : C.green, border: `1px solid ${a.dir === "down" ? C.red : C.green}`, borderRadius: 3, padding: "1px 5px" }}>{a.dir === "down" ? "▼" : "▲"}</span>
+          <div className="flex items-center" style={{ gap: 12, padding: "7px 14px", fontSize: 9.5, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", background: "rgba(255,255,255,0.02)" }}>
+            <span style={{ width: 26 }} /><span style={{ minWidth: 52 }}>Papel</span>
+            <span style={{ minWidth: 90, textAlign: "right" }}>Está en</span>
+            <span style={{ minWidth: 90, textAlign: "right" }}>Tiene que llegar</span>
+            <span style={{ minWidth: 130, textAlign: "right" }}>Falta ($ y %)</span>
+            <span style={{ flex: 1 }}>Nota / acción</span>
+            <span />
+          </div>
+          {rows.map((a) => {
+            const target = Number(a.price);
+            const cur = livePx[a.ticker]?.price ?? null;
+            const dist = cur != null ? target - cur : null;
+            const distPct = cur != null && cur > 0 ? (dist / cur) * 100 : null;
+            return (
+            <div key={a.id} className="flex items-center" style={{ gap: 12, padding: "10px 14px", borderTop: `1px solid ${C.border}`, opacity: a.triggered_at ? 0.5 : 1, fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ fontWeight: 700, fontSize: 10, width: 26, textAlign: "center", color: a.dir === "down" ? C.red : C.green, border: `1px solid ${a.dir === "down" ? C.red : C.green}`, borderRadius: 3, padding: "1px 0" }}>{a.dir === "down" ? "▼" : "▲"}</span>
               <span style={{ color: C.text, fontWeight: 700, minWidth: 52 }}>{a.ticker}</span>
-              <span style={{ color: "#f59e0b", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{f$(Number(a.price))}</span>
-              {a.usd_ref && <span style={{ color: C.dim, fontSize: 11 }}>US${Number(a.usd_ref)}</span>}
+              <span style={{ color: C.text, minWidth: 90, textAlign: "right" }}>{cur != null ? f$(cur) : "—"}</span>
+              <span style={{ color: "#f59e0b", fontWeight: 700, minWidth: 90, textAlign: "right" }}>{f$(target)}{a.usd_ref ? <span style={{ color: C.dim, fontWeight: 400, fontSize: 10 }}> (US${Number(a.usd_ref)})</span> : null}</span>
+              <span style={{ minWidth: 130, textAlign: "right", fontWeight: 600, color: dist == null ? C.dim : dist >= 0 ? C.green : C.red }}>
+                {dist == null ? "—" : `${dist >= 0 ? "+" : "−"}${f$(Math.abs(dist)).slice(1)} (${distPct >= 0 ? "+" : ""}${distPct.toFixed(2)}%)`}
+              </span>
               <span style={{ color: C.muted, fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nota || ""}</span>
-              <span style={{ fontSize: 10.5, color: a.triggered_at ? C.dim : C.green }}>{a.triggered_at ? "disparada" : "armada"}</span>
-              <button onClick={() => del(a.id)} style={{ width: 24, height: 24, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 11 }}>✕</button>
+              <span style={{ fontSize: 10.5, color: a.triggered_at ? C.dim : C.green, whiteSpace: "nowrap" }}>{a.triggered_at ? "disparada" : "armada"}</span>
+              <button onClick={() => del(a.id)} style={{ width: 24, height: 24, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 11, flexShrink: 0 }}>✕</button>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
       <p style={{ fontSize: 10.5, color: C.dim, marginTop: 12, lineHeight: 1.5 }}>
