@@ -24535,7 +24535,7 @@ function TvAlertasModule() {
     const load = () => supabase.from("tv_analysis_queue").select("ticker,status,result,created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(6)
       .then(({ data }) => { if (!c) setAnaQueue(data || []); });
     load();
-    const iv = setInterval(load, 30000);
+    const iv = setInterval(load, 15000);
     return () => { c = true; clearInterval(iv); };
   }, [user, tick]);
   const analizar = async (tkOverride) => {
@@ -24574,9 +24574,13 @@ function TvAlertasModule() {
   useEffect(() => {
     if (!user) return;
     let c = false;
-    supabase.from("price_alerts").select("id,ticker,price,dir,nota,usd_ref,origen,triggered_at,created_at").eq("user_id", user.id).eq("canal", "screen").order("created_at", { ascending: false })
-      .then(({ data }) => { if (!c) setRows(data || []); });
-    return () => { c = true; };
+    const load = () => supabase.from("price_alerts").select("id,ticker,price,dir,nota,usd_ref,origen,triggered_at,created_at").eq("user_id", user.id).eq("canal", "screen").order("created_at", { ascending: false })
+      .then(({ data, error }) => { if (!c && !error) setRows(data || []); });
+    load();
+    // Polling: el worker procesa la cola en ~1 min; la tabla se refresca sola
+    // cada 15s así los niveles nuevos aparecen sin tocar nada.
+    const iv = setInterval(load, 15000);
+    return () => { c = true; clearInterval(iv); };
   }, [user, tick]);
 
   // Precio USD live del subyacente (feed USA) para las columnas en dólares.
