@@ -24732,14 +24732,13 @@ function TvAlertasModule() {
                 <th style={{ ...th, textAlign: "right" }}>Falta %</th>
                 <th style={{ ...th, textAlign: "left" }}>Nota / acción</th>
                 <th style={{ ...th, textAlign: "center" }}>Origen</th>
-                <th style={{ ...th, textAlign: "right" }}>Estado</th>
                 <th style={th} />
               </tr>
             </thead>
             <tbody>
               {Object.entries(rows.reduce((m, a) => { (m[a.ticker] = m[a.ticker] || []).push(a); return m; }, {})).flatMap(([tik, items]) => [
                 <tr key={tik + "_hdr"} style={{ background: C.deep }}>
-                  <td colSpan={10} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
+                  <td colSpan={9} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
                     {tik} <span style={{ color: C.dim, fontWeight: 400 }}>({items.length})</span>
                     {(usaPx[tik] != null || livePx[tik]?.price != null) && <span style={{ color: C.dim, fontWeight: 400 }}> · valor actual:</span>}
                     {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> USD {Number(usaPx[tik]).toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
@@ -24772,8 +24771,8 @@ function TvAlertasModule() {
                       <td style={{ ...tdd, textAlign: "center" }}>
                         <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: a.origen === "tv" ? C.accent : C.dim, border: `1px solid ${a.origen === "tv" ? C.accent : C.border}`, borderRadius: 3, padding: "1px 6px" }}>{a.origen === "tv" ? "BOT" : "MANUAL"}</span>
                       </td>
-                      <td style={{ ...numc, fontSize: 10.5, color: a.triggered_at ? C.dim : C.green }}>{a.triggered_at ? "disparada" : "armada"}</td>
                       <td style={{ ...tdd, textAlign: "right" }}>
+                        {a.triggered_at && <span style={{ fontSize: 9, color: C.dim, marginRight: 6 }}>disparada</span>}
                         <button onClick={() => del(a.id)} style={{ width: 20, height: 20, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 10, lineHeight: 1 }}>✕</button>
                       </td>
                     </tr>
