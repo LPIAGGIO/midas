@@ -24742,8 +24742,8 @@ function TvAlertasModule() {
                   <td colSpan={10} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
                     {tik} <span style={{ color: C.dim, fontWeight: 400 }}>({items.length})</span>
                     {(usaPx[tik] != null || livePx[tik]?.price != null) && <span style={{ color: C.dim, fontWeight: 400 }}> · valor actual:</span>}
-                    {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> US${Number(usaPx[tik]).toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
-                    {livePx[tik]?.price != null && <span style={{ color: C.text, fontWeight: 600 }}> · {f$(livePx[tik].price)}</span>}
+                    {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> USD {Number(usaPx[tik]).toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
+                    {livePx[tik]?.price != null && <span style={{ color: C.text, fontWeight: 600 }}>{usaPx[tik] != null ? " · " : " "}ARS {Math.round(livePx[tik].price).toLocaleString("es-AR")}</span>}
                   </td>
                 </tr>,
                 ...items.map((a) => {
