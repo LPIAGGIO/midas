@@ -24725,14 +24725,11 @@ function TvAlertasModule() {
             <thead>
               <tr>
                 <th style={{ ...th, textAlign: "left" }}>Dir</th>
-                <th style={{ ...th, textAlign: "right" }}>Está en USD</th>
                 <th style={{ ...th, textAlign: "right" }}>Target USD</th>
-                <th style={{ ...th, textAlign: "right" }}>Está en ARS</th>
                 <th style={{ ...th, textAlign: "right" }}>Target ARS</th>
                 <th style={{ ...th, textAlign: "right" }}>Falta USD</th>
-                <th style={{ ...th, textAlign: "right" }}>%</th>
                 <th style={{ ...th, textAlign: "right" }}>Falta ARS</th>
-                <th style={{ ...th, textAlign: "right" }}>%</th>
+                <th style={{ ...th, textAlign: "right" }}>Falta %</th>
                 <th style={{ ...th, textAlign: "left" }}>Nota / acción</th>
                 <th style={{ ...th, textAlign: "center" }}>Origen</th>
                 <th style={{ ...th, textAlign: "right" }}>Estado</th>
@@ -24742,10 +24739,11 @@ function TvAlertasModule() {
             <tbody>
               {Object.entries(rows.reduce((m, a) => { (m[a.ticker] = m[a.ticker] || []).push(a); return m; }, {})).flatMap(([tik, items]) => [
                 <tr key={tik + "_hdr"} style={{ background: C.deep }}>
-                  <td colSpan={13} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
+                  <td colSpan={10} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
                     {tik} <span style={{ color: C.dim, fontWeight: 400 }}>({items.length})</span>
-                    {usaPx[tik] != null && <span style={{ color: C.muted, fontWeight: 400 }}> · US${Number(usaPx[tik]).toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
-                    {livePx[tik]?.price != null && <span style={{ color: C.muted, fontWeight: 400 }}> · {f$(livePx[tik].price)}</span>}
+                    {(usaPx[tik] != null || livePx[tik]?.price != null) && <span style={{ color: C.dim, fontWeight: 400 }}> · valor actual:</span>}
+                    {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> US${Number(usaPx[tik]).toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
+                    {livePx[tik]?.price != null && <span style={{ color: C.text, fontWeight: 600 }}> · {f$(livePx[tik].price)}</span>}
                   </td>
                 </tr>,
                 ...items.map((a) => {
@@ -24765,14 +24763,11 @@ function TvAlertasModule() {
                       <td style={{ ...tdd, fontWeight: 700, color: /COMPRA/i.test(a.nota || "") ? C.green : /(venta|resistencia|vender|stop|salir|ganancia)/i.test(a.nota || "") ? C.red : a.dir === "down" ? C.red : C.green }}>
                         {/COMPRA/i.test(a.nota || "") ? "▼ COMPRAR ACÁ" : /(venta|resistencia|vender|ganancia)/i.test(a.nota || "") ? "▲ VENDER ACÁ" : /(stop|salir)/i.test(a.nota || "") ? "▼ SALIR ACÁ" : a.dir === "down" ? "▼ baje" : "▲ suba"}
                       </td>
-                      <td style={numc}>{curUsd != null ? fU(curUsd) : "—"}</td>
                       <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{targetUsd != null ? fU(targetUsd) : "—"}</td>
-                      <td style={numc}>{curArs != null ? f$(curArs) : "—"}</td>
                       <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{f$(targetArs)}</td>
                       <td style={{ ...numc, color: colU }}>{dUsd == null ? "—" : `${dUsd >= 0 ? "+" : "−"}${Math.abs(dUsd).toFixed(2)}`}</td>
-                      <td style={{ ...numc, color: colU }}>{dUsdPct == null ? "—" : `${dUsdPct >= 0 ? "+" : "−"}${Math.abs(dUsdPct).toFixed(2)}%`}</td>
                       <td style={{ ...numc, color: colA }}>{dArs == null ? "—" : `${dArs >= 0 ? "+" : "−"}${f$(Math.abs(dArs)).slice(1)}`}</td>
-                      <td style={{ ...numc, color: colA }}>{dArsPct == null ? "—" : `${dArsPct >= 0 ? "+" : "−"}${Math.abs(dArsPct).toFixed(2)}%`}</td>
+                      <td style={{ ...numc, color: colA != C.dim ? colA : colU }}>{(dArsPct ?? dUsdPct) == null ? "—" : `${(dArsPct ?? dUsdPct) >= 0 ? "+" : "−"}${Math.abs(dArsPct ?? dUsdPct).toFixed(2)}%`}</td>
                       <td style={{ ...tdd, color: C.muted, fontFamily: "inherit", maxWidth: 230, overflow: "hidden", textOverflow: "ellipsis" }}>{a.nota || "—"}</td>
                       <td style={{ ...tdd, textAlign: "center" }}>
                         <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: a.origen === "tv" ? C.accent : C.dim, border: `1px solid ${a.origen === "tv" ? C.accent : C.border}`, borderRadius: 3, padding: "1px 6px" }}>{a.origen === "tv" ? "BOT" : "MANUAL"}</span>
