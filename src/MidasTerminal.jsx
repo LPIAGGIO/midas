@@ -168,7 +168,7 @@ const NAV = [
     type: "single",
     requiresAuth: true,  // Si no hay sesión, muestra wall de login
   },
-  { id: "alertas-tv", label: "Alertas TV", icon: LineChart, type: "single", requiresAuth: true },
+  { id: "alertas-tv", label: "Alertas TV · Bot", icon: LineChart, type: "single", requiresAuth: true },
   { id: "importaciones", label: "Importaciones", icon: Upload, type: "single", requiresAuth: true },
   {
     // Trading automatizado / estrategias bot. Reservado para futuros
@@ -24522,11 +24522,12 @@ function TvAlertasModule() {
   const [dir, setDir] = useState("up");
   const [nota, setNota] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showForm, setShowForm] = useState(false); // manual = fallback, colapsado
 
   useEffect(() => {
     if (!user) return;
     let c = false;
-    supabase.from("price_alerts").select("id,ticker,price,dir,nota,usd_ref,triggered_at,created_at").eq("user_id", user.id).eq("canal", "screen").order("created_at", { ascending: false })
+    supabase.from("price_alerts").select("id,ticker,price,dir,nota,usd_ref,origen,triggered_at,created_at").eq("user_id", user.id).eq("canal", "screen").order("created_at", { ascending: false })
       .then(({ data }) => { if (!c) setRows(data || []); });
     return () => { c = true; };
   }, [user, tick]);
@@ -24539,7 +24540,7 @@ function TvAlertasModule() {
   const add = async () => {
     if (!user || !arsLevel) return;
     setSaving(true);
-    await supabase.from("price_alerts").insert({ user_id: user.id, ticker: T, price: Math.round(arsLevel), dir, nota: nota.trim() || null, usd_ref: usdN, canal: "screen" });
+    await supabase.from("price_alerts").insert({ user_id: user.id, ticker: T, price: Math.round(arsLevel), dir, nota: nota.trim() || null, usd_ref: usdN, canal: "screen", origen: "manual" });
     setSaving(false); setUsd(""); setNota(""); setTick((t) => t + 1);
   };
   const del = async (id) => { await supabase.from("price_alerts").delete().eq("id", id); setTick((t) => t + 1); };
@@ -24550,10 +24551,16 @@ function TvAlertasModule() {
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 980, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, margin: 0 }}>Alertas TV</h1>
-      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 16px 0", maxWidth: 820 }}>
-        Niveles técnicos del análisis en TradingView (sobre el ticker USA), traducidos al CEDEAR: <b>USD × CCL ÷ ratio</b>. Suenan acá en Midas mientras operás — no van a Telegram. CCL de referencia: <b style={{ color: C.text }}>{ccl ? f$(ccl) : "…"}</b>
-      </p>
+      <div className="flex items-start justify-between" style={{ gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, margin: 0 }}>Alertas TV · Bot</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 16px 0", maxWidth: 780 }}>
+            Los niveles entran SOLOS desde TradingView (webhook de tus alertas/estrategias Pine) y suenan acá mientras operás — no van a Telegram. CCL de referencia: <b style={{ color: C.text }}>{ccl ? f$(ccl) : "…"}</b>
+          </p>
+        </div>
+        <button onClick={() => setShowForm((v) => !v)} style={{ padding: "6px 12px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: showForm ? C.accent : C.muted, borderRadius: 4, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{showForm ? "▾ ocultar carga manual" : "▸ carga manual"}</button>
+      </div>
+      {showForm && (<>
       <div className="flex" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
         <div style={{ flex: "0 1 110px" }}>
           <label style={lbl}>Ticker</label>
@@ -24587,6 +24594,7 @@ function TvAlertasModule() {
             : "cargá ticker y nivel USD para ver la conversión"}
         </span>
       </div>
+      </>)}
       {!rows ? <div style={{ color: C.muted, fontSize: 12, padding: 20 }}>Cargando…</div> : (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, background: C.panel, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -24600,6 +24608,7 @@ function TvAlertasModule() {
                 <th style={{ textAlign: "right", padding: "8px 12px" }}>Falta $</th>
                 <th style={{ textAlign: "right", padding: "8px 12px" }}>Falta %</th>
                 <th style={{ textAlign: "left", padding: "8px 12px" }}>Nota / acción</th>
+                <th style={{ textAlign: "center", padding: "8px 8px" }}>Origen</th>
                 <th style={{ textAlign: "right", padding: "8px 12px" }}>Estado</th>
                 <th />
               </tr>
@@ -24607,7 +24616,7 @@ function TvAlertasModule() {
             <tbody>
               {!rows.length && (
                 <tr style={{ borderTop: `1px solid ${C.border}` }}>
-                  <td colSpan={10} style={{ padding: "26px 14px", textAlign: "center", color: C.muted, fontSize: 12 }}>Sin niveles cargados. Análisis en TradingView (ticker USA) → nivel USD acá → Midas te avisa en pantalla al cruzarlo.</td>
+                  <td colSpan={11} style={{ padding: "26px 14px", textAlign: "center", color: C.muted, fontSize: 12 }}>Sin niveles todavía. Las alertas de TradingView entran solas por webhook; si necesitás clavar un nivel a mano, usá "carga manual" arriba.</td>
                 </tr>
               )}
               {rows.map((a) => {
@@ -24627,6 +24636,9 @@ function TvAlertasModule() {
                     <td style={{ ...num, color: dcol, fontWeight: 600 }}>{dist == null ? "—" : `${dist >= 0 ? "+" : "−"}${f$(Math.abs(dist)).slice(1)}`}</td>
                     <td style={{ ...num, color: dcol, fontWeight: 600 }}>{distPct == null ? "—" : `${distPct >= 0 ? "+" : "−"}${Math.abs(distPct).toFixed(2)}%`}</td>
                     <td style={{ padding: "8px 12px", color: C.muted, fontSize: 11.5, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "inherit" }}>{a.nota || "—"}</td>
+                    <td style={{ padding: "8px 8px", textAlign: "center" }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: a.origen === "tv" ? C.accent : C.dim, border: `1px solid ${a.origen === "tv" ? C.accent : C.border}`, borderRadius: 3, padding: "1px 6px" }}>{a.origen === "tv" ? "BOT" : "MANUAL"}</span>
+                    </td>
                     <td style={{ ...num, fontSize: 10.5, color: a.triggered_at ? C.dim : C.green }}>{a.triggered_at ? "DISPARADA" : "ARMADA"}</td>
                     <td style={{ padding: "8px 10px", textAlign: "right" }}>
                       <button onClick={() => del(a.id)} style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 10 }}>✕</button>
