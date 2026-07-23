@@ -150,7 +150,8 @@ async function main(scanPortfolio = true) {
       }
 
       // Limpiar alertas AUTO previas NO disparadas de este ticker/usuario
-      await supabase.from("price_alerts").delete().eq("user_id", job.user_id).eq("ticker", tk).eq("origen", "tv").is("triggered_at", null).like("nota", "AUTO an%");
+      // (LIKE 'AUTO%' cubre el formato viejo "AUTO análisis:" y el nuevo "AUTO ·")
+      await supabase.from("price_alerts").delete().eq("user_id", job.user_id).eq("ticker", tk).eq("origen", "tv").is("triggered_at", null).like("nota", "AUTO%");
 
       const unit = modo === "local_ars" ? "$" : "US$";
       const mk = (lvl, dir, nota) => ({
@@ -158,8 +159,8 @@ async function main(scanPortfolio = true) {
         dir, nota, usd_ref: usdShown(lvl), canal: "screen", origen: "tv",
       });
       const rows = [];
-      if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO análisis: zona de COMPRA — soporte ${unit}${buyLvl.toFixed(2)} (pivote ${buyLvl === d.sop ? "diario" : "horario"}${modo === "adr" ? ", vía ADR " + adrInfo.adr : ""})`));
-      if (sellLvl) rows.push(mk(sellLvl, "up", `AUTO análisis: resistencia ${unit}${sellLvl.toFixed(2)} (pivote ${sellLvl === d.res ? "diario" : "horario"}${modo === "adr" ? ", vía ADR " + adrInfo.adr : ""}) — venta/tomar ganancia`));
+      if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO · soporte ${unit}${buyLvl.toFixed(2)} · pivote ${buyLvl === d.sop ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
+      if (sellLvl) rows.push(mk(sellLvl, "up", `AUTO · resistencia ${unit}${sellLvl.toFixed(2)} · pivote ${sellLvl === d.res ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
       if (rows.length) { const { error } = await supabase.from("price_alerts").insert(rows); if (error) throw new Error(error.message); }
 
       await supabase.from("tv_analysis_queue").update({
