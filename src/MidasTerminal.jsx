@@ -24557,13 +24557,18 @@ function TvAlertasModule() {
     return list.sort((a, b) => a.sym.localeCompare(b.sym)).slice(0, 30);
   }, [anaTk, livePx]);
   const miCartera = useMemo(() => {
-    const net = {};
+    const agg = {};
     for (const p of myPos || []) {
       if (!["cedear", "stock"].includes(p.instrument_type) || !p.ticker) continue;
       const t = p.ticker.toUpperCase().trim();
-      net[t] = (net[t] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+      const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+      const a = agg[t] || (agg[t] = { net: 0, buyQty: 0, buyVal: 0 });
+      a.net += q;
+      if (q > 0) { a.buyQty += q; a.buyVal += q * (Number(p.entry_price) || 0); }
     }
-    return Object.entries(net).filter(([, q]) => q > 0).map(([t]) => t).sort();
+    return Object.entries(agg).filter(([, a]) => a.net > 0)
+      .map(([t, a]) => ({ t, qty: a.net, ppc: a.buyQty > 0 ? a.buyVal / a.buyQty : null }))
+      .sort((x, y) => x.t.localeCompare(y.t));
   }, [myPos]);
 
   useEffect(() => {
@@ -24656,7 +24661,11 @@ function TvAlertasModule() {
         <select value="" onChange={(e) => { if (e.target.value) analizar(e.target.value); e.target.value = ""; }}
           style={{ padding: "7px 10px", fontSize: 12, fontWeight: 600, color: C.muted, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}>
           <option value="">Analizar de mi cartera…</option>
-          {miCartera.map((t) => <option key={t} value={t}>{t}</option>)}
+          {miCartera.map((o) => (
+            <option key={o.t} value={o.t}>
+              {o.t} · {o.qty.toLocaleString("es-AR", { maximumFractionDigits: 0 })}{o.ppc != null ? ` @ ${o.ppc.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""}
+            </option>
+          ))}
         </select>
         <button onClick={() => analizar()} disabled={!anaTk.trim()} style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, cursor: anaTk.trim() ? "pointer" : "default", border: `1px solid ${anaTk.trim() ? C.accent : C.border}`, background: anaTk.trim() ? "rgba(124,156,255,0.12)" : "transparent", color: anaTk.trim() ? C.accent : C.dim, borderRadius: 6 }}>🤖 Analizar</button>
         <button onClick={() => { setTick((x) => x + 1); setAnaMsg(`lista actualizada ${new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} — si no ves cambios, el bot aún no procesó nada nuevo`); }} title="Refrescar la lista ya" style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer", fontSize: 13 }}>↻</button>
