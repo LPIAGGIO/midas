@@ -3,13 +3,14 @@ module.exports = {
     {
       name: "niveles-auto",
       script: "worker.js",
-      // Cada 5 min, lun-vie, 10:00-18:55 ART (cubre pre-apertura BYMA, rueda
-      // local y cierre de NY). One-shot: corre, procesa la cola y sale.
-      cron_restart: "*/5 10-18 * * 1-5",
-      autorestart: false,
+      // Servicio PERSISTENTE: procesa la cola manual cada 60s las 24hs (un
+      // análisis pedido un domingo sale en <1 min) y escanea posiciones
+      // nuevas cada 5 min solo en ventana de mercado (lun-vie 10-19 ART,
+      // gateado dentro del worker).
+      autorestart: true,
       instances: 1,
       exec_mode: "fork",
-      max_memory_restart: "200M",
+      max_memory_restart: "250M",
     },
   ],
 };

@@ -34,6 +34,16 @@ const log = (...a) => console.log(`[${new Date().toISOString()}]`, ...a);
 const UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" };
 const LB = 5; // barras de confirmación del pivote (igual que el Pine)
 
+// Acciones argentinas → su ADR en NYSE (ratio = acciones locales por ADR).
+// El nivel se calcula sobre el ADR (más líquido) y se traduce: local = adr_usd × CCL ÷ ratio.
+const ARG_ADR = {
+  YPFD: { adr: "YPF", r: 1 }, GGAL: { adr: "GGAL", r: 10 }, PAMP: { adr: "PAM", r: 25 },
+  BMA: { adr: "BMA", r: 10 }, CEPU: { adr: "CEPU", r: 10 }, EDN: { adr: "EDN", r: 20 },
+  LOMA: { adr: "LOMA", r: 5 }, SUPV: { adr: "SUPV", r: 5 }, TGSU2: { adr: "TGS", r: 5 },
+  CRES: { adr: "CRESY", r: 10 }, IRSA: { adr: "IRS", r: 10 }, BBAR: { adr: "BBAR", r: 3 },
+  TECO2: { adr: "TEO", r: 5 },
+};
+
 async function yahooCandles(sym, interval, range) {
   const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${interval}&range=${range}`, { headers: UA });
   const j = await r.json();
@@ -63,9 +73,7 @@ function pivots(candles, lb = LB) {
   return { res, sop };
 }
 
-async function main() {
-  log("niveles-auto arrancando");
-
+async function main(scanPortfolio = true) {
   // CCL + feeds para ratio en vivo
   const [dolRes, usaRes, cedRes] = await Promise.all([
     fetch("https://dolarapi.com/v1/dolares/contadoconliqui", { headers: UA }).then((r) => r.json()).catch(() => null),
@@ -84,7 +92,7 @@ async function main() {
 
   // 2. Posiciones nuevas (24h) de brokers != iol, sin análisis previo
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const { data: newPos } = await supabase.from("positions")
+  const { data: newPos } = !scanPortfolio ? { data: [] } : await supabase.from("positions")
     .select("user_id,ticker,broker,created_at")
     .in("instrument_type", ["cedear", "stock"]).neq("broker", "iol").gte("created_at", since);
   for (const p of newPos || []) {
@@ -96,19 +104,27 @@ async function main() {
     if (ins) jobs.push(ins);
   }
 
-  if (!jobs.length) { log("sin trabajos"); return; }
+  if (!jobs.length) return;
 
   for (const job of jobs) {
     const tk = job.ticker;
     try {
-      const [daily, hourly] = await Promise.all([
-        yahooCandles(tk, "1d", "1y"),
-        yahooCandles(tk, "60m", "1mo"),
-      ]);
-      if (!daily) throw new Error("sin velas Yahoo");
+      // Resolver el símbolo a analizar: CEDEAR/acción USA directo; acción
+      // argentina con ADR → el ADR; sin ADR → la especie local .BA (en ARS).
+      const adrInfo = ARG_ADR[tk] || null;
+      const symUsa = adrInfo ? adrInfo.adr : tk;
+      let daily = await yahooCandles(symUsa, "1d", "1y");
+      let hourly = daily ? await yahooCandles(symUsa, "60m", "1mo") : null;
+      let modo = adrInfo ? "adr" : "usa";
+      if (!daily) {
+        daily = await yahooCandles(tk + ".BA", "1d", "1y");
+        hourly = daily ? await yahooCandles(tk + ".BA", "60m", "1mo") : null;
+        modo = "local_ars";
+        if (!daily) throw new Error("sin velas Yahoo (ni USA, ni ADR, ni .BA)");
+      }
       const d = pivots(daily, LB);
       const h = hourly ? pivots(hourly, LB) : { res: null, sop: null };
-      const spot = usdPx[tk] ?? daily[daily.length - 1].c;
+      const spot = modo === "usa" ? (usdPx[tk] ?? daily[daily.length - 1].c) : daily[daily.length - 1].c;
 
       // Nivel de compra = soporte más CERCANO por debajo del precio (el horario
       // afina si está entre el diario y el precio). Venta = resistencia más
@@ -118,33 +134,67 @@ async function main() {
       const buyLvl = sops.length ? Math.max(...sops) : null;
       const sellLvl = ress.length ? Math.min(...ress) : null;
 
-      // Ratio en vivo: (usd × ccl) / precio del cedear en ARS.
-      const ratio = arsPx[tk] > 0 && usdPx[tk] > 0 ? Math.max(1, Math.round((usdPx[tk] * ccl) / arsPx[tk])) : null;
-      if (!ratio) throw new Error("sin ratio (no está el CEDEAR en el feed)");
+      // Conversión a ARS según el modo.
+      let toArs, usdShown;
+      if (modo === "usa") {
+        const ratio = arsPx[tk] > 0 && usdPx[tk] > 0 ? Math.max(1, Math.round((usdPx[tk] * ccl) / arsPx[tk])) : null;
+        if (!ratio) throw new Error("sin ratio (no está el CEDEAR en el feed)");
+        toArs = (usd) => Math.round((usd * ccl) / ratio);
+        usdShown = (x) => Math.round(x * 100) / 100;
+      } else if (modo === "adr") {
+        toArs = (usd) => Math.round((usd * ccl) / adrInfo.r);
+        usdShown = (x) => Math.round(x * 100) / 100;
+      } else {
+        toArs = (ars) => Math.round(ars); // niveles ya en pesos (.BA)
+        usdShown = () => null;
+      }
 
       // Limpiar alertas AUTO previas NO disparadas de este ticker/usuario
       await supabase.from("price_alerts").delete().eq("user_id", job.user_id).eq("ticker", tk).eq("origen", "tv").is("triggered_at", null).like("nota", "AUTO an%");
 
-      const mk = (usd, dir, nota) => ({
-        user_id: job.user_id, ticker: tk, price: Math.round((usd * ccl) / ratio),
-        dir, nota, usd_ref: Math.round(usd * 100) / 100, canal: "screen", origen: "tv",
+      const unit = modo === "local_ars" ? "$" : "US$";
+      const mk = (lvl, dir, nota) => ({
+        user_id: job.user_id, ticker: tk, price: toArs(lvl),
+        dir, nota, usd_ref: usdShown(lvl), canal: "screen", origen: "tv",
       });
       const rows = [];
-      if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO análisis: zona de COMPRA — soporte US$${buyLvl.toFixed(2)} (pivote ${buyLvl === d.sop ? "diario" : "horario"})`));
-      if (sellLvl) rows.push(mk(sellLvl, "up", `AUTO análisis: resistencia US$${sellLvl.toFixed(2)} (pivote ${sellLvl === d.res ? "diario" : "horario"}) — venta/tomar ganancia`));
+      if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO análisis: zona de COMPRA — soporte ${unit}${buyLvl.toFixed(2)} (pivote ${buyLvl === d.sop ? "diario" : "horario"}${modo === "adr" ? ", vía ADR " + adrInfo.adr : ""})`));
+      if (sellLvl) rows.push(mk(sellLvl, "up", `AUTO análisis: resistencia ${unit}${sellLvl.toFixed(2)} (pivote ${sellLvl === d.res ? "diario" : "horario"}${modo === "adr" ? ", vía ADR " + adrInfo.adr : ""}) — venta/tomar ganancia`));
       if (rows.length) { const { error } = await supabase.from("price_alerts").insert(rows); if (error) throw new Error(error.message); }
 
       await supabase.from("tv_analysis_queue").update({
         status: "done", processed_at: new Date().toISOString(),
-        result: { spot_usd: spot, buy_usd: buyLvl, sell_usd: sellLvl, daily: d, hourly: h, ratio, ccl },
+        result: { modo, spot, buy: buyLvl, sell: sellLvl, daily: d, hourly: h, ccl },
       }).eq("id", job.id);
-      log(`${tk}: compra ${buyLvl ? buyLvl.toFixed(2) : "-"} / venta ${sellLvl ? sellLvl.toFixed(2) : "-"} (ratio ${ratio})`);
+      log(`${tk} [${modo}]: compra ${buyLvl ? buyLvl.toFixed(2) : "-"} / venta ${sellLvl ? sellLvl.toFixed(2) : "-"}`);
     } catch (e) {
       await supabase.from("tv_analysis_queue").update({ status: "error", processed_at: new Date().toISOString(), result: { error: e.message } }).eq("id", job.id);
       log(`${tk} ERROR: ${e.message}`);
     }
   }
-  log("niveles-auto OK");
 }
 
-main().then(() => process.exit(0)).catch((e) => { console.error("fatal:", e.message); process.exit(1); });
+// Loop persistente: la COLA manual se procesa SIEMPRE (cada 60s, 24/7 — LP
+// puede pedir un análisis un domingo a la noche y lo tiene en un minuto).
+// El escaneo de posiciones nuevas corre solo en horario ampliado de mercado.
+function inMarketWindow() {
+  const ar = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const dow = ar.getDay(), hr = ar.getHours();
+  return dow >= 1 && dow <= 5 && hr >= 10 && hr < 19;
+}
+
+async function loop() {
+  log("niveles-auto persistente arrancando (cola cada 60s; portfolio solo en mercado)");
+  let lastPortfolioScan = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      const scanPortfolio = inMarketWindow() && Date.now() - lastPortfolioScan > 5 * 60 * 1000;
+      await main(scanPortfolio);
+      if (scanPortfolio) lastPortfolioScan = Date.now();
+    } catch (e) { console.error("[loop]", e.message); }
+    await new Promise((r) => setTimeout(r, 60 * 1000));
+  }
+}
+
+loop();

@@ -24542,7 +24542,7 @@ function TvAlertasModule() {
     const t = anaTk.trim().toUpperCase();
     if (!t || !user) return;
     await supabase.from("tv_analysis_queue").insert({ user_id: user.id, ticker: t, source: "manual" });
-    setAnaMsg(`${t} encolado — el bot lo analiza en el próximo ciclo (≤5 min en horario de mercado)`);
+    setAnaMsg(`${t} encolado — el bot lo analiza en ≤1 minuto (a cualquier hora, con o sin mercado)`);
     setAnaTk(""); setTick((x) => x + 1);
   };
 
@@ -24617,8 +24617,9 @@ function TvAlertasModule() {
         <input value={anaTk} onChange={(e) => setAnaTk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") analizar(); }} placeholder="NVDA"
           style={{ width: 110, padding: "6px 10px", fontSize: 12.5, fontWeight: 600, color: C.text, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase" }} />
         <button onClick={analizar} disabled={!anaTk.trim()} style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, cursor: anaTk.trim() ? "pointer" : "default", border: `1px solid ${anaTk.trim() ? C.accent : C.border}`, background: anaTk.trim() ? "rgba(124,156,255,0.12)" : "transparent", color: anaTk.trim() ? C.accent : C.dim, borderRadius: 6 }}>🤖 Analizar</button>
+        <button onClick={() => setTick((x) => x + 1)} title="Refrescar la lista ya" style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer", fontSize: 13 }}>↻</button>
         <span style={{ fontSize: 11, color: C.muted }}>
-          {anaMsg || "el bot calcula soporte (zona de compra) y resistencia, y arma las alertas solo"}
+          {anaMsg || "el bot calcula soporte (zona de compra) y resistencia, y arma las alertas solo — responde en ≤1 min a cualquier hora"}
         </span>
         {anaQueue.filter((q) => q.status !== "done").slice(0, 3).map((q, i) => (
           <span key={i} style={{ fontSize: 10, color: q.status === "error" ? C.red : "#f59e0b", border: `1px solid ${C.border}`, borderRadius: 3, padding: "2px 7px", fontFamily: "'JetBrains Mono', monospace" }}>
@@ -24706,7 +24707,9 @@ function TvAlertasModule() {
                   const fU = (n) => `US$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
                   return (
                     <tr key={a.id} style={{ opacity: a.triggered_at ? 0.45 : 1 }}>
-                      <td style={{ ...tdd, fontWeight: 600, color: a.dir === "down" ? C.red : C.green }}>{a.dir === "down" ? "▼ baje" : "▲ suba"}</td>
+                      <td style={{ ...tdd, fontWeight: 700, color: /COMPRA/i.test(a.nota || "") ? C.green : /(venta|resistencia|vender|stop|salir|ganancia)/i.test(a.nota || "") ? C.red : a.dir === "down" ? C.red : C.green }}>
+                        {/COMPRA/i.test(a.nota || "") ? "▼ COMPRAR ACÁ" : /(venta|resistencia|vender|ganancia)/i.test(a.nota || "") ? "▲ VENDER ACÁ" : /(stop|salir)/i.test(a.nota || "") ? "▼ SALIR ACÁ" : a.dir === "down" ? "▼ baje" : "▲ suba"}
+                      </td>
                       <td style={numc}>{curUsd != null ? fU(curUsd) : "—"}</td>
                       <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{targetUsd != null ? fU(targetUsd) : "—"}</td>
                       <td style={numc}>{curArs != null ? f$(curArs) : "—"}</td>
