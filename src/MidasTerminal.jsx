@@ -24825,7 +24825,7 @@ function TvAlertasModule() {
                   return (
                     <tr key={a.id} style={{ opacity: a.triggered_at ? 0.45 : 1 }}>
                       <td style={{ ...tdd, fontWeight: 700, color: /(COMPRA|soporte)/i.test(a.nota || "") ? C.green : /(venta|resistencia|vender|stop|salir|ganancia)/i.test(a.nota || "") ? C.red : a.dir === "down" ? C.red : C.green }}>
-                        {/(COMPRA|soporte)/i.test(a.nota || "") ? "▼ COMPRAR" : /(venta|resistencia|vender|ganancia)/i.test(a.nota || "") ? "▲ VENDER" : /(stop|salir)/i.test(a.nota || "") ? "▼ SALIR" : a.dir === "down" ? "▼ baje" : "▲ suba"}
+                        {/(stop|salir)/i.test(a.nota || "") ? "▼ STOP LOSS" : /(COMPRA|soporte|piso)/i.test(a.nota || "") ? "▼ COMPRAR" : /(venta|resistencia|vender|ganancia)/i.test(a.nota || "") ? "▲ VENDER" : a.dir === "down" ? "▼ baje" : "▲ suba"}
                       </td>
                       <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{targetUsd != null ? `USD ${Number(targetUsd).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
                       <td style={{ ...numc, color: "#f59e0b", fontWeight: 600 }}>{`$ ${Math.round(targetArs).toLocaleString("es-AR")}`}</td>
