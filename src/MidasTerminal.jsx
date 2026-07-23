@@ -24836,9 +24836,14 @@ function TvAlertasModule() {
                       <td style={{ ...numc, color: colU }}>{dUsd == null ? "—" : `${dUsd >= 0 ? "+" : "−"}${Math.abs(dUsd).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</td>
                       <td style={{ ...numc, color: colA }}>{dArs == null ? "—" : `${dArs >= 0 ? "+" : "−"}${f$(Math.abs(dArs)).slice(1)}`}</td>
                       <td style={{ ...numc, color: colA != C.dim ? colA : colU }}>{(dArsPct ?? dUsdPct) == null ? "—" : `${(dArsPct ?? dUsdPct) >= 0 ? "+" : "−"}${Math.abs(dArsPct ?? dUsdPct).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</td>
-                      <td style={{ ...tdd, color: C.muted, fontFamily: "inherit", maxWidth: 230, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {(a.nota || "—").replace(/^AUTO análisis:\s*/i, "").replace(/^AUTO ·\s*/i, "").replace(/zona de COMPRA — /i, "").replace(/ — venta\/tomar ganancia/i, "").replace(/^\((pivote[^)]*)\)$/i, "$1")}
-                      </td>
+                      {(() => {
+                        const notaLimpia = (a.nota || "—").replace(/^AUTO análisis:\s*/i, "").replace(/^AUTO ·\s*/i, "").replace(/zona de COMPRA — /i, "").replace(/ — venta\/tomar ganancia/i, "").replace(/^\((pivote[^)]*)\)$/i, "$1");
+                        return (
+                          <td title={notaLimpia} style={{ ...tdd, color: C.muted, fontFamily: "inherit", maxWidth: 230, overflow: "hidden", textOverflow: "ellipsis", cursor: "default" }}>
+                            {notaLimpia}
+                          </td>
+                        );
+                      })()}
                       <td style={{ ...tdd, textAlign: "center" }}>
                         <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: a.origen === "tv" ? C.accent : C.dim, border: `1px solid ${a.origen === "tv" ? C.accent : C.border}`, borderRadius: 3, padding: "1px 6px" }}>{a.origen === "tv" ? "BOT" : "MANUAL"}</span>
                       </td>
