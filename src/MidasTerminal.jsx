@@ -24538,13 +24538,33 @@ function TvAlertasModule() {
     const iv = setInterval(load, 30000);
     return () => { c = true; clearInterval(iv); };
   }, [user, tick]);
-  const analizar = async () => {
-    const t = anaTk.trim().toUpperCase();
+  const analizar = async (tkOverride) => {
+    const t = (tkOverride || anaTk).trim().toUpperCase();
     if (!t || !user) return;
     await supabase.from("tv_analysis_queue").insert({ user_id: user.id, ticker: t, source: "manual" });
     setAnaMsg(`${t} encolado — el bot lo analiza en ≤1 minuto (a cualquier hora, con o sin mercado)`);
     setAnaTk(""); setTick((x) => x + 1);
   };
+  // Buscador estilo Simulador de venta + selector "de mi cartera".
+  const { positions: myPos } = useUserPositions();
+  const [anaOpen, setAnaOpen] = useState(false);
+  const anaOptions = useMemo(() => {
+    const ceds = Object.keys(CEDEAR_CAT).map((k) => ({ sym: k, name: CEDEAR_CAT[k].n, kind: "CED" }));
+    const accs = Object.keys(livePx).filter((s) => !CEDEAR_CAT[s]).map((s) => ({ sym: s, name: "Acción local", kind: "ACC" }));
+    const all = [...ceds, ...accs];
+    const term = anaTk.trim().toUpperCase();
+    const list = term ? all.filter((o) => o.sym.includes(term) || o.name.toUpperCase().includes(term)) : all;
+    return list.sort((a, b) => a.sym.localeCompare(b.sym)).slice(0, 30);
+  }, [anaTk, livePx]);
+  const miCartera = useMemo(() => {
+    const net = {};
+    for (const p of myPos || []) {
+      if (!["cedear", "stock"].includes(p.instrument_type) || !p.ticker) continue;
+      const t = p.ticker.toUpperCase().trim();
+      net[t] = (net[t] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+    }
+    return Object.entries(net).filter(([, q]) => q > 0).map(([t]) => t).sort();
+  }, [myPos]);
 
   useEffect(() => {
     if (!user) return;
@@ -24614,9 +24634,31 @@ function TvAlertasModule() {
           bot te dice a cuánto conviene entrar (soporte) y dónde tomar ganancia. */}
       <div className="flex items-center" style={{ gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em" }}>Analizar papel</span>
-        <input value={anaTk} onChange={(e) => setAnaTk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") analizar(); }} placeholder="NVDA"
-          style={{ width: 110, padding: "6px 10px", fontSize: 12.5, fontWeight: 600, color: C.text, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase" }} />
-        <button onClick={analizar} disabled={!anaTk.trim()} style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, cursor: anaTk.trim() ? "pointer" : "default", border: `1px solid ${anaTk.trim() ? C.accent : C.border}`, background: anaTk.trim() ? "rgba(124,156,255,0.12)" : "transparent", color: anaTk.trim() ? C.accent : C.dim, borderRadius: 6 }}>🤖 Analizar</button>
+        <div style={{ position: "relative", flex: "0 1 340px", minWidth: 240 }}>
+          <input value={anaTk} onFocus={() => setAnaOpen(true)} onBlur={() => setTimeout(() => setAnaOpen(false), 150)}
+            onChange={(e) => { setAnaTk(e.target.value); setAnaOpen(true); }} onKeyDown={(e) => { if (e.key === "Enter") { analizar(); setAnaOpen(false); } }}
+            placeholder="🔎 Buscar un CEDEAR o acción para analizar…"
+            style={{ width: "100%", padding: "7px 11px", fontSize: 12.5, fontWeight: 600, color: C.text, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" }} />
+          {anaOpen && anaOptions.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 3, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, zIndex: 10, maxHeight: 220, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+              {anaOptions.map((o) => (
+                <div key={o.sym} onMouseDown={() => { analizar(o.sym); setAnaOpen(false); }} className="flex items-center justify-between"
+                  style={{ padding: "7px 10px", cursor: "pointer", borderBottom: `1px solid ${C.border}`, gap: 8 }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#f59e0b", fontSize: 12, minWidth: 50 }}>{o.sym}</span>
+                  <span style={{ fontSize: 8.5, color: C.dim, textTransform: "uppercase", letterSpacing: "0.06em", border: `1px solid ${C.border}`, borderRadius: 3, padding: "1px 4px" }}>{o.kind}</span>
+                  <span style={{ fontSize: 11, color: C.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
+                  <span style={{ fontSize: 11.5, color: livePx[o.sym]?.price != null ? "#34d399" : C.dim, fontFamily: "'JetBrains Mono', monospace" }}>{livePx[o.sym]?.price != null ? `$${Math.round(livePx[o.sym].price).toLocaleString("es-AR")}` : "s/precio"}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <select value="" onChange={(e) => { if (e.target.value) analizar(e.target.value); e.target.value = ""; }}
+          style={{ padding: "7px 10px", fontSize: 12, fontWeight: 600, color: C.muted, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}>
+          <option value="">Analizar de mi cartera…</option>
+          {miCartera.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <button onClick={() => analizar()} disabled={!anaTk.trim()} style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, cursor: anaTk.trim() ? "pointer" : "default", border: `1px solid ${anaTk.trim() ? C.accent : C.border}`, background: anaTk.trim() ? "rgba(124,156,255,0.12)" : "transparent", color: anaTk.trim() ? C.accent : C.dim, borderRadius: 6 }}>🤖 Analizar</button>
         <button onClick={() => { setTick((x) => x + 1); setAnaMsg(`lista actualizada ${new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} — si no ves cambios, el bot aún no procesó nada nuevo`); }} title="Refrescar la lista ya" style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer", fontSize: 13 }}>↻</button>
         <span style={{ fontSize: 11, color: C.muted }}>
           {anaMsg || "el bot calcula soporte (zona de compra) y resistencia, y arma las alertas solo — responde en ≤1 min a cualquier hora"}
