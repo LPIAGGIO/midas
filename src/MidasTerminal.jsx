@@ -24532,6 +24532,21 @@ function TvAlertasModule() {
     return () => { c = true; };
   }, [user, tick]);
 
+  // Precio USD live del subyacente (feed USA) para las columnas en dólares.
+  const [usaPx, setUsaPx] = useState({});
+  useEffect(() => {
+    let c = false;
+    const load = () => fetch(`/api/data912?type=usa&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])).then((arr) => {
+      if (c) return;
+      const m = {};
+      for (const it of arr || []) { const px2 = Number(it?.c); if (it?.symbol && px2 > 0) m[String(it.symbol).trim().toUpperCase()] = px2; }
+      setUsaPx(m);
+    }).catch(() => {});
+    load();
+    const iv = setInterval(load, 5 * 60 * 1000);
+    return () => { c = true; clearInterval(iv); };
+  }, []);
+
   const T = tkr.trim().toUpperCase();
   const cat = CEDEAR_CAT[T];
   const usdN = Number(String(usd).replace(",", "."));
@@ -24600,47 +24615,59 @@ function TvAlertasModule() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace" }}>
             <thead>
               <tr style={{ color: C.dim, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.1em", background: "rgba(255,255,255,0.02)" }}>
-                <th style={{ textAlign: "left", padding: "8px 12px" }}>Ticker</th>
-                <th style={{ textAlign: "center", padding: "8px 6px" }}>Dir</th>
-                <th style={{ textAlign: "right", padding: "8px 12px" }}>Está en</th>
-                <th style={{ textAlign: "right", padding: "8px 12px" }}>Target</th>
-                <th style={{ textAlign: "right", padding: "8px 12px" }}>Nivel USD</th>
-                <th style={{ textAlign: "right", padding: "8px 12px" }}>Falta $</th>
-                <th style={{ textAlign: "right", padding: "8px 12px" }}>Falta %</th>
-                <th style={{ textAlign: "left", padding: "8px 12px" }}>Nota / acción</th>
-                <th style={{ textAlign: "center", padding: "8px 8px" }}>Origen</th>
-                <th style={{ textAlign: "right", padding: "8px 12px" }}>Estado</th>
+                <th style={{ textAlign: "left", padding: "8px 10px" }}>Ticker</th>
+                <th style={{ textAlign: "center", padding: "8px 4px" }}>Dir</th>
+                <th style={{ textAlign: "right", padding: "8px 10px" }}>Está en USD</th>
+                <th style={{ textAlign: "right", padding: "8px 10px" }}>Target USD</th>
+                <th style={{ textAlign: "right", padding: "8px 10px" }}>Está en ARS</th>
+                <th style={{ textAlign: "right", padding: "8px 10px" }}>Target ARS</th>
+                <th style={{ textAlign: "right", padding: "8px 10px" }}>Falta USD</th>
+                <th style={{ textAlign: "right", padding: "8px 8px" }}>%</th>
+                <th style={{ textAlign: "right", padding: "8px 10px" }}>Falta ARS</th>
+                <th style={{ textAlign: "right", padding: "8px 8px" }}>%</th>
+                <th style={{ textAlign: "left", padding: "8px 10px" }}>Nota / acción</th>
+                <th style={{ textAlign: "center", padding: "8px 6px" }}>Origen</th>
+                <th style={{ textAlign: "right", padding: "8px 10px" }}>Estado</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {!rows.length && (
                 <tr style={{ borderTop: `1px solid ${C.border}` }}>
-                  <td colSpan={11} style={{ padding: "26px 14px", textAlign: "center", color: C.muted, fontSize: 12 }}>Sin niveles todavía. Las alertas de TradingView entran solas por webhook; si necesitás clavar un nivel a mano, usá "carga manual" arriba.</td>
+                  <td colSpan={14} style={{ padding: "26px 14px", textAlign: "center", color: C.muted, fontSize: 12 }}>Sin niveles todavía. Las alertas de TradingView entran solas por webhook; si necesitás clavar un nivel a mano, usá "carga manual" arriba.</td>
                 </tr>
               )}
               {rows.map((a) => {
-                const target = Number(a.price);
-                const cur = livePx[a.ticker]?.price ?? null;
-                const dist = cur != null ? target - cur : null;
-                const distPct = cur != null && cur > 0 ? (dist / cur) * 100 : null;
-                const dcol = dist == null ? C.dim : dist >= 0 ? C.green : C.red;
-                const num = { padding: "8px 12px", textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+                const targetArs = Number(a.price);
+                const curArs = livePx[a.ticker]?.price ?? null;
+                const targetUsd = a.usd_ref ? Number(a.usd_ref) : null;
+                const curUsd = usaPx[a.ticker] ?? null;
+                const dArs = curArs != null ? targetArs - curArs : null;
+                const dArsPct = curArs > 0 ? (dArs / curArs) * 100 : null;
+                const dUsd = (targetUsd != null && curUsd != null) ? targetUsd - curUsd : null;
+                const dUsdPct = (dUsd != null && curUsd > 0) ? (dUsd / curUsd) * 100 : null;
+                const colA = dArs == null ? C.dim : dArs >= 0 ? C.green : C.red;
+                const colU = dUsd == null ? C.dim : dUsd >= 0 ? C.green : C.red;
+                const num = { padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+                const fU = (n) => `US$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
                 return (
                   <tr key={a.id} style={{ borderTop: `1px solid ${C.border}`, opacity: a.triggered_at ? 0.45 : 1 }}>
-                    <td style={{ padding: "8px 12px", color: "#fbbf24", fontWeight: 700 }}>{a.ticker}</td>
-                    <td style={{ padding: "8px 6px", textAlign: "center", fontWeight: 700, color: a.dir === "down" ? C.red : C.green }}>{a.dir === "down" ? "▼" : "▲"}</td>
-                    <td style={{ ...num, color: C.text }}>{cur != null ? f$(cur) : "—"}</td>
-                    <td style={{ ...num, color: "#f59e0b", fontWeight: 700 }}>{f$(target)}</td>
-                    <td style={{ ...num, color: C.muted }}>{a.usd_ref ? `US$${Number(a.usd_ref)}` : "—"}</td>
-                    <td style={{ ...num, color: dcol, fontWeight: 600 }}>{dist == null ? "—" : `${dist >= 0 ? "+" : "−"}${f$(Math.abs(dist)).slice(1)}`}</td>
-                    <td style={{ ...num, color: dcol, fontWeight: 600 }}>{distPct == null ? "—" : `${distPct >= 0 ? "+" : "−"}${Math.abs(distPct).toFixed(2)}%`}</td>
-                    <td style={{ padding: "8px 12px", color: C.muted, fontSize: 11.5, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "inherit" }}>{a.nota || "—"}</td>
-                    <td style={{ padding: "8px 8px", textAlign: "center" }}>
+                    <td style={{ padding: "8px 10px", color: "#fbbf24", fontWeight: 700 }}>{a.ticker}</td>
+                    <td style={{ padding: "8px 4px", textAlign: "center", fontWeight: 700, color: a.dir === "down" ? C.red : C.green }}>{a.dir === "down" ? "▼" : "▲"}</td>
+                    <td style={{ ...num, color: C.text }}>{curUsd != null ? fU(curUsd) : "—"}</td>
+                    <td style={{ ...num, color: "#f59e0b", fontWeight: 700 }}>{targetUsd != null ? fU(targetUsd) : "—"}</td>
+                    <td style={{ ...num, color: C.text }}>{curArs != null ? f$(curArs) : "—"}</td>
+                    <td style={{ ...num, color: "#f59e0b", fontWeight: 700 }}>{f$(targetArs)}</td>
+                    <td style={{ ...num, color: colU, fontWeight: 600 }}>{dUsd == null ? "—" : `${dUsd >= 0 ? "+" : "−"}${Math.abs(dUsd).toFixed(2)}`}</td>
+                    <td style={{ ...num, padding: "8px 8px", color: colU, fontWeight: 600 }}>{dUsdPct == null ? "—" : `${dUsdPct >= 0 ? "+" : "−"}${Math.abs(dUsdPct).toFixed(2)}%`}</td>
+                    <td style={{ ...num, color: colA, fontWeight: 600 }}>{dArs == null ? "—" : `${dArs >= 0 ? "+" : "−"}${f$(Math.abs(dArs)).slice(1)}`}</td>
+                    <td style={{ ...num, padding: "8px 8px", color: colA, fontWeight: 600 }}>{dArsPct == null ? "—" : `${dArsPct >= 0 ? "+" : "−"}${Math.abs(dArsPct).toFixed(2)}%`}</td>
+                    <td style={{ padding: "8px 10px", color: C.muted, fontSize: 11.5, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "inherit" }}>{a.nota || "—"}</td>
+                    <td style={{ padding: "8px 6px", textAlign: "center" }}>
                       <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: a.origen === "tv" ? C.accent : C.dim, border: `1px solid ${a.origen === "tv" ? C.accent : C.border}`, borderRadius: 3, padding: "1px 6px" }}>{a.origen === "tv" ? "BOT" : "MANUAL"}</span>
                     </td>
                     <td style={{ ...num, fontSize: 10.5, color: a.triggered_at ? C.dim : C.green }}>{a.triggered_at ? "DISPARADA" : "ARMADA"}</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                    <td style={{ padding: "8px 8px", textAlign: "right" }}>
                       <button onClick={() => del(a.id)} style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 10 }}>✕</button>
                     </td>
                   </tr>
