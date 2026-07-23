@@ -197,6 +197,15 @@ async function main(scanPortfolio = true) {
       if (big.sop != null && big.sop < spot && (!buyLvl || big.sop < buyLvl * 0.97)) {
         rows.push(mk(big.sop, "down", `AUTO · soporte ESTRUCTURAL ${unit}${fmt(big.sop)} · pivote mayor del año`));
       }
+      // Sin NINGÚN soporte debajo (papel haciendo mínimos nuevos): fallback al
+      // mínimo de 52 semanas como referencia de piso — y si el precio YA está
+      // ahí, no hay red: eso también es información.
+      if (!buyLvl && (big.sop == null || big.sop >= spot)) {
+        const yrLow = Math.min(...daily.map((c) => c.l));
+        if (yrLow < spot * 0.995) {
+          rows.push(mk(yrLow, "down", `AUTO · piso del año ${unit}${fmt(yrLow)} · mínimo 52 semanas (sin soporte de pivote debajo: mínimos nuevos)`));
+        }
+      }
       if (big.res != null && big.res > spot && (!sellLvl || big.res > sellLvl * 1.03)) {
         rows.push(mk(big.res, "up", `AUTO · resistencia ESTRUCTURAL ${unit}${fmt(big.res)} · pivote mayor del año`));
       }
