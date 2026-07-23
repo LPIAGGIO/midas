@@ -24591,35 +24591,49 @@ function TvAlertasModule() {
       {!rows ? <div style={{ color: C.muted, fontSize: 12, padding: 20 }}>Cargando…</div> : !rows.length ? (
         <div style={{ color: C.muted, fontSize: 12.5, padding: 24, textAlign: "center", border: `1px dashed ${C.border}`, borderRadius: 8 }}>Sin niveles cargados. El flujo: análisis en TradingView (ticker USA) → nivel USD acá → Midas te avisa en pantalla al cruzarlo.</div>
       ) : (
-        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
-          <div className="flex items-center" style={{ gap: 12, padding: "7px 14px", fontSize: 9.5, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", background: "rgba(255,255,255,0.02)" }}>
-            <span style={{ width: 26 }} /><span style={{ minWidth: 52 }}>Papel</span>
-            <span style={{ minWidth: 90, textAlign: "right" }}>Está en</span>
-            <span style={{ minWidth: 90, textAlign: "right" }}>Tiene que llegar</span>
-            <span style={{ minWidth: 130, textAlign: "right" }}>Falta ($ y %)</span>
-            <span style={{ flex: 1 }}>Nota / acción</span>
-            <span />
-          </div>
-          {rows.map((a) => {
-            const target = Number(a.price);
-            const cur = livePx[a.ticker]?.price ?? null;
-            const dist = cur != null ? target - cur : null;
-            const distPct = cur != null && cur > 0 ? (dist / cur) * 100 : null;
-            return (
-            <div key={a.id} className="flex items-center" style={{ gap: 12, padding: "10px 14px", borderTop: `1px solid ${C.border}`, opacity: a.triggered_at ? 0.5 : 1, fontVariantNumeric: "tabular-nums" }}>
-              <span style={{ fontWeight: 700, fontSize: 10, width: 26, textAlign: "center", color: a.dir === "down" ? C.red : C.green, border: `1px solid ${a.dir === "down" ? C.red : C.green}`, borderRadius: 3, padding: "1px 0" }}>{a.dir === "down" ? "▼" : "▲"}</span>
-              <span style={{ color: C.text, fontWeight: 700, minWidth: 52 }}>{a.ticker}</span>
-              <span style={{ color: C.text, minWidth: 90, textAlign: "right" }}>{cur != null ? f$(cur) : "—"}</span>
-              <span style={{ color: "#f59e0b", fontWeight: 700, minWidth: 90, textAlign: "right" }}>{f$(target)}{a.usd_ref ? <span style={{ color: C.dim, fontWeight: 400, fontSize: 10 }}> (US${Number(a.usd_ref)})</span> : null}</span>
-              <span style={{ minWidth: 130, textAlign: "right", fontWeight: 600, color: dist == null ? C.dim : dist >= 0 ? C.green : C.red }}>
-                {dist == null ? "—" : `${dist >= 0 ? "+" : "−"}${f$(Math.abs(dist)).slice(1)} (${distPct >= 0 ? "+" : ""}${distPct.toFixed(2)}%)`}
-              </span>
-              <span style={{ color: C.muted, fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nota || ""}</span>
-              <span style={{ fontSize: 10.5, color: a.triggered_at ? C.dim : C.green, whiteSpace: "nowrap" }}>{a.triggered_at ? "disparada" : "armada"}</span>
-              <button onClick={() => del(a.id)} style={{ width: 24, height: 24, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 11, flexShrink: 0 }}>✕</button>
-            </div>
-            );
-          })}
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, background: C.panel, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace" }}>
+            <thead>
+              <tr style={{ color: C.dim, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.1em", background: "rgba(255,255,255,0.02)" }}>
+                <th style={{ textAlign: "left", padding: "8px 12px" }}>Ticker</th>
+                <th style={{ textAlign: "center", padding: "8px 6px" }}>Dir</th>
+                <th style={{ textAlign: "right", padding: "8px 12px" }}>Está en</th>
+                <th style={{ textAlign: "right", padding: "8px 12px" }}>Target</th>
+                <th style={{ textAlign: "right", padding: "8px 12px" }}>Nivel USD</th>
+                <th style={{ textAlign: "right", padding: "8px 12px" }}>Falta $</th>
+                <th style={{ textAlign: "right", padding: "8px 12px" }}>Falta %</th>
+                <th style={{ textAlign: "left", padding: "8px 12px" }}>Nota / acción</th>
+                <th style={{ textAlign: "right", padding: "8px 12px" }}>Estado</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((a) => {
+                const target = Number(a.price);
+                const cur = livePx[a.ticker]?.price ?? null;
+                const dist = cur != null ? target - cur : null;
+                const distPct = cur != null && cur > 0 ? (dist / cur) * 100 : null;
+                const dcol = dist == null ? C.dim : dist >= 0 ? C.green : C.red;
+                const num = { padding: "8px 12px", textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+                return (
+                  <tr key={a.id} style={{ borderTop: `1px solid ${C.border}`, opacity: a.triggered_at ? 0.45 : 1 }}>
+                    <td style={{ padding: "8px 12px", color: "#fbbf24", fontWeight: 700 }}>{a.ticker}</td>
+                    <td style={{ padding: "8px 6px", textAlign: "center", fontWeight: 700, color: a.dir === "down" ? C.red : C.green }}>{a.dir === "down" ? "▼" : "▲"}</td>
+                    <td style={{ ...num, color: C.text }}>{cur != null ? f$(cur) : "—"}</td>
+                    <td style={{ ...num, color: "#f59e0b", fontWeight: 700 }}>{f$(target)}</td>
+                    <td style={{ ...num, color: C.muted }}>{a.usd_ref ? `US$${Number(a.usd_ref)}` : "—"}</td>
+                    <td style={{ ...num, color: dcol, fontWeight: 600 }}>{dist == null ? "—" : `${dist >= 0 ? "+" : "−"}${f$(Math.abs(dist)).slice(1)}`}</td>
+                    <td style={{ ...num, color: dcol, fontWeight: 600 }}>{distPct == null ? "—" : `${distPct >= 0 ? "+" : "−"}${Math.abs(distPct).toFixed(2)}%`}</td>
+                    <td style={{ padding: "8px 12px", color: C.muted, fontSize: 11.5, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "inherit" }}>{a.nota || "—"}</td>
+                    <td style={{ ...num, fontSize: 10.5, color: a.triggered_at ? C.dim : C.green }}>{a.triggered_at ? "DISPARADA" : "ARMADA"}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                      <button onClick={() => del(a.id)} style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 10 }}>✕</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
       <p style={{ fontSize: 10.5, color: C.dim, marginTop: 12, lineHeight: 1.5 }}>
