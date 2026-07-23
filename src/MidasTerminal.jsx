@@ -24772,12 +24772,18 @@ function TvAlertasModule() {
               {Object.entries(rows.reduce((m, a) => { (m[a.ticker] = m[a.ticker] || []).push(a); return m; }, {})).flatMap(([tik, items]) => {
                 // Potencial del trade: % entre el nivel de compra (soporte) y el
                 // de venta (resistencia) del par vigente (no disparadas).
+                // Par MÁS CERCANO al precio: la compra más ALTA y la venta más
+                // BAJA (los niveles inmediatos, no los estructurales — si no,
+                // soporte del año vs resistencia del año da un % gigante).
                 const vivas = items.filter((x) => !x.triggered_at);
-                const buy = vivas.find((x) => x.dir === "down" && /(COMPRA|soporte)/i.test(x.nota || ""));
-                const sell = vivas.find((x) => x.dir === "up" && /(venta|resistencia|ganancia)/i.test(x.nota || ""));
-                const bV = buy ? (Number(buy.usd_ref) || Number(buy.price)) : null;
-                const sV = sell ? (Number(sell.usd_ref) || Number(sell.price)) : null;
-                const potencial = (bV && sV && bV > 0 && ((buy.usd_ref && sell.usd_ref) || (!buy.usd_ref && !sell.usd_ref))) ? ((sV / bV) - 1) * 100 : null;
+                const buys = vivas.filter((x) => x.dir === "down" && /(COMPRA|soporte|piso)/i.test(x.nota || ""));
+                const sells = vivas.filter((x) => x.dir === "up" && /(venta|resistencia|ganancia)/i.test(x.nota || ""));
+                const val = (x) => Number(x.usd_ref) || Number(x.price);
+                const buy = buys.length ? buys.reduce((a, b) => (val(b) > val(a) ? b : a)) : null;
+                const sell = sells.length ? sells.reduce((a, b) => (val(b) < val(a) ? b : a)) : null;
+                const bV = buy ? val(buy) : null;
+                const sV = sell ? val(sell) : null;
+                const potencial = (bV && sV && bV > 0 && sV > bV && ((buy.usd_ref && sell.usd_ref) || (!buy.usd_ref && !sell.usd_ref))) ? ((sV / bV) - 1) * 100 : null;
                 return [
                 <tr key={tik + "_hdr"} style={{ background: C.deep }}>
                   <td colSpan={9} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
