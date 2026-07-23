@@ -24617,7 +24617,7 @@ function TvAlertasModule() {
         <input value={anaTk} onChange={(e) => setAnaTk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") analizar(); }} placeholder="NVDA"
           style={{ width: 110, padding: "6px 10px", fontSize: 12.5, fontWeight: 600, color: C.text, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase" }} />
         <button onClick={analizar} disabled={!anaTk.trim()} style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, cursor: anaTk.trim() ? "pointer" : "default", border: `1px solid ${anaTk.trim() ? C.accent : C.border}`, background: anaTk.trim() ? "rgba(124,156,255,0.12)" : "transparent", color: anaTk.trim() ? C.accent : C.dim, borderRadius: 6 }}>🤖 Analizar</button>
-        <button onClick={() => setTick((x) => x + 1)} title="Refrescar la lista ya" style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer", fontSize: 13 }}>↻</button>
+        <button onClick={() => { setTick((x) => x + 1); setAnaMsg(`lista actualizada ${new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} — si no ves cambios, el bot aún no procesó nada nuevo`); }} title="Refrescar la lista ya" style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer", fontSize: 13 }}>↻</button>
         <span style={{ fontSize: 11, color: C.muted }}>
           {anaMsg || "el bot calcula soporte (zona de compra) y resistencia, y arma las alertas solo — responde en ≤1 min a cualquier hora"}
         </span>
