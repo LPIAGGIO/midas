@@ -24753,7 +24753,7 @@ function TvAlertasModule() {
                     {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> USD {Number(usaPx[tik]).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
                     {livePx[tik]?.price != null && <span style={{ color: C.text, fontWeight: 600 }}>{usaPx[tik] != null ? " · " : " "}ARS {Math.round(livePx[tik].price).toLocaleString("es-AR")}</span>}
                     {potencial != null && potencial > 0 && (
-                      <span style={{ color: C.dim, fontWeight: 400 }}> · potencial compra→venta: <b style={{ color: C.green, fontWeight: 700 }}>+{potencial.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</b></span>
+                      <span style={{ color: C.dim, fontWeight: 400 }}> · potencial compra→venta: <b style={{ color: C.green, fontWeight: 700 }}>+{potencial.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</b> (en USD)</span>
                     )}
                   </td>
                 </tr>,
