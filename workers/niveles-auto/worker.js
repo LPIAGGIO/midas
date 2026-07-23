@@ -119,9 +119,21 @@ async function main(scanPortfolio = true) {
   for (const it of usaRes || []) if (it?.symbol && Number(it.c) > 0) usdPx[it.symbol.toUpperCase()] = Number(it.c);
   for (const it of cedRes || []) if (it?.symbol && Number(it.c) > 0) arsPx[it.symbol.toUpperCase()] = Number(it.c);
 
-  // 1. Cola manual pendiente
+  // 1. Cola manual pendiente — colapsando duplicados por usuario+ticker (si LP
+  // encoló dos veces el mismo papel, se analiza UNA vez y se marcan todos).
   const { data: queue } = await supabase.from("tv_analysis_queue").select("*").eq("status", "pending").limit(20);
-  const jobs = (queue || []).map((q) => ({ ...q, ticker: q.ticker.toUpperCase().trim() }));
+  const seen = new Set();
+  const jobs = [];
+  for (const q of queue || []) {
+    const tk = q.ticker.toUpperCase().trim();
+    const key = q.user_id + "|" + tk;
+    if (seen.has(key)) {
+      await supabase.from("tv_analysis_queue").update({ status: "done", processed_at: new Date().toISOString(), result: { dup: true } }).eq("id", q.id);
+      continue;
+    }
+    seen.add(key);
+    jobs.push({ ...q, ticker: tk });
+  }
 
   // Escaneo automático de posiciones: DESACTIVADO a pedido de LP (23/07).
   // Un import de Cocos marcaría todo el portfolio como "nuevo" y dispararía

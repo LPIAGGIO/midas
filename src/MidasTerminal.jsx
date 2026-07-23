@@ -24540,6 +24540,9 @@ function TvAlertasModule() {
   const analizar = async (tkOverride) => {
     const t = (tkOverride || anaTk).trim().toUpperCase();
     if (!t || !user) return;
+    // No duplicar: si ya hay un pedido pendiente del mismo ticker, avisar y listo.
+    const { data: dup } = await supabase.from("tv_analysis_queue").select("id").eq("user_id", user.id).eq("ticker", t).eq("status", "pending").limit(1);
+    if (dup && dup.length) { setAnaMsg(`${t} ya está en cola — esperá que el bot lo procese (≤1 min)`); setAnaTk(""); return; }
     await supabase.from("tv_analysis_queue").insert({ user_id: user.id, ticker: t, source: "manual" });
     setAnaMsg(`${t} encolado — el bot lo analiza en ≤1 minuto (a cualquier hora, con o sin mercado)`);
     setAnaTk(""); setTick((x) => x + 1);
@@ -24706,7 +24709,7 @@ function TvAlertasModule() {
         <span style={{ fontSize: 11, color: C.muted }}>
           {anaMsg || "el bot calcula soporte (zona de compra) y resistencia, y arma las alertas solo — responde en ≤1 min a cualquier hora"}
         </span>
-        {anaQueue.filter((q) => q.status !== "done").slice(0, 3).map((q, i) => (
+        {[...new Map(anaQueue.filter((q) => q.status !== "done").map((q) => [q.ticker + q.status, q])).values()].slice(0, 3).map((q, i) => (
           <span key={i} style={{ fontSize: 10, color: q.status === "error" ? C.red : "#f59e0b", border: `1px solid ${C.border}`, borderRadius: 3, padding: "2px 7px", fontFamily: "'JetBrains Mono', monospace" }}>
             {q.ticker} · {q.status === "pending" ? "en cola…" : "error"}
           </span>
