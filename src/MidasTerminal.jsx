@@ -24514,7 +24514,6 @@ function TvAlertasModule() {
   const { user } = useAuth();
   const { fx } = useDashboardFx();
   const { prices: livePx } = useStockPrices();
-  const ccl = fx?.ccl?.mid ?? null;
   const [rows, setRows] = useState(null);
   const [tick, setTick] = useState(0);
   const [tkr, setTkr] = useState("");
@@ -24583,20 +24582,40 @@ function TvAlertasModule() {
     return () => { c = true; clearInterval(iv); };
   }, [user, tick]);
 
-  // Precio USD live del subyacente (feed USA) para las columnas en dólares.
+  // Precios live con pulso propio de 60s mientras la pantalla está abierta:
+  // subyacente USA, CEDEARs/acciones en ARS y CCL. (El poll global de la app
+  // es de 5 min — acá el "valor actual" tiene que sentirse vivo.)
   const [usaPx, setUsaPx] = useState({});
+  const [arsLive, setArsLive] = useState({});
+  const [cclLive, setCclLive] = useState(null);
   useEffect(() => {
     let c = false;
-    const load = () => fetch(`/api/data912?type=usa&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])).then((arr) => {
-      if (c) return;
+    const toMap = (arr) => {
       const m = {};
       for (const it of arr || []) { const px2 = Number(it?.c); if (it?.symbol && px2 > 0) m[String(it.symbol).trim().toUpperCase()] = px2; }
-      setUsaPx(m);
-    }).catch(() => {});
+      return m;
+    };
+    const load = () => Promise.all([
+      fetch(`/api/data912?type=usa&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch(`/api/data912?type=cedears&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch(`/api/data912?type=acciones&_=${Date.now()}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch(`/api/dolares`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([usa, ced, acc, dol]) => {
+      if (c) return;
+      setUsaPx(toMap(usa));
+      setArsLive({ ...toMap(acc), ...toMap(ced) });
+      const row = Array.isArray(dol) ? dol.find((d) => (d.casa || "").toLowerCase() === "contadoconliqui") : null;
+      const v = row ? (Number(row.venta) || Number(row.compra)) : null;
+      if (v) setCclLive(v);
+    });
     load();
-    const iv = setInterval(load, 5 * 60 * 1000);
+    const iv = setInterval(load, 60 * 1000);
     return () => { c = true; clearInterval(iv); };
   }, []);
+  // CCL: el live de 60s manda; el del dashboard queda de fallback inicial.
+  const ccl = cclLive ?? fx?.ccl?.mid ?? null;
+  // Precio ARS: feed local de 60s primero, hook global de fallback.
+  const arsOf = (t) => arsLive[t] ?? livePx[t]?.price ?? null;
 
   const T = tkr.trim().toUpperCase();
   const cat = CEDEAR_CAT[T];
@@ -24749,9 +24768,9 @@ function TvAlertasModule() {
                 <tr key={tik + "_hdr"} style={{ background: C.deep }}>
                   <td colSpan={9} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
                     {tik}
-                    {(usaPx[tik] != null || livePx[tik]?.price != null) && <span style={{ color: C.dim, fontWeight: 400 }}> · valor actual:</span>}
+                    {(usaPx[tik] != null || arsOf(tik) != null) && <span style={{ color: C.dim, fontWeight: 400 }}> · valor actual:</span>}
                     {usaPx[tik] != null && <span style={{ color: C.text, fontWeight: 600 }}> USD {Number(usaPx[tik]).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
-                    {livePx[tik]?.price != null && <span style={{ color: C.text, fontWeight: 600 }}>{usaPx[tik] != null ? " · " : " "}ARS {Math.round(livePx[tik].price).toLocaleString("es-AR")}</span>}
+                    {arsOf(tik) != null && <span style={{ color: C.text, fontWeight: 600 }}>{usaPx[tik] != null ? " · " : " "}ARS {Math.round(arsOf(tik)).toLocaleString("es-AR")}</span>}
                     {potencial != null && potencial > 0 && (
                       <span style={{ color: C.dim, fontWeight: 400 }}> · potencial compra→venta: <b style={{ color: C.green, fontWeight: 700 }}>+{potencial.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</b> (en USD)</span>
                     )}
@@ -24759,7 +24778,7 @@ function TvAlertasModule() {
                 </tr>,
                 ...items.map((a) => {
                   const targetArs = Number(a.price);
-                  const curArs = livePx[a.ticker]?.price ?? null;
+                  const curArs = arsOf(a.ticker);
                   const targetUsd = a.usd_ref ? Number(a.usd_ref) : null;
                   const curUsd = usaPx[a.ticker] ?? null;
                   const dArs = curArs != null ? targetArs - curArs : null;
