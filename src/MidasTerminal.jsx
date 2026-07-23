@@ -24616,6 +24616,17 @@ function TvAlertasModule() {
   const ccl = cclLive ?? fx?.ccl?.mid ?? null;
   // Precio ARS: feed local de 60s primero, hook global de fallback.
   const arsOf = (t) => arsLive[t] ?? livePx[t]?.price ?? null;
+  // Contexto fundamental por ticker (lo escribe el worker niveles-auto):
+  // próximo earnings + target promedio de analistas.
+  const [tkCtx, setTkCtx] = useState({});
+  useEffect(() => {
+    let c = false;
+    const load = () => supabase.from("ticker_context").select("ticker,earnings_date,target_mean,recommendation")
+      .then(({ data }) => { if (!c && data) setTkCtx(Object.fromEntries(data.map((r) => [r.ticker, r]))); });
+    load();
+    const iv = setInterval(load, 5 * 60 * 1000);
+    return () => { c = true; clearInterval(iv); };
+  }, [tick]);
 
   const T = tkr.trim().toUpperCase();
   const cat = CEDEAR_CAT[T];
@@ -24774,6 +24785,20 @@ function TvAlertasModule() {
                     {potencial != null && potencial > 0 && (
                       <span style={{ color: C.dim, fontWeight: 400 }}> · potencial compra→venta: <b style={{ color: C.green, fontWeight: 700 }}>+{potencial.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</b> (en USD)</span>
                     )}
+                    {(() => {
+                      const cx = tkCtx[tik];
+                      if (!cx) return null;
+                      const days = cx.earnings_date ? Math.round((new Date(cx.earnings_date + "T00:00:00") - new Date()) / 86400000) : null;
+                      const upside = (cx.target_mean && usaPx[tik]) ? ((cx.target_mean / usaPx[tik]) - 1) * 100 : null;
+                      return (<>
+                        {cx.earnings_date && days != null && days >= 0 && (
+                          <span style={{ fontWeight: 400, color: days <= 7 ? "#f59e0b" : C.dim }}> · earnings {cx.earnings_date.slice(8, 10)}/{cx.earnings_date.slice(5, 7)}{days <= 7 ? ` (¡en ${days === 0 ? "HOY" : days + "d"}!)` : ""}</span>
+                        )}
+                        {cx.target_mean != null && (
+                          <span style={{ color: C.dim, fontWeight: 400 }}> · target analistas USD {Number(cx.target_mean).toLocaleString("es-AR", { maximumFractionDigits: 0 })}{upside != null ? ` (${upside >= 0 ? "+" : ""}${upside.toFixed(0)}%)` : ""}</span>
+                        )}
+                      </>);
+                    })()}
                   </td>
                 </tr>,
                 ...items.map((a) => {

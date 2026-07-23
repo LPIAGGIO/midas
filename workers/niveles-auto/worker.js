@@ -44,6 +44,39 @@ const ARG_ADR = {
   TECO2: { adr: "TEO", r: 5 },
 };
 
+// Contexto fundamental del ticker (Yahoo quoteSummary, mismo baile cookie+crumb
+// del worker fundamentals-snapshot): próxima fecha de earnings + target promedio
+// de analistas + recomendación. Se guarda en ticker_context para la pantalla.
+let _yAuth = null;
+async function yahooAuth() {
+  if (_yAuth) return _yAuth;
+  const r = await fetch("https://fc.yahoo.com", { headers: UA });
+  const sc = typeof r.headers.getSetCookie === "function" ? r.headers.getSetCookie() : (r.headers.get("set-cookie") ? [r.headers.get("set-cookie")] : []);
+  const cookie = sc.map((c) => c.split(";")[0]).join("; ");
+  const cr = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", { headers: { ...UA, Cookie: cookie } });
+  const crumb = (await cr.text()).trim();
+  if (!crumb || crumb.startsWith("{")) throw new Error("sin crumb Yahoo");
+  _yAuth = { cookie, crumb };
+  return _yAuth;
+}
+const yraw = (x) => (x && typeof x === "object" && "raw" in x ? x.raw : (typeof x === "number" ? x : null));
+async function tickerContext(symUsa, tk) {
+  try {
+    const a = await yahooAuth();
+    const u = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symUsa)}?modules=calendarEvents,financialData&crumb=${encodeURIComponent(a.crumb)}`;
+    const r = await fetch(u, { headers: { ...UA, Cookie: a.cookie } });
+    const j = await r.json();
+    const res = j?.quoteSummary?.result?.[0];
+    if (!res) return;
+    const eDates = res.calendarEvents?.earnings?.earningsDate || [];
+    const eRaw = yraw(eDates[0]);
+    const earnings = eRaw ? new Date(eRaw * 1000).toISOString().slice(0, 10) : null;
+    const target = yraw(res.financialData?.targetMeanPrice);
+    const reco = res.financialData?.recommendationKey || null;
+    await supabase.from("ticker_context").upsert({ ticker: tk, earnings_date: earnings, target_mean: target, recommendation: reco, updated_at: new Date().toISOString() }, { onConflict: "ticker" });
+  } catch (e) { log(`[contexto ${tk}] ${e.message}`); }
+}
+
 async function yahooCandles(sym, interval, range) {
   const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${interval}&range=${range}`, { headers: UA });
   const j = await r.json();
@@ -124,7 +157,13 @@ async function main(scanPortfolio = true) {
       }
       const d = pivots(daily, LB);
       const h = hourly ? pivots(hourly, LB) : { res: null, sop: null };
+      // Nivel ESTRUCTURAL: pivote grande (confirmación 20) sobre el año entero —
+      // los "850 de MU": la zona de batalla que el pivote corto no ve.
+      const big = pivots(daily, 20);
       const spot = modo === "usa" ? (usdPx[tk] ?? daily[daily.length - 1].c) : daily[daily.length - 1].c;
+
+      // Contexto fundamental (earnings + target analistas) en paralelo, no bloquea.
+      tickerContext(symUsa, tk).catch(() => {});
 
       // Nivel de compra = soporte más CERCANO por debajo del precio (el horario
       // afina si está entre el diario y el precio). Venta = resistencia más
@@ -162,6 +201,13 @@ async function main(scanPortfolio = true) {
       const rows = [];
       if (buyLvl) rows.push(mk(buyLvl, "down", `AUTO · soporte ${unit}${fmt(buyLvl)} · pivote ${buyLvl === d.sop ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
       if (sellLvl) rows.push(mk(sellLvl, "up", `AUTO · resistencia ${unit}${fmt(sellLvl)} · pivote ${sellLvl === d.res ? "diario" : "horario"}${modo === "adr" ? " · ADR " + adrInfo.adr : ""}`));
+      // Estructurales: solo si están al menos 3% más allá del nivel corto (si no, duplican).
+      if (big.sop != null && big.sop < spot && (!buyLvl || big.sop < buyLvl * 0.97)) {
+        rows.push(mk(big.sop, "down", `AUTO · soporte ESTRUCTURAL ${unit}${fmt(big.sop)} · pivote mayor del año`));
+      }
+      if (big.res != null && big.res > spot && (!sellLvl || big.res > sellLvl * 1.03)) {
+        rows.push(mk(big.res, "up", `AUTO · resistencia ESTRUCTURAL ${unit}${fmt(big.res)} · pivote mayor del año`));
+      }
       if (rows.length) { const { error } = await supabase.from("price_alerts").insert(rows); if (error) throw new Error(error.message); }
 
       await supabase.from("tv_analysis_queue").update({
