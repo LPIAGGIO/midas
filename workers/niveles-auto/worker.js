@@ -569,13 +569,47 @@ async function confirmTouches() {
   }
 }
 
+/* ───────── Modo día volátil: rearme automático del tablero ─────────
+ * Cada 15 min en horario de mercado USA, re-encola los tickers que YA están
+ * en el tablero (con alertas AUTO vivas). NO agrega papeles nuevos — la regla
+ * de LP sigue: los papeles entran a mano; esto solo refresca los que él cargó.
+ * Las disparadas no se tocan (conservan su veredicto de cierre hasta que él
+ * las borre); se recalculan las vigentes con el precio del momento. */
+function inUsMarketWindow() {
+  const ar = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const dow = ar.getDay(), mins = ar.getHours() * 60 + ar.getMinutes();
+  return dow >= 1 && dow <= 5 && mins >= 10 * 60 + 30 && mins <= 17 * 60;
+}
+async function autoRearm() {
+  if (!inUsMarketWindow()) return;
+  const { data: act } = await supabase.from("price_alerts").select("user_id,ticker").eq("origen", "tv").eq("canal", "screen").like("nota", "AUTO%");
+  if (!act?.length) return;
+  const { data: pend } = await supabase.from("tv_analysis_queue").select("user_id,ticker").eq("status", "pending");
+  const pendSet = new Set((pend || []).map((p) => p.user_id + "|" + p.ticker.toUpperCase()));
+  const seen = new Set(), rows = [];
+  for (const a of act) {
+    const key = a.user_id + "|" + a.ticker.toUpperCase();
+    if (seen.has(key) || pendSet.has(key)) continue;
+    seen.add(key);
+    rows.push({ user_id: a.user_id, ticker: a.ticker, source: "auto-rearm", status: "pending" });
+  }
+  if (rows.length) {
+    await supabase.from("tv_analysis_queue").insert(rows);
+    log(`auto-rearm: ${rows.map((r) => r.ticker).join(", ")}`);
+  }
+}
+
 /* ───────── Loop persistente ───────── */
 async function loop() {
-  log("niveles-auto v6 arrancando (cola 60s; confirmaciones 10 min; tracks 60 min)");
-  let lastTracks = 0, lastConfirm = 0;
+  log("niveles-auto v6 arrancando (cola 60s; rearme 15 min en mercado; confirmaciones 10 min; tracks 60 min)");
+  let lastTracks = 0, lastConfirm = 0, lastRearm = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
+      if (Date.now() - lastRearm > 15 * 60 * 1000) {
+        await autoRearm().catch((e) => log("[rearm]", e.message));
+        lastRearm = Date.now();
+      }
       await main();
       if (Date.now() - lastConfirm > 10 * 60 * 1000) {
         await confirmTouches().catch((e) => log("[confirm]", e.message));
