@@ -24548,11 +24548,27 @@ function ResearchDelDiaModule() {
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     let c = false;
-    const load = () => {
-      supabase.from("ticker_brief").select("*").order("updated_at", { ascending: false })
-        .then(({ data }) => { if (!c) { setBriefs(data || []); setLoading(false); } });
-      supabase.from("ticker_context").select("ticker,earnings_date,target_mean,news")
-        .then(({ data }) => { if (!c && data) setCtx(Object.fromEntries(data.map((r) => [r.ticker, r]))); });
+    const load = async () => {
+      // La tabla de briefs es GLOBAL (el research se hace una vez por ticker),
+      // pero cada usuario ve solo SU universo: sus alertas + sus posiciones
+      // abiertas (RLS ya filtra por dueño en las dos consultas).
+      const [{ data: br }, { data: al }, { data: po }, { data: cxd }] = await Promise.all([
+        supabase.from("ticker_brief").select("*").order("updated_at", { ascending: false }),
+        supabase.from("price_alerts").select("ticker").eq("canal", "screen"),
+        supabase.from("positions").select("ticker,operation_type,quantity,instrument_type,broker").in("instrument_type", ["cedear", "stock"]).neq("broker", "iol"),
+        supabase.from("ticker_context").select("ticker,earnings_date,target_mean,news"),
+      ]);
+      if (c) return;
+      const mine = new Set((al || []).map((a) => a.ticker.toUpperCase()));
+      const net = {};
+      for (const p of po || []) {
+        const t = (p.ticker || "").toUpperCase();
+        net[t] = (net[t] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+      }
+      for (const [t, q] of Object.entries(net)) if (q > 1e-6) mine.add(t);
+      setBriefs((br || []).filter((b) => mine.has(b.ticker.toUpperCase())));
+      if (cxd) setCtx(Object.fromEntries(cxd.map((r) => [r.ticker, r])));
+      setLoading(false);
     };
     load();
     const iv = setInterval(load, 5 * 60 * 1000);
