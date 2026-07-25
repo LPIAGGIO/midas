@@ -24744,10 +24744,17 @@ function TvAlertasModule() {
   // Contexto fundamental por ticker (lo escribe el worker niveles-auto):
   // próximo earnings + target promedio de analistas.
   const [tkCtx, setTkCtx] = useState({});
+  // Del research matinal solo el veredicto (rumbo + acción) como chips en el
+  // header del grupo — el brief completo vive en Research del día.
+  const [tkBrief, setTkBrief] = useState({});
   useEffect(() => {
     let c = false;
-    const load = () => supabase.from("ticker_context").select("ticker,earnings_date,target_mean,recommendation")
-      .then(({ data }) => { if (!c && data) setTkCtx(Object.fromEntries(data.map((r) => [r.ticker, r]))); });
+    const load = () => {
+      supabase.from("ticker_context").select("ticker,earnings_date,target_mean,recommendation")
+        .then(({ data }) => { if (!c && data) setTkCtx(Object.fromEntries(data.map((r) => [r.ticker, r]))); });
+      supabase.from("ticker_brief").select("ticker,rumbo,accion,updated_at")
+        .then(({ data }) => { if (!c && data) setTkBrief(Object.fromEntries(data.map((r) => [r.ticker, r]))); });
+    };
     load();
     const iv = setInterval(load, 5 * 60 * 1000);
     return () => { c = true; clearInterval(iv); };
@@ -24936,6 +24943,21 @@ function TvAlertasModule() {
                         {cx.target_mean != null && (
                           <span style={{ color: C.dim, fontWeight: 400 }}> · target analistas USD {Number(cx.target_mean).toLocaleString("es-AR", { maximumFractionDigits: 0 })}{upside != null ? ` (${upside >= 0 ? "+" : ""}${upside.toFixed(0)}%)` : ""}</span>
                         )}
+                      </>);
+                    })()}
+                    {(() => {
+                      // Veredicto del research matinal: rumbo + acción a simple vista.
+                      const b = tkBrief[tik];
+                      if (!b || (!b.rumbo && !b.accion)) return null;
+                      const stale = Date.now() - new Date(b.updated_at).getTime() > 30 * 3600 * 1000;
+                      const rumboCol = stale ? C.dim : b.rumbo === "alcista" ? C.green : b.rumbo === "bajista" ? C.red : "#f59e0b";
+                      const accCol = stale ? C.dim : /ENTRAR/i.test(b.accion || "") ? C.green : /(SALIR|DEFENDER)/i.test(b.accion || "") ? C.red : "#f59e0b";
+                      const chip = (txt, col) => (
+                        <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, letterSpacing: "0.07em", padding: "1px 6px", borderRadius: 3, verticalAlign: "middle", color: col, border: `1px solid ${col}55`, textTransform: "uppercase" }}>{txt}</span>
+                      );
+                      return (<>
+                        {b.rumbo && chip(b.rumbo, rumboCol)}
+                        {b.accion && chip(b.accion, accCol)}
                       </>);
                     })()}
                   </td>
