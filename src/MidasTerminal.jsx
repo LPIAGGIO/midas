@@ -78,6 +78,7 @@ import {
   Eye,
   EyeOff,
   Send,
+  Newspaper,
 } from "lucide-react";
 import {
   ScatterChart,
@@ -168,6 +169,7 @@ const NAV = [
     type: "single",
     requiresAuth: true,  // Si no hay sesión, muestra wall de login
   },
+  { id: "research-dia", label: "Research del día", icon: Newspaper, type: "single", requiresAuth: true },
   { id: "alertas-tv", label: "Alertas TV · Bot", icon: LineChart, type: "single", requiresAuth: true },
   { id: "importaciones", label: "Importaciones", icon: Upload, type: "single", requiresAuth: true },
   {
@@ -1554,6 +1556,8 @@ function MidasApp({ allowedModules = null }) {
               />
             ) : active === "rem" ? (
               <RemTcModule key={active} />
+            ) : active === "research-dia" ? (
+              <ResearchDelDiaModule key={active} />
             ) : active === "alertas-tv" ? (
               <TvAlertasModule key={active} />
             ) : active === "caja-tiempo" ? (
@@ -24533,6 +24537,101 @@ function AlertAdd({ onAdd }) {
 // nivel es. Disparan EN PANTALLA (motor global + sonido), NO por Telegram
 // (canal='screen'; el bot queda para P&L/portfolio/dólar).
 // ═══════════════════════════════════════════════════════════════════════
+// Research del día: el brief matinal por papel (tarea programada de Claude,
+// lun-vie 9:35, tabla ticker_brief) en formato tablero de lectura — qué pasó,
+// catalizadores, rumbo y acción, con titulares y fuentes. Universo: papeles
+// con alertas + posiciones en cartera (lo arma la tarea, acá solo se lee).
+// ═══════════════════════════════════════════════════════════════════════
+function ResearchDelDiaModule() {
+  const [briefs, setBriefs] = useState([]);
+  const [ctx, setCtx] = useState({});
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let c = false;
+    const load = () => {
+      supabase.from("ticker_brief").select("*").order("updated_at", { ascending: false })
+        .then(({ data }) => { if (!c) { setBriefs(data || []); setLoading(false); } });
+      supabase.from("ticker_context").select("ticker,earnings_date,target_mean,news")
+        .then(({ data }) => { if (!c && data) setCtx(Object.fromEntries(data.map((r) => [r.ticker, r]))); });
+    };
+    load();
+    const iv = setInterval(load, 5 * 60 * 1000);
+    return () => { c = true; clearInterval(iv); };
+  }, []);
+
+  const rumboCol = (r) => (r === "alcista" ? C.green : r === "bajista" ? C.red : "#f59e0b");
+  const accCol = (a) => (/ENTRAR/i.test(a || "") ? C.green : /(SALIR|DEFENDER)/i.test(a || "") ? C.red : "#f59e0b");
+  const chip = (txt, col) => (
+    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", padding: "2px 8px", borderRadius: 3, color: col, border: `1px solid ${col}55`, textTransform: "uppercase", whiteSpace: "nowrap" }}>{txt}</span>
+  );
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Research del día</h1>
+      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 20px 0", maxWidth: 780 }}>
+        Análisis pre-apertura de tus papeles (alertas + cartera): noticias, catalizadores y rumbo, cruzados con los niveles del bot.
+        Se regenera solo los días hábiles a la mañana; si agregás un papel al tablero, entra en el research del día siguiente.
+      </p>
+      {loading ? (
+        <div style={{ color: C.dim, fontSize: 13 }}>Cargando…</div>
+      ) : !briefs.length ? (
+        <div style={{ color: C.dim, fontSize: 13, border: `1px dashed ${C.border}`, padding: 24, textAlign: "center" }}>
+          Todavía no hay research. Cargá papeles en Alertas TV · Bot y el análisis matinal los toma solo.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(480px, 1fr))", gap: 14 }}>
+          {briefs.map((b) => {
+            const dt = new Date(b.updated_at);
+            const stale = Date.now() - dt.getTime() > 30 * 3600 * 1000;
+            const cx = ctx[b.ticker];
+            const fuentes = Array.isArray(b.fuentes) ? b.fuentes : [];
+            return (
+              <div key={b.ticker} style={{ border: `1px solid ${C.border}`, background: C.deep, padding: "14px 16px" }}>
+                <div className="flex items-center" style={{ gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono', monospace" }}>{b.ticker}</span>
+                  {b.rumbo && chip(b.rumbo, rumboCol(b.rumbo))}
+                  {b.accion && chip(b.accion, accCol(b.accion))}
+                  <span style={{ marginLeft: "auto", fontSize: 10, color: stale ? "#f59e0b" : C.dim }}>
+                    {dt.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} {String(dt.getHours()).padStart(2, "0")}:{String(dt.getMinutes()).padStart(2, "0")}{stale ? " · viejo" : ""}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12.5, color: C.muted, lineHeight: 1.55 }}>{b.brief}</div>
+                {cx && (cx.earnings_date || cx.target_mean != null) && (
+                  <div style={{ fontSize: 11, color: C.dim, marginTop: 8 }}>
+                    {cx.earnings_date && <span>earnings {cx.earnings_date.slice(8, 10)}/{cx.earnings_date.slice(5, 7)}</span>}
+                    {cx.target_mean != null && <span>{cx.earnings_date ? " · " : ""}target analistas USD {Number(cx.target_mean).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>}
+                  </div>
+                )}
+                {cx?.news?.length > 0 && (
+                  <div style={{ marginTop: 10, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+                    {cx.news.slice(0, 4).map((n, i) => {
+                      const ago = n.pub ? Math.round((Date.now() - new Date(n.pub).getTime()) / 3600000) : null;
+                      return (
+                        <div key={i} style={{ fontSize: 11, color: C.muted, marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <a href={n.link} target="_blank" rel="noreferrer" style={{ color: C.muted, textDecoration: "none" }} title={n.title}>{n.title}</a>
+                          {ago != null && <span style={{ color: C.dim }}> · {ago < 24 ? `${ago}h` : `${Math.round(ago / 24)}d`}{n.src ? ` · ${n.src}` : ""}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {fuentes.length > 0 && (
+                  <div style={{ fontSize: 10, color: C.dim, marginTop: 8 }}>
+                    fuentes: {fuentes.map((u, i) => {
+                      let host = u; try { host = new URL(u).hostname.replace("www.", ""); } catch { /* raw */ }
+                      return (<span key={i}>{i > 0 && " · "}<a href={u} target="_blank" rel="noreferrer" style={{ color: C.dim }}>{host}</a></span>);
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TvAlertasModule() {
   const { user } = useAuth();
   const { fx } = useDashboardFx();
