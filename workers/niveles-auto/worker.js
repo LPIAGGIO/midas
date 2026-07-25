@@ -78,7 +78,16 @@ async function tickerContext(symUsa, tk) {
     const earnings = eRaw ? new Date(eRaw * 1000).toISOString().slice(0, 10) : null;
     const target = yraw(res.financialData?.targetMeanPrice);
     const reco = res.financialData?.recommendationKey || null;
-    await supabase.from("ticker_context").upsert({ ticker: tk, earnings_date: earnings, target_mean: target, recommendation: reco, updated_at: new Date().toISOString() }, { onConflict: "ticker" });
+    // Titulares recientes del ticker (Yahoo search): la pantalla los muestra
+    // en el grupo — información fresca sin esperar el brief matinal.
+    let news = null;
+    try {
+      const nr = await fetch(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symUsa)}&newsCount=5&quotesCount=0`, { headers: UA });
+      const nj = await nr.json();
+      news = (nj?.news || []).slice(0, 5).map((n) => ({ title: n.title, link: n.link, pub: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null, src: n.publisher || null }));
+      if (!news.length) news = null;
+    } catch { /* sin titulares no es error */ }
+    await supabase.from("ticker_context").upsert({ ticker: tk, earnings_date: earnings, target_mean: target, recommendation: reco, news, updated_at: new Date().toISOString() }, { onConflict: "ticker" });
     return { earnings, target };
   } catch (e) { log(`[contexto ${tk}] ${e.message}`); return null; }
 }

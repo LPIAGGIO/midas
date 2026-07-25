@@ -24645,10 +24645,16 @@ function TvAlertasModule() {
   // Contexto fundamental por ticker (lo escribe el worker niveles-auto):
   // próximo earnings + target promedio de analistas.
   const [tkCtx, setTkCtx] = useState({});
+  // Brief matinal por ticker (research de noticias pre-apertura, tabla ticker_brief).
+  const [tkBrief, setTkBrief] = useState({});
   useEffect(() => {
     let c = false;
-    const load = () => supabase.from("ticker_context").select("ticker,earnings_date,target_mean,recommendation")
-      .then(({ data }) => { if (!c && data) setTkCtx(Object.fromEntries(data.map((r) => [r.ticker, r]))); });
+    const load = () => {
+      supabase.from("ticker_context").select("ticker,earnings_date,target_mean,recommendation,news")
+        .then(({ data }) => { if (!c && data) setTkCtx(Object.fromEntries(data.map((r) => [r.ticker, r]))); });
+      supabase.from("ticker_brief").select("ticker,brief,rumbo,accion,updated_at")
+        .then(({ data }) => { if (!c && data) setTkBrief(Object.fromEntries(data.map((r) => [r.ticker, r]))); });
+    };
     load();
     const iv = setInterval(load, 5 * 60 * 1000);
     return () => { c = true; clearInterval(iv); };
@@ -24841,6 +24847,43 @@ function TvAlertasModule() {
                     })()}
                   </td>
                 </tr>,
+                // Brief matinal (research pre-apertura de la tarea programada)
+                ...(tkBrief[tik] ? [(() => {
+                  const b = tkBrief[tik];
+                  const dt = new Date(b.updated_at);
+                  const stale = Date.now() - dt.getTime() > 30 * 3600 * 1000;
+                  const accCol = /ENTRAR/i.test(b.accion || "") ? C.green : /(SALIR|DEFENDER)/i.test(b.accion || "") ? C.red : "#f59e0b";
+                  return (
+                    <tr key={tik + "_brief"}>
+                      <td colSpan={9} style={{ ...tdd, fontSize: 11, color: C.muted, fontFamily: "inherit", whiteSpace: "normal", lineHeight: 1.45, padding: "6px 10px 7px" }}>
+                        <span style={{ color: stale ? C.dim : C.accent, fontWeight: 700, fontSize: 9, letterSpacing: "0.08em" }}>
+                          BRIEF {String(dt.getHours()).padStart(2, "0")}:{String(dt.getMinutes()).padStart(2, "0")}{stale ? " (viejo)" : ""}
+                        </span>
+                        {b.accion && (
+                          <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, letterSpacing: "0.06em", padding: "1px 6px", borderRadius: 3, color: accCol, border: `1px solid ${accCol}55` }}>{b.accion}</span>
+                        )}
+                        <span style={{ marginLeft: 8 }}>{b.brief}</span>
+                      </td>
+                    </tr>
+                  );
+                })()] : []),
+                // Titulares recientes (los trae el worker en cada rearme)
+                ...(tkCtx[tik]?.news?.length ? [(
+                  <tr key={tik + "_news"}>
+                    <td colSpan={9} style={{ ...tdd, fontSize: 10.5, color: C.dim, fontFamily: "inherit", padding: "2px 10px 7px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 640 }}>
+                      {tkCtx[tik].news.slice(0, 3).map((n, i) => {
+                        const ago = n.pub ? Math.round((Date.now() - new Date(n.pub).getTime()) / 3600000) : null;
+                        return (
+                          <span key={i}>
+                            {i > 0 && "  ·  "}
+                            <a href={n.link} target="_blank" rel="noreferrer" title={n.title} style={{ color: C.muted, textDecoration: "none" }}>«{n.title}»</a>
+                            {ago != null && <span> ({ago < 24 ? `${ago}h` : `${Math.round(ago / 24)}d`})</span>}
+                          </span>
+                        );
+                      })}
+                    </td>
+                  </tr>
+                )] : []),
                 ...items.map((a) => {
                   const targetArs = Number(a.price);
                   const curArs = arsOf(a.ticker);
