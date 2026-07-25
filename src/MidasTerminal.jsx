@@ -24904,7 +24904,7 @@ function TvAlertasModule() {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(rows.reduce((m, a) => { (m[a.ticker] = m[a.ticker] || []).push(a); return m; }, {})).flatMap(([tik, items]) => {
+              {Object.entries(rows.reduce((m, a) => { (m[a.ticker] = m[a.ticker] || []).push(a); return m; }, {})).flatMap(([tik, items], gi) => {
                 // Potencial del trade: % entre el nivel de compra (soporte) y el
                 // de venta (resistencia) del par vigente (no disparadas).
                 // Par MÁS CERCANO al precio: la compra más ALTA y la venta más
@@ -24922,6 +24922,9 @@ function TvAlertasModule() {
                 const sV = sell ? val(sell) : null;
                 const potencial = (bV && sV && bV > 0 && sV > bV && ((buy.usd_ref && sell.usd_ref) || (!buy.usd_ref && !sell.usd_ref))) ? ((sV / bV) - 1) * 100 : null;
                 return [
+                // Separador entre papeles: aire para que cada grupo respire
+                // como card, sin tocar el diseño de la tabla.
+                ...(gi > 0 ? [<tr key={tik + "_gap"}><td colSpan={9} style={{ height: 16, border: "none", background: "transparent", padding: 0 }} /></tr>] : []),
                 <tr key={tik + "_hdr"} style={{ background: C.deep }}>
                   <td colSpan={9} style={{ ...tdd, fontFamily: "inherit", fontWeight: 700, color: "#f59e0b" }}>
                     {tik}
