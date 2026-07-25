@@ -24547,6 +24547,20 @@ function ResearchDelDiaModule() {
   const [briefs, setBriefs] = useState([]);
   const [ctx, setCtx] = useState({});
   const [loading, setLoading] = useState(true);
+  // Precio USD en vivo (feed data912, 60s) — referencia "actual:" junto a la acción.
+  const [usaPx, setUsaPx] = useState({});
+  useEffect(() => {
+    let c = false;
+    const load = () => fetch("https://data912.com/live/usa_stocks").then((r) => r.json()).then((d) => {
+      if (c || !Array.isArray(d)) return;
+      const m = {};
+      for (const it of d) if (it?.symbol && Number(it.c) > 0) m[it.symbol.toUpperCase()] = Number(it.c);
+      setUsaPx(m);
+    }).catch(() => {});
+    load();
+    const iv = setInterval(load, 60 * 1000);
+    return () => { c = true; clearInterval(iv); };
+  }, []);
   useEffect(() => {
     if (!user) return;
     let c = false;
@@ -24611,6 +24625,11 @@ function ResearchDelDiaModule() {
                   <span style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono', monospace" }}>{b.ticker}</span>
                   {b.rumbo && chip(b.rumbo, rumboCol(b.rumbo))}
                   {b.accion && chip(b.accion, accCol(b.accion))}
+                  {usaPx[b.ticker] != null && (
+                    <span style={{ fontSize: 11, color: C.dim }}>
+                      actual: <b style={{ color: C.text, fontWeight: 600 }}>USD {usaPx[b.ticker].toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+                    </span>
+                  )}
                   <span style={{ marginLeft: "auto", fontSize: 10, color: stale ? "#f59e0b" : C.dim }}>
                     {dt.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} {String(dt.getHours()).padStart(2, "0")}:{String(dt.getMinutes()).padStart(2, "0")}{stale ? " · viejo" : ""}
                   </span>
