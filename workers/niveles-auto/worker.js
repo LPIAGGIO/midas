@@ -510,7 +510,12 @@ async function main() {
       if (rows.length) {
         const { error } = await supabase.from("price_alerts").insert(rows);
         if (error) throw new Error(error.message);
-        await supabase.from("nivel_track").insert(tracks).then(({ error: e2 }) => { if (e2) log(`[track ${tk}] ${e2.message}`); });
+        // Dedup del feedback loop: el rearme de 15 min re-emite los mismos
+        // niveles; solo se registra un nivel si no hay ya un track ABIERTO
+        // del mismo tipo a menos de 0,2% (una fila por nivel real emitido).
+        const { data: openTr } = await supabase.from("nivel_track").select("tipo,level").eq("user_id", job.user_id).eq("ticker", tk).eq("done", false);
+        const fresh = tracks.filter((t) => !(openTr || []).some((o) => o.tipo === t.tipo && Math.abs(Number(o.level) - t.level) / t.level < 0.002));
+        if (fresh.length) await supabase.from("nivel_track").insert(fresh).then(({ error: e2 }) => { if (e2) log(`[track ${tk}] ${e2.message}`); });
       }
 
       await supabase.from("tv_analysis_queue").update({
