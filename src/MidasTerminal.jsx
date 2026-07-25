@@ -24543,19 +24543,23 @@ function AlertAdd({ onAdd }) {
 // con alertas + posiciones en cartera (lo arma la tarea, acá solo se lee).
 // ═══════════════════════════════════════════════════════════════════════
 function ResearchDelDiaModule() {
+  const { user } = useAuth();
   const [briefs, setBriefs] = useState([]);
   const [ctx, setCtx] = useState({});
   const [loading, setLoading] = useState(true);
   useEffect(() => {
+    if (!user) return;
     let c = false;
     const load = async () => {
       // La tabla de briefs es GLOBAL (el research se hace una vez por ticker),
       // pero cada usuario ve solo SU universo: sus alertas + sus posiciones
-      // abiertas (RLS ya filtra por dueño en las dos consultas).
+      // abiertas. El user_id va EXPLÍCITO (no alcanza con RLS: el admin ve
+      // todas las filas por la policy admin_all y se le colaban los papeles
+      // de otros usuarios).
       const [{ data: br }, { data: al }, { data: po }, { data: cxd }] = await Promise.all([
         supabase.from("ticker_brief").select("*").order("updated_at", { ascending: false }),
-        supabase.from("price_alerts").select("ticker").eq("canal", "screen"),
-        supabase.from("positions").select("ticker,operation_type,quantity,instrument_type,broker").in("instrument_type", ["cedear", "stock"]).neq("broker", "iol"),
+        supabase.from("price_alerts").select("ticker").eq("canal", "screen").eq("user_id", user.id),
+        supabase.from("positions").select("ticker,operation_type,quantity,instrument_type,broker").in("instrument_type", ["cedear", "stock"]).neq("broker", "iol").eq("user_id", user.id),
         supabase.from("ticker_context").select("ticker,earnings_date,target_mean,news"),
       ]);
       if (c) return;
@@ -24573,7 +24577,7 @@ function ResearchDelDiaModule() {
     load();
     const iv = setInterval(load, 5 * 60 * 1000);
     return () => { c = true; clearInterval(iv); };
-  }, []);
+  }, [user]);
 
   const rumboCol = (r) => (r === "alcista" ? C.green : r === "bajista" ? C.red : "#f59e0b");
   const accCol = (a) => (/ENTRAR/i.test(a || "") ? C.green : /(SALIR|DEFENDER)/i.test(a || "") ? C.red : "#f59e0b");
