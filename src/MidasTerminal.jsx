@@ -24544,6 +24544,7 @@ function AlertAdd({ onAdd }) {
 // ═══════════════════════════════════════════════════════════════════════
 function ResearchDelDiaModule() {
   const { user } = useAuth();
+  const { prices: livePx } = useStockPrices(); // precio local ARS (acciones/CEDEARs)
   const [briefs, setBriefs] = useState([]);
   const [ctx, setCtx] = useState({});
   const [loading, setLoading] = useState(true);
@@ -24625,11 +24626,17 @@ function ResearchDelDiaModule() {
                   <span style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono', monospace" }}>{b.ticker}</span>
                   {b.rumbo && chip(b.rumbo, rumboCol(b.rumbo))}
                   {b.accion && chip(b.accion, accCol(b.accion))}
-                  {usaPx[b.ticker] != null && (
-                    <span style={{ fontSize: 11, color: C.dim }}>
-                      actual: <b style={{ color: C.text, fontWeight: 600 }}>USD {usaPx[b.ticker].toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
-                    </span>
-                  )}
+                  {(() => {
+                    const uPx = usaPx[b.ticker];
+                    const aPx = livePx?.[b.ticker]?.price;
+                    if (uPx == null && aPx == null) return null;
+                    return (
+                      <span style={{ fontSize: 11, color: C.dim }}>
+                        actual:{uPx != null && <b style={{ color: C.text, fontWeight: 600 }}> USD {uPx.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>}
+                        {aPx != null && <b style={{ color: C.text, fontWeight: 600 }}>{uPx != null ? " · " : " "}$ {Math.round(aPx).toLocaleString("es-AR")}</b>}
+                      </span>
+                    );
+                  })()}
                   <span style={{ marginLeft: "auto", fontSize: 10, color: stale ? "#f59e0b" : C.dim }}>
                     {dt.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} {String(dt.getHours()).padStart(2, "0")}:{String(dt.getMinutes()).padStart(2, "0")}{stale ? " · viejo" : ""}
                   </span>
