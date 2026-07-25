@@ -68,7 +68,7 @@ const yraw = (x) => (x && typeof x === "object" && "raw" in x ? x.raw : (typeof 
 async function tickerContext(symUsa, tk) {
   try {
     const a = await yahooAuth();
-    const u = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symUsa)}?modules=calendarEvents,financialData&crumb=${encodeURIComponent(a.crumb)}`;
+    const u = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symUsa)}?modules=calendarEvents,financialData,defaultKeyStatistics,summaryDetail&crumb=${encodeURIComponent(a.crumb)}`;
     const r = await fetch(u, { headers: { ...UA, Cookie: a.cookie } });
     const j = await r.json();
     const res = j?.quoteSummary?.result?.[0];
@@ -78,6 +78,18 @@ async function tickerContext(symUsa, tk) {
     const earnings = eRaw ? new Date(eRaw * 1000).toISOString().slice(0, 10) : null;
     const target = yraw(res.financialData?.targetMeanPrice);
     const reco = res.financialData?.recommendationKey || null;
+    // Snapshot fundamental compacto para la card de Research del día.
+    const ks = res.defaultKeyStatistics || {}, fd = res.financialData || {}, sd = res.summaryDetail || {};
+    const fund = {
+      peFwd: yraw(ks.forwardPE) ?? yraw(sd.forwardPE),
+      revG: yraw(fd.revenueGrowth),          // crecimiento ingresos i.a. (fracción)
+      margin: yraw(fd.profitMargins),        // margen neto (fracción)
+      shortF: yraw(ks.shortPercentOfFloat),  // short float (fracción)
+      beta: yraw(sd.beta),
+      divY: yraw(sd.dividendYield),          // fracción
+      cap: yraw(sd.marketCap) ?? yraw(ks.enterpriseValue),
+    };
+    const hasFund = Object.values(fund).some((v) => v != null);
     // Titulares recientes del ticker (Yahoo search): la pantalla los muestra
     // en el grupo — información fresca sin esperar el brief matinal.
     let news = null;
@@ -87,7 +99,7 @@ async function tickerContext(symUsa, tk) {
       news = (nj?.news || []).slice(0, 5).map((n) => ({ title: n.title, link: n.link, pub: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null, src: n.publisher || null }));
       if (!news.length) news = null;
     } catch { /* sin titulares no es error */ }
-    await supabase.from("ticker_context").upsert({ ticker: tk, earnings_date: earnings, target_mean: target, recommendation: reco, news, updated_at: new Date().toISOString() }, { onConflict: "ticker" });
+    await supabase.from("ticker_context").upsert({ ticker: tk, earnings_date: earnings, target_mean: target, recommendation: reco, news, fund: hasFund ? fund : null, updated_at: new Date().toISOString() }, { onConflict: "ticker" });
     return { earnings, target };
   } catch (e) { log(`[contexto ${tk}] ${e.message}`); return null; }
 }

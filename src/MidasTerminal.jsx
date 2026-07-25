@@ -24560,7 +24560,7 @@ function ResearchDelDiaModule() {
         supabase.from("ticker_brief").select("*").order("updated_at", { ascending: false }),
         supabase.from("price_alerts").select("ticker").eq("canal", "screen").eq("user_id", user.id),
         supabase.from("positions").select("ticker,operation_type,quantity,instrument_type,broker").in("instrument_type", ["cedear", "stock"]).neq("broker", "iol").eq("user_id", user.id),
-        supabase.from("ticker_context").select("ticker,earnings_date,target_mean,news"),
+        supabase.from("ticker_context").select("ticker,earnings_date,target_mean,news,fund"),
       ]);
       if (c) return;
       const mine = new Set((al || []).map((a) => a.ticker.toUpperCase()));
@@ -24622,6 +24622,28 @@ function ResearchDelDiaModule() {
                     {cx.target_mean != null && <span>{cx.earnings_date ? " · " : ""}target analistas USD {Number(cx.target_mean).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>}
                   </div>
                 )}
+                {cx?.fund && (() => {
+                  // Snapshot fundamental de un vistazo (Yahoo, lo trae el worker).
+                  const f = cx.fund;
+                  const pct = (v, dec = 0) => (v != null ? `${v >= 0 ? "+" : ""}${(v * 100).toLocaleString("es-AR", { minimumFractionDigits: dec, maximumFractionDigits: dec })}%` : null);
+                  const num = (v, dec = 1) => (v != null ? Number(v).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: dec }) : null);
+                  const capTxt = f.cap != null ? (f.cap >= 1e12 ? `US$${(f.cap / 1e12).toLocaleString("es-AR", { maximumFractionDigits: 2 })} B` : `US$${Math.round(f.cap / 1e9).toLocaleString("es-AR")} mil M`) : null;
+                  const parts = [
+                    f.peFwd != null ? `P/E fwd ${num(f.peFwd)}` : null,
+                    f.revG != null ? `ingresos ${pct(f.revG)} i.a.` : null,
+                    f.margin != null ? `margen ${pct(f.margin)}` : null,
+                    f.shortF != null ? `short float ${pct(f.shortF, 1)}`.replace("+", "") : null,
+                    f.beta != null ? `beta ${num(f.beta)}` : null,
+                    f.divY != null && f.divY > 0 ? `div ${pct(f.divY, 1)}`.replace("+", "") : null,
+                    capTxt ? `cap ${capTxt}` : null,
+                  ].filter(Boolean);
+                  if (!parts.length) return null;
+                  return (
+                    <div style={{ fontSize: 10.5, color: C.dim, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.01em" }}>
+                      {parts.join("  ·  ")}
+                    </div>
+                  );
+                })()}
                 {cx?.news?.length > 0 && (
                   <div style={{ marginTop: 10, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
                     {cx.news.slice(0, 4).map((n, i) => {
