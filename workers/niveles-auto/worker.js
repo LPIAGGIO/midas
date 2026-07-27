@@ -391,11 +391,13 @@ async function main() {
         const deeper = buysBelow.filter((z) => z.hasD && z.hi < buyZone.lo * 0.985);
         if (deeper.length) swingZone = deeper[deeper.length - 1];
       }
-      // Stop: piso de la siguiente zona debajo de la entrada, o 1×ATR.
+      // Stop: 0,7% DEBAJO del piso de la siguiente zona (el stop va bajo el
+      // soporte, no en el soporte — clavado exacto te lo barre una mecha, y
+      // además coincidía con la entrada swing de esa misma zona), o 1×ATR.
       let stopLvl = null, stopWhy = "";
       if (buyZone) {
         const below = buysBelow.filter((z) => z.hi < buyZone.lo * 0.995);
-        if (below.length) { const z = below[below.length - 1]; stopLvl = z.lo; stopWhy = `piso de zona ${z.touches} toque${z.touches > 1 ? "s" : ""}`; }
+        if (below.length) { const z = below[below.length - 1]; stopLvl = z.lo * 0.993; stopWhy = `0,7% bajo la zona de ${z.touches} toque${z.touches > 1 ? "s" : ""}`; }
         else { stopLvl = buyZone.hi - atr; stopWhy = "1×ATR diario"; }
       }
 
