@@ -28638,12 +28638,28 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
             <button onClick={() => delSell(i)} title="Quitar venta" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.dim, cursor: "pointer", fontSize: 11 }}>✕</button>
           </div>
         ))}
-        {hasSells && (
-          <div className="flex" style={{ gap: 16, marginTop: 9, fontSize: 12, color: C.muted, flexWrap: "wrap" }}>
-            <span>Vendés: <b style={{ color: C.text }}>{fQ(totalSold)}</b> papeles</span>
-            <span>Resultado acumulado: <b style={{ color: totalPnl >= 0 ? C.green : C.red }}>{fAr0(totalPnl)}</b></span>
-          </div>
-        )}
+        {hasSells && (() => {
+          // % sobre el costo de lo vendido, y su TNA equivalente usando los
+          // días financiados (mínimo 1: un intradía se anualiza a 1 día).
+          const costSold = avg != null ? totalSold * avg : null;
+          const pct = costSold > 0 ? (totalPnl / costSold) * 100 : null;
+          const diasEf = Math.max(1, pn(diasFin) || 0);
+          const tna = pct != null ? pct * (365 / diasEf) : null;
+          const col = totalPnl >= 0 ? C.green : C.red;
+          const f2 = (n) => n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          return (
+            <div className="flex" style={{ gap: 16, marginTop: 9, fontSize: 12, color: C.muted, flexWrap: "wrap" }}>
+              <span>Vendés: <b style={{ color: C.text }}>{fQ(totalSold)}</b> papeles</span>
+              <span>Resultado acumulado: <b style={{ color: col }}>{fAr0(totalPnl)}</b></span>
+              {pct != null && <span>Ganancia: <b style={{ color: col }}>{pct >= 0 ? "+" : ""}{f2(pct)}%</b></span>}
+              {tna != null && (
+                <span title={`Anualizada sobre ${diasEf} día${diasEf > 1 ? "s" : ""} (${(pn(diasFin) || 0) === 0 ? "intradía contado como 1" : "días financiados"})`}>
+                  TNA equiv.: <b style={{ color: col }}>{pct >= 0 ? "+" : ""}{f2(tna)}%</b> <span style={{ color: C.dim }}>({diasEf}d)</span>
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Resultados */}
