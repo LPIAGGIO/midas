@@ -17663,8 +17663,33 @@ function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPric
         dayTotal += d.pnl;
       }
       if (!anyData) return { dailyPnl: null, dailyPct: null, marketClosed: false };
-      // % del día sobre el valor de mercado actual del neto del grupo.
-      const denom = Math.abs(Number(group.valueAtMarket) || 0);
+      // % del día sobre el CAPITAL que trabajó hoy: arrastre valuado al cierre
+      // de ayer + compras de HOY. No sobre el valor del remanente: tras un día
+      // de round-trips pesados el remanente puede ser chico y el % explota
+      // (SNDK 28/07: −4,1M sobre 500 papeles remanentes = −78% engañoso;
+      // sobre los ~$110M que operaron en el día es −3,7%, el número real).
+      let denom = 0;
+      {
+        const tkG = (group.ticker || "").toUpperCase();
+        const isEqG = group.instrument_type === "stock" || group.instrument_type === "cedear";
+        const feedG = isEqG ? stockPrices?.[tkG] : bondPrices?.[tkG];
+        let prevG = feedG?.previousClose;
+        if (prevG == null && feedG?.changePct != null) {
+          const den = 1 + Number(feedG.changePct) / 100;
+          if (den > 0) prevG = Number(feedG.price) / den;
+        }
+        const todayARg = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        let carriedQ = 0, buysToday = 0;
+        for (const op of group.operations) {
+          if (op?.isSynthetic) continue;
+          const q = Number(op.quantity) || 0, px = Number(op.entry_price) || 0;
+          if (op.entry_date === todayARg) { if (op.operation_type !== "sell") buysToday += q * px; }
+          else carriedQ += (op.operation_type === "sell" ? -1 : 1) * q;
+        }
+        const raw = (prevG > 0 ? Math.abs(carriedQ) * prevG : 0) + buysToday;
+        denom = Math.abs(applyConventionToValue(group.instrument_type, 1, raw));
+      }
+      if (!(denom > 0)) denom = Math.abs(Number(group.valueAtMarket) || 0);
       const dailyPct = denom > 0 ? (dayTotal / denom) * 100 : null;
       return { dailyPnl: dayTotal, dailyPct, marketClosed: false };
     }
