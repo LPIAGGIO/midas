@@ -12524,6 +12524,12 @@ function computeDailyPnL(p, bondPrices, futurePrices, stockPrices, futureAdjLook
         // T30A7 09/06: +138k cuando lo real era ~+9k). Ventas y lotes viejos
         // siguen usando el cierre anterior. Mismo criterio que la rama futuros.
         const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        // Venta ejecutada HOY: aporte FIJO (venta − precio actual), no un
+        // short vivo desde el cierre de ayer — ver rama acciones (SNDK 28/07).
+        if (p.operation_type === "sell" && p.entry_date === todayAR && Number(p.entry_price) > 0) {
+          const sp = Number(p.entry_price);
+          return { pnl: ((sp - m.price) / 100) * qty, pct: ((sp - m.price) / sp) * 100 };
+        }
         const base = (p.entry_date === todayAR && p.operation_type !== "sell" && Number(p.entry_price) > 0)
           ? Number(p.entry_price)
           : prev;
@@ -12576,6 +12582,16 @@ function computeDailyPnL(p, bondPrices, futurePrices, stockPrices, futureAdjLook
       if (prev != null && prev > 0) {
         // Lote comprado HOY: base = entrada (no el cierre de ayer). Ver bonos.
         const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        // Venta ejecutada HOY: su aporte al día queda FIJO en (precio de venta
+        // − precio actual). En la suma por lotes el lote comprado sigue
+        // aportando (px − base), así el par cierra en (venta − base) y deja de
+        // flotar. Antes se modelaba como short vivo desde el cierre de ayer:
+        // con round-trips intradía y el papel cayendo, cada venta inventaba
+        // ganancia fantasma (SNDK 28/07: 16 ops, P&L HOY +8,7M con el papel −13%).
+        if (p.operation_type === "sell" && p.entry_date === todayAR && Number(p.entry_price) > 0) {
+          const sp = Number(p.entry_price);
+          return { pnl: (sp - m.price) * qty, pct: ((sp - m.price) / sp) * 100 };
+        }
         const base = (p.entry_date === todayAR && p.operation_type !== "sell" && Number(p.entry_price) > 0)
           ? Number(p.entry_price)
           : prev;
