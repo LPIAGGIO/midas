@@ -661,7 +661,7 @@ async function ratchetPass() {
     .select("user_id,ticker,operation_type,quantity,entry_price,entry_date,created_at,broker")
     .in("instrument_type", ["cedear", "stock"]).neq("broker", "iol");
   const { data: ratchets } = await supabase.from("price_alerts")
-    .select("id,user_id,ticker,usd_ref,price").like("nota", "RATCHET%").is("triggered_at", null);
+    .select("id,user_id,ticker,usd_ref,price,triggered_at").like("nota", "RATCHET%");
   const groups = new Map();
   for (const p of pos || []) {
     const key = p.user_id + "|" + p.ticker.toUpperCase();
@@ -743,10 +743,16 @@ async function ratchetPass() {
       const nota = `RATCHET · STOP dinámico ${unit}${fmtL(stop)} · ${k >= 1 ? `ganaste ${k}R → protege ${k - 1 > 0 ? k - 1 + "R" : "breakeven"}` : "1×ATR bajo tu entrada"} · entrada ~${unit}${fmtL(entryLvl)} · R=${fmtL(R)} · solo sube, nunca baja${timeTxt}`;
 
       liveKeys.add(key);
-      const prev = (ratchets || []).find((r) => r.user_id === userId && r.ticker.toUpperCase() === tk);
-      const prevLvl = prev ? (prev.usd_ref != null ? Number(prev.usd_ref) : Number(prev.price)) : null;
+      const mine = (ratchets || []).filter((r) => r.user_id === userId && r.ticker.toUpperCase() === tk);
+      const lvlOf = (r) => (r.usd_ref != null ? Number(r.usd_ref) : Number(r.price));
       const newLvl = modo === "local_ars" ? toArs(stop) : stop;
-      if (prev && prevLvl != null && newLvl <= prevLvl + 0.005) continue; // el ratchet nunca baja ni repite
+      // Anti-spam: si ya DISPARÓ un ratchet a este nivel (o mayor), el aviso
+      // está dado — no se recrea hasta que el stop suba de verdad. Si el
+      // usuario borró la disparada, tampoco lo perseguimos al mismo nivel.
+      const fired = mine.filter((r) => r.triggered_at);
+      if (fired.some((r) => lvlOf(r) >= newLvl - 0.005)) continue;
+      const prev = mine.find((r) => !r.triggered_at);
+      if (prev && lvlOf(prev) != null && newLvl <= lvlOf(prev) + 0.005) continue; // nunca baja ni repite
       if (prev) await supabase.from("price_alerts").delete().eq("id", prev.id);
       await supabase.from("price_alerts").insert({
         user_id: userId, ticker: tk, price: toArs(stop), dir: "down", nota,
@@ -755,12 +761,7 @@ async function ratchetPass() {
       log(`ratchet ${tk}: stop ${stop.toFixed(2)} (k=${k}, entrada ${entryLvl.toFixed(2)}, hwm ${hwm.toFixed(2)})`);
     } catch (e) { log(`[ratchet ${key}] ${e.message}`); }
   }
-  // posiciones cerradas → su ratchet se retira
-  for (const r of ratchets || []) {
-    const key = r.user_id + "|" + r.ticker.toUpperCase();
-    if (!groups.has(key)) continue; // sin posiciones importadas no tocamos
-    // si el walk dio neto 0 el key no está en liveKeys pero sí en groups
-  }
+  // posiciones cerradas → su ratchet se retira (disparado o no)
   for (const r of ratchets || []) {
     const key = r.user_id + "|" + r.ticker.toUpperCase();
     if (groups.has(key) && !liveKeys.has(key)) await supabase.from("price_alerts").delete().eq("id", r.id);
