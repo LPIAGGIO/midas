@@ -658,7 +658,7 @@ async function autoRearm() {
  * Sobrevive a los rearmes (nota no empieza con AUTO). */
 async function ratchetPass() {
   const { data: pos } = await supabase.from("positions")
-    .select("user_id,ticker,operation_type,quantity,entry_price,entry_date,broker")
+    .select("user_id,ticker,operation_type,quantity,entry_price,entry_date,created_at,broker")
     .in("instrument_type", ["cedear", "stock"]).neq("broker", "iol");
   const { data: ratchets } = await supabase.from("price_alerts")
     .select("id,user_id,ticker,usd_ref,price").like("nota", "RATCHET%").is("triggered_at", null);
@@ -685,7 +685,9 @@ async function ratchetPass() {
       const [userId, tk] = key.split("|");
       // walk cronológico (a prueba de cruces por cero): neto, costo promedio
       // y fecha de inicio de la RACHA abierta actual.
-      ops.sort((a, b) => (a.entry_date || "").localeCompare(b.entry_date || ""));
+      // Orden: fecha y, dentro del mismo día, created_at (sin esto el walk de
+      // un día de round-trips queda ambiguo y el promedio sale corrido).
+      ops.sort((a, b) => (a.entry_date || "").localeCompare(b.entry_date || "") || String(a.created_at || "").localeCompare(String(b.created_at || "")));
       let q = 0, v = 0, streakStart = null;
       for (const p of ops) {
         const n = Number(p.quantity) || 0, px = Number(p.entry_price) || 0;
