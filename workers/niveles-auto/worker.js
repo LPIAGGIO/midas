@@ -441,6 +441,15 @@ async function main() {
         tracks.push({ user_id: job.user_id, ticker: tk, sym, tipo, dir, level: Math.round(lvl * 100) / 100, spot: Math.round(spot * 100) / 100, regime, rsi, estructura: estr, ...extra });
       };
 
+      // CONTRA-TENDENCIA (AQR "Hold the Dip"): estructura bajista + precio en
+      // mínimos = comprar el dip contra momentum, la jugada que pierde 6 de 10
+      // veces. Etiqueta explícita y score capado en 4 — el recordatorio salta
+      // exactamente donde pica la mano de promediar.
+      const low20 = Math.min(...daily.slice(-20).map((c) => c.l));
+      const enMinimos = daily[daily.length - 1].l <= low20 * 1.01;
+      const contraTendencia = estr === "bajista" && enMinimos;
+      const ctTxt = contraTendencia ? " · CONTRA-TENDENCIA: dip contra momentum (AQR: pierde 6 de 10)" : "";
+
       // 1. Entrada principal — señales de velas/divergencia/POC ajustan el score.
       if (buyZone) {
         const sc = scoreZone(buyZone, emas);
@@ -450,20 +459,32 @@ async function main() {
         if (div.bull) { sig.push("divergencia RSI alcista"); sc.score += 1; }
         if (poc && Math.abs(poc - buyZone.avg) / buyZone.avg <= 0.01) { sig.push("es el POC del año"); sc.score += 1; }
         if (estr === "alcista") sc.score += 1; else if (estr === "bajista") sc.score -= 1;
+        if (contraTendencia) { sig.push("CONTRA-TENDENCIA"); sc.score = Math.min(sc.score, 4); }
         sc.score = Math.max(1, Math.min(10, sc.score));
-        const sigTxt = sig.length ? " · " + sig.join(" · ") : "";
+        const sigTxt = sig.filter((s) => s !== "CONTRA-TENDENCIA").length ? " · " + sig.filter((s) => s !== "CONTRA-TENDENCIA").join(" · ") : "";
         const gapTxt = gapDn ? ` · gap abierto abajo ${fmt(gapDn.lo)}-${fmt(gapDn.hi)} (imán)` : "";
         const rr = sellZone && stopLvl && buyZone.hi - stopLvl > 0 ? Math.round(((sellZone.lo - buyZone.hi) / (buyZone.hi - stopLvl)) * 10) / 10 : null;
         const rrTxt = rr != null ? ` · R:R ${fmt1(rr)}${rr < 1.2 ? " flaco" : rr >= 2.5 ? " bueno" : ""}` : "";
-        mk(buyZone.hi, "down", `AUTO · soporte ${unit}${fmt(buyZone.hi)} · ${tfLabel(buyZone)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}${rrTxt}${gapTxt}${warnTxt} · zona de COMPRA`, buyZone.hasD ? "soporte-diario" : "soporte-horario", { score: sc.score, touches: buyZone.touches, rr, senales: sig.join(",") || null });
+        // Sizing por riesgo (regla Scalbi: la distancia a la invalidante manda
+        // el tamaño, nunca al revés): riesgo por papel en ARS y cuántos papeles
+        // corresponden a arriesgar $250k / $500k.
+        let sizeTxt = "";
+        if (stopLvl && stopLvl > 0 && stopLvl < buyZone.hi) {
+          const rpp = toArs(buyZone.hi) - toArs(stopLvl);
+          if (rpp > 0) sizeTxt = ` · riesgo $${Math.round(rpp).toLocaleString("es-AR")}/papel (250k→${Math.floor(250000 / rpp)} · 500k→${Math.floor(500000 / rpp)} papeles)`;
+        }
+        mk(buyZone.hi, "down", `AUTO · soporte ${unit}${fmt(buyZone.hi)} · ${tfLabel(buyZone)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}${ctTxt}${rrTxt}${sizeTxt}${gapTxt}${warnTxt} · zona de COMPRA`, buyZone.hasD ? "soporte-diario" : "soporte-horario", { score: sc.score, touches: buyZone.touches, rr, senales: sig.join(",") || null });
         // 2. Stop de esa entrada
         if (stopLvl && stopLvl > 0 && stopLvl < buyZone.hi) {
           mk(stopLvl, "down", `AUTO · STOP LOSS ${unit}${fmt(stopLvl)} si comprás en ${fmt(buyZone.hi)} · ${stopWhy}`, "stop", { score: null, touches: null });
         }
         // 2b. Entrada swing (zona diaria más abajo) — para trade, no scalp.
+        // La etiqueta CONTRA-TENDENCIA aplica acá también: la swing es la
+        // tentación clásica de la promediada.
         if (swingZone) {
           const sc2 = scoreZone(swingZone, emas);
-          mk(swingZone.hi, "down", `AUTO · soporte ${unit}${fmt(swingZone.hi)} · diario · ${zoneTag(swingZone, sc2)} · zona de COMPRA swing`, "soporte-diario", { score: sc2.score, touches: swingZone.touches });
+          if (contraTendencia) sc2.score = Math.min(sc2.score, 4);
+          mk(swingZone.hi, "down", `AUTO · soporte ${unit}${fmt(swingZone.hi)} · diario · ${zoneTag(swingZone, sc2)}${ctTxt} · zona de COMPRA swing`, "soporte-diario", { score: sc2.score, touches: swingZone.touches, senales: contraTendencia ? "CONTRA-TENDENCIA" : null });
         }
       }
       // 3. Take profit / venta con lectura de breakout + señales bajistas.
