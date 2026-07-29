@@ -24776,6 +24776,8 @@ function TvAlertasModule() {
   const [rows, setRows] = useState(null);
   const [tick, setTick] = useState(0);
   const [tkr, setTkr] = useState("");
+  // Notas expandidas (click en la flechita): quedan abiertas para screenshots.
+  const [openNotes, setOpenNotes] = useState(() => new Set());
   const [usd, setUsd] = useState("");
   const [dir, setDir] = useState("up");
   const [nota, setNota] = useState("");
@@ -25152,8 +25154,23 @@ function TvAlertasModule() {
                       <td style={{ ...numc, color: colA != C.dim ? colA : colU }}>{(dArsPct ?? dUsdPct) == null ? "—" : `${(dArsPct ?? dUsdPct) >= 0 ? "+" : "−"}${Math.abs(dArsPct ?? dUsdPct).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</td>
                       {(() => {
                         const notaLimpia = (a.nota || "—").replace(/^AUTO análisis:\s*/i, "").replace(/^AUTO ·\s*/i, "").replace(/zona de COMPRA — /i, "").replace(/ — venta\/tomar ganancia/i, "").replace(/^\((pivote[^)]*)\)$/i, "$1");
+                        // Flechita para expandir/colapsar la nota completa INLINE:
+                        // el tooltip desaparece al mover el mouse y no se puede
+                        // screenshotear; el estado expandido queda fijo.
+                        const open = openNotes.has(a.id);
+                        const toggle = () => setOpenNotes((s) => { const n = new Set(s); if (n.has(a.id)) n.delete(a.id); else n.add(a.id); return n; });
                         return (
-                          <td title={notaLimpia} style={{ ...tdd, color: C.muted, fontFamily: "inherit", maxWidth: 230, overflow: "hidden", textOverflow: "ellipsis", cursor: "default" }}>
+                          <td
+                            title={open ? undefined : notaLimpia}
+                            onClick={toggle}
+                            style={{
+                              ...tdd, color: C.muted, fontFamily: "inherit", maxWidth: 230, cursor: "pointer",
+                              ...(open
+                                ? { whiteSpace: "normal", overflow: "visible", lineHeight: 1.5, paddingTop: 6, paddingBottom: 6 }
+                                : { overflow: "hidden", textOverflow: "ellipsis" }),
+                            }}
+                          >
+                            <span style={{ color: C.dim, fontSize: 9, marginRight: 5, userSelect: "none" }}>{open ? "▾" : "▸"}</span>
                             {notaLimpia}
                           </td>
                         );
