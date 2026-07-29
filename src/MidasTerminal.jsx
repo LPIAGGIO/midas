@@ -25343,7 +25343,8 @@ function useGlobalAlerts() {
         setPalerts((data || []).map((r) => ({ id: r.id, ticker: r.ticker, price: Number(r.price), dir: r.dir })));
       });
     load();
-    const iv = setInterval(load, 15000);
+    // 5s: en papeles volátiles los 15s de antes regalaban medio movimiento.
+    const iv = setInterval(load, 5000);
     return () => { cancelled = true; clearInterval(iv); };
   }, [user]);
 
@@ -25361,12 +25362,28 @@ function useGlobalAlerts() {
   const [muted, setMuted] = useState(() => { try { return localStorage.getItem("midas:alerts-muted") === "1"; } catch (e) { return false; } });
   const toggleMute = useCallback(() => setMuted((m) => { const nm = !m; try { localStorage.setItem("midas:alerts-muted", nm ? "1" : "0"); } catch (e) { /* noop */ } return nm; }), []);
   const firedRef = useRef(new Set());
+  const nearRef = useRef(new Set()); // pre-avisos ya emitidos (uno por alerta)
 
   const fire = useCallback((title, body) => {
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       try { new Notification(title, { body }); } catch (e) { /* noop */ }
     }
     flowBeep();
+  }, []);
+  // Pre-aviso: tono corto y grave, distinto de la campana de disparo — suena
+  // cuando el precio entra a 0,5% de un nivel, para llegar a Matriz con la
+  // orden cargada ANTES del toque (papeles volátiles no dan tiempo después).
+  const softBeep = useCallback(() => {
+    try {
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = "sine"; o.frequency.value = 420;
+      g.gain.setValueAtTime(0.12, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.35);
+      o.connect(g); g.connect(ac.destination);
+      o.start(); o.stop(ac.currentTime + 0.36);
+      setTimeout(() => ac.close().catch(() => {}), 600);
+    } catch (e) { /* sin audio no es fatal */ }
   }, []);
   const requestPerm = useCallback(() => {
     if (typeof Notification !== "undefined") Notification.requestPermission().then((p) => { setNotifPerm(p); if (p === "granted") flowBeep(); });
@@ -25381,6 +25398,20 @@ function useGlobalAlerts() {
       const price = priceOf[a.ticker] ?? gStockPx[a.ticker]?.price ?? null;
       if (price == null || firedRef.current.has(a.id)) continue;
       const hit = a.dir === "up" ? price >= a.price : price <= a.price;
+      // Pre-aviso a 0,5% del nivel (una sola vez por alerta): tono suave +
+      // notificación "se acerca" — la ventana para dejar la orden cargada.
+      if (!hit && !nearRef.current.has(a.id)) {
+        const near = a.dir === "up" ? price >= a.price * 0.995 : price <= a.price * 1.005;
+        if (near) {
+          nearRef.current.add(a.id);
+          if (!muted) {
+            softBeep();
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              try { new Notification(`⏳ ${a.ticker} se acerca`, { body: `Está ${price} — tu nivel: ${a.price}. Dejá la orden lista.` }); } catch (e) { /* noop */ }
+            }
+          }
+        }
+      }
       if (!hit) continue;
       firedRef.current.add(a.id);
       if (!muted) fire(`${a.dir === "up" ? "🎯" : "🛑"} ${a.ticker}`, `Precio ${price} cruzó tu alerta ${a.price}`);
