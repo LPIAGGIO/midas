@@ -648,16 +648,137 @@ async function autoRearm() {
   }
 }
 
+/* ───────── Ratchet: el stop solo sube (regla Scalbi, fase 2) ─────────
+ * Para cada posición ABIERTA de contado (importada en positions, sin IOL),
+ * mantiene UNA alerta "RATCHET · STOP dinámico": arranca 1×ATR bajo la
+ * entrada promedio y, por cada múltiplo R que el máximo desde la entrada
+ * avanza, sube (1R ganado → breakeven; 2R → protege 1R; ...). NUNCA baja.
+ * No hay take profit: el ratchet ES la toma de ganancias. Suma el time-stop:
+ * si tras 10 ruedas el trade nunca validó (+0,5R), la nota lo dice.
+ * Sobrevive a los rearmes (nota no empieza con AUTO). */
+async function ratchetPass() {
+  const { data: pos } = await supabase.from("positions")
+    .select("user_id,ticker,operation_type,quantity,entry_price,entry_date,broker")
+    .in("instrument_type", ["cedear", "stock"]).neq("broker", "iol");
+  const { data: ratchets } = await supabase.from("price_alerts")
+    .select("id,user_id,ticker,usd_ref,price").like("nota", "RATCHET%").is("triggered_at", null);
+  const groups = new Map();
+  for (const p of pos || []) {
+    const key = p.user_id + "|" + p.ticker.toUpperCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  // feeds para ratio en vivo
+  const [dolRes, usaRes, cedRes] = await Promise.all([
+    fetch("https://dolarapi.com/v1/dolares/contadoconliqui", { headers: UA }).then((r) => r.json()).catch(() => null),
+    fetch("https://data912.com/live/usa_stocks", { headers: UA }).then((r) => r.json()).catch(() => []),
+    fetch("https://data912.com/live/arg_cedears", { headers: UA }).then((r) => r.json()).catch(() => []),
+  ]);
+  const ccl = Number(dolRes?.venta) || Number(dolRes?.compra) || null;
+  const usdPx = {}, arsPx = {};
+  for (const it of usaRes || []) if (it?.symbol && Number(it.c) > 0) usdPx[it.symbol.toUpperCase()] = Number(it.c);
+  for (const it of cedRes || []) if (it?.symbol && Number(it.c) > 0) arsPx[it.symbol.toUpperCase()] = Number(it.c);
+
+  const liveKeys = new Set();
+  for (const [key, ops] of groups) {
+    try {
+      const [userId, tk] = key.split("|");
+      // walk cronológico (a prueba de cruces por cero): neto, costo promedio
+      // y fecha de inicio de la RACHA abierta actual.
+      ops.sort((a, b) => (a.entry_date || "").localeCompare(b.entry_date || ""));
+      let q = 0, v = 0, streakStart = null;
+      for (const p of ops) {
+        const n = Number(p.quantity) || 0, px = Number(p.entry_price) || 0;
+        const s = p.operation_type === "sell" ? -n : n;
+        if (q <= 0 && s > 0) streakStart = p.entry_date;
+        if (q === 0 || (q > 0) === (s > 0)) { q += s; v += s * px; }
+        else {
+          const closing = Math.min(Math.abs(s), Math.abs(q));
+          const avg = v / q; const opening = Math.abs(s) - closing;
+          if (opening > 0) { q = s > 0 ? opening : -opening; v = q * px; }
+          else { q += s; v += (s > 0 ? closing : -closing) * avg; }
+        }
+        if (q <= 0) streakStart = null;
+      }
+      if (q <= 0 || !streakStart) continue;
+      const avgArs = v / q;
+
+      // símbolo y conversión (misma cascada que el kit)
+      const adrInfo = ARG_ADR[tk] || null;
+      const symUsa = adrInfo ? adrInfo.adr : tk;
+      let daily = await yahooCandles(symUsa, "1d", "1y");
+      let modo = adrInfo ? "adr" : "usa";
+      if (!daily) { daily = await yahooCandles(tk + ".BA", "1d", "1y"); modo = "local_ars"; if (!daily) continue; }
+      let toArs, entryLvl, unit;
+      if (modo === "usa") {
+        const ratio = arsPx[tk] > 0 && usdPx[tk] > 0 && ccl ? Math.max(1, Math.round((usdPx[tk] * ccl) / arsPx[tk])) : null;
+        if (!ratio) continue;
+        toArs = (usd) => Math.round((usd * ccl) / ratio);
+        entryLvl = (avgArs * ratio) / ccl; unit = "US$";
+      } else if (modo === "adr") {
+        if (!ccl) continue;
+        toArs = (usd) => Math.round((usd * ccl) / adrInfo.r);
+        entryLvl = (avgArs * adrInfo.r) / ccl; unit = "US$";
+      } else { toArs = (x) => Math.round(x); entryLvl = avgArs; unit = "$"; }
+
+      const since = daily.filter((c) => c.t >= streakStart);
+      if (!since.length) continue;
+      const hwm = Math.max(...since.map((c) => c.h));
+      let atr = 0;
+      for (let i = Math.max(1, daily.length - 14); i < daily.length; i++) {
+        atr += Math.max(daily[i].h - daily[i].l, Math.abs(daily[i].h - daily[i - 1].c), Math.abs(daily[i].l - daily[i - 1].c));
+      }
+      atr /= Math.min(14, daily.length - 1);
+      if (!(atr > 0) || !(entryLvl > 0)) continue;
+
+      const R = atr;
+      const k = Math.floor((hwm - entryLvl) / R);
+      const stop = k >= 1 ? entryLvl + (k - 1) * R : entryLvl - R;
+      const ruedas = since.length;
+      const validated = hwm >= entryLvl + 0.5 * R;
+      const fmtL = (x) => x.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const timeTxt = !validated && ruedas >= 10 ? ` · TIME-STOP: ${ruedas} ruedas sin validar +0,5R — revisar la tesis` : "";
+      const nota = `RATCHET · STOP dinámico ${unit}${fmtL(stop)} · ${k >= 1 ? `ganaste ${k}R → protege ${k - 1 > 0 ? k - 1 + "R" : "breakeven"}` : "1×ATR bajo tu entrada"} · entrada ~${unit}${fmtL(entryLvl)} · R=${fmtL(R)} · solo sube, nunca baja${timeTxt}`;
+
+      liveKeys.add(key);
+      const prev = (ratchets || []).find((r) => r.user_id === userId && r.ticker.toUpperCase() === tk);
+      const prevLvl = prev ? (prev.usd_ref != null ? Number(prev.usd_ref) : Number(prev.price)) : null;
+      const newLvl = modo === "local_ars" ? toArs(stop) : stop;
+      if (prev && prevLvl != null && newLvl <= prevLvl + 0.005) continue; // el ratchet nunca baja ni repite
+      if (prev) await supabase.from("price_alerts").delete().eq("id", prev.id);
+      await supabase.from("price_alerts").insert({
+        user_id: userId, ticker: tk, price: toArs(stop), dir: "down", nota,
+        usd_ref: modo === "local_ars" ? null : Math.round(stop * 100) / 100, canal: "screen", origen: "tv",
+      });
+      log(`ratchet ${tk}: stop ${stop.toFixed(2)} (k=${k}, entrada ${entryLvl.toFixed(2)}, hwm ${hwm.toFixed(2)})`);
+    } catch (e) { log(`[ratchet ${key}] ${e.message}`); }
+  }
+  // posiciones cerradas → su ratchet se retira
+  for (const r of ratchets || []) {
+    const key = r.user_id + "|" + r.ticker.toUpperCase();
+    if (!groups.has(key)) continue; // sin posiciones importadas no tocamos
+    // si el walk dio neto 0 el key no está en liveKeys pero sí en groups
+  }
+  for (const r of ratchets || []) {
+    const key = r.user_id + "|" + r.ticker.toUpperCase();
+    if (groups.has(key) && !liveKeys.has(key)) await supabase.from("price_alerts").delete().eq("id", r.id);
+  }
+}
+
 /* ───────── Loop persistente ───────── */
 async function loop() {
-  log("niveles-auto v6 arrancando (cola 60s; rearme 15 min en mercado; confirmaciones 10 min; tracks 60 min)");
-  let lastTracks = 0, lastConfirm = 0, lastRearm = 0;
+  log("niveles-auto v7 arrancando (cola 60s; rearme 15 min; ratchet 30 min; confirmaciones 10 min; tracks 60 min)");
+  let lastTracks = 0, lastConfirm = 0, lastRearm = 0, lastRatchet = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       if (Date.now() - lastRearm > 15 * 60 * 1000) {
         await autoRearm().catch((e) => log("[rearm]", e.message));
         lastRearm = Date.now();
+      }
+      if (Date.now() - lastRatchet > 30 * 60 * 1000) {
+        await ratchetPass().catch((e) => log("[ratchet]", e.message));
+        lastRatchet = Date.now();
       }
       await main();
       if (Date.now() - lastConfirm > 10 * 60 * 1000) {
