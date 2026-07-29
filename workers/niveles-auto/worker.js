@@ -768,10 +768,90 @@ async function ratchetPass() {
   }
 }
 
+/* ───────── Régimen de cartera (Kaminski & Lo): modo defensa ─────────
+ * Regla del paper adaptada: si la canasta de tenencias acumula < −4% en 12
+ * meses → DEFENSA (reducir equity, refugio en caución/FCI); se vuelve a
+ * NORMAL tras un mes (21 ruedas) de retorno no negativo. Mientras no exista
+ * serie real de equity, la canasta es sintética: retorno ponderado por valor
+ * de las tenencias actuales (subyacente USA/ADR — sin ruido CCL). Además
+ * graba el equity ARS real del día en portfolio_equity para que en unos
+ * meses la regla corra sobre la serie verdadera. */
+async function regimePass() {
+  const { data: pos } = await supabase.from("positions")
+    .select("user_id,ticker,operation_type,quantity,entry_price,entry_date,created_at,broker")
+    .in("instrument_type", ["cedear", "stock"]).neq("broker", "iol");
+  if (!pos?.length) return;
+  const [usaRes, cedRes] = await Promise.all([
+    fetch("https://data912.com/live/usa_stocks", { headers: UA }).then((r) => r.json()).catch(() => []),
+    fetch("https://data912.com/live/arg_cedears", { headers: UA }).then((r) => r.json()).catch(() => []),
+  ]);
+  const arsPx = {};
+  for (const it of [...(cedRes || []), ...(usaRes || [])]) if (it?.symbol && Number(it.c) > 0 && !(it.symbol.toUpperCase() in arsPx)) arsPx[it.symbol.toUpperCase()] = Number(it.c);
+
+  // net por usuario|ticker (walk simple: solo hace falta el neto)
+  const perUser = new Map();
+  for (const p of pos) {
+    const u = p.user_id, tk = p.ticker.toUpperCase();
+    if (!perUser.has(u)) perUser.set(u, new Map());
+    const m = perUser.get(u);
+    m.set(tk, (m.get(tk) || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0));
+  }
+  const candCache = new Map();
+  const getRets = async (tk) => {
+    if (candCache.has(tk)) return candCache.get(tk);
+    const adr = ARG_ADR[tk];
+    let d = await yahooCandles(adr ? adr.adr : tk, "1d", "1y");
+    if (!d) d = await yahooCandles(tk + ".BA", "1d", "1y");
+    const rets = new Map();
+    if (d) for (let i = 1; i < d.length; i++) rets.set(d[i].t, d[i].c / d[i - 1].c - 1);
+    candCache.set(tk, rets);
+    return rets;
+  };
+  const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+  for (const [userId, m] of perUser) {
+    try {
+      const holds = [...m.entries()].filter(([, q]) => q > 1e-6);
+      if (!holds.length) continue;
+      // pesos por valor ARS actual (fallback: sin feed no pondera)
+      let totalV = 0;
+      const w = new Map();
+      for (const [tk, q] of holds) { const v = q * (arsPx[tk] || 0); if (v > 0) { w.set(tk, v); totalV += v; } }
+      if (!(totalV > 0)) continue;
+      // canasta sintética: retorno diario ponderado de las tenencias actuales
+      const retMaps = new Map();
+      for (const [tk] of w) retMaps.set(tk, await getRets(tk));
+      const dates = [...new Set([].concat(...[...retMaps.values()].map((r) => [...r.keys()])))].sort();
+      let cum = 1, peak = 1, dd = 0;
+      const cums = [];
+      for (const d of dates) {
+        let r = 0;
+        for (const [tk, val] of w) r += (val / totalV) * (retMaps.get(tk).get(d) || 0);
+        cum *= 1 + r; peak = Math.max(peak, cum); dd = Math.min(dd, cum / peak - 1);
+        cums.push(cum);
+      }
+      const ret12 = cum - 1;
+      const ret1m = cums.length > 21 ? cum / cums[cums.length - 22] - 1 : 0;
+      const { data: prevRow } = await supabase.from("portfolio_regime").select("regime").eq("user_id", userId).maybeSingle();
+      const prev = prevRow?.regime || "normal";
+      let regime = prev;
+      if (prev === "normal" && ret12 < -0.04) regime = "defensa";
+      else if (prev === "defensa" && ret1m >= 0) regime = "normal";
+      await supabase.from("portfolio_regime").upsert({
+        user_id: userId, regime,
+        metric: { ret12: Math.round(ret12 * 1000) / 10, ret1m: Math.round(ret1m * 1000) / 10, dd: Math.round(dd * 1000) / 10, holdings: holds.length },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+      await supabase.from("portfolio_equity").upsert({ user_id: userId, date: todayAR, value: Math.round(totalV) }, { onConflict: "user_id,date" });
+      log(`regimen ${userId.slice(0, 8)}: ${regime} (12m ${(ret12 * 100).toFixed(1)}% · 1m ${(ret1m * 100).toFixed(1)}% · dd ${(dd * 100).toFixed(1)}%)`);
+    } catch (e) { log(`[regimen] ${e.message}`); }
+  }
+}
+
 /* ───────── Loop persistente ───────── */
 async function loop() {
   log("niveles-auto v7 arrancando (cola 60s; rearme 15 min; ratchet 30 min; confirmaciones 10 min; tracks 60 min)");
-  let lastTracks = 0, lastConfirm = 0, lastRearm = 0, lastRatchet = 0;
+  let lastTracks = 0, lastConfirm = 0, lastRearm = 0, lastRatchet = 0, lastRegime = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
@@ -782,6 +862,10 @@ async function loop() {
       if (Date.now() - lastRatchet > 30 * 60 * 1000) {
         await ratchetPass().catch((e) => log("[ratchet]", e.message));
         lastRatchet = Date.now();
+      }
+      if (Date.now() - lastRegime > 4 * 60 * 60 * 1000) {
+        await regimePass().catch((e) => log("[regimen]", e.message));
+        lastRegime = Date.now();
       }
       await main();
       if (Date.now() - lastConfirm > 10 * 60 * 1000) {

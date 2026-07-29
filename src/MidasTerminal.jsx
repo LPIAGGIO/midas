@@ -24589,6 +24589,15 @@ function ResearchDelDiaModule() {
   const [briefs, setBriefs] = useState([]);
   const [ctx, setCtx] = useState({});
   const [loading, setLoading] = useState(true);
+  // Régimen de cartera (Kaminski & Lo, lo calcula el worker cada 4h).
+  const [regime, setRegime] = useState(null);
+  useEffect(() => {
+    if (!user) return;
+    let c = false;
+    supabase.from("portfolio_regime").select("regime,metric,updated_at").eq("user_id", user.id).maybeSingle()
+      .then(({ data }) => { if (!c && data) setRegime(data); });
+    return () => { c = true; };
+  }, [user]);
   // Precio USD en vivo (feed data912, 60s) — referencia "actual:" junto a la acción.
   const [usaPx, setUsaPx] = useState({});
   useEffect(() => {
@@ -24644,10 +24653,29 @@ function ResearchDelDiaModule() {
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Research del día</h1>
-      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 20px 0", maxWidth: 780 }}>
+      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 12px 0", maxWidth: 780 }}>
         Análisis pre-apertura de tus papeles (alertas + cartera): noticias, catalizadores y rumbo, cruzados con los niveles del bot.
         Se regenera solo los días hábiles a la mañana; si agregás un papel al tablero, entra en el research del día siguiente.
       </p>
+      {regime && (() => {
+        // Régimen Kaminski-Lo: canasta de tenencias acumulando <−4% en 12m →
+        // DEFENSA (reducir equity, refugio en caución/FCI) hasta un mes de
+        // retorno no negativo. Lo calcula el worker sobre la canasta actual.
+        const def = regime.regime === "defensa";
+        const mtr = regime.metric || {};
+        return (
+          <div style={{
+            border: `1px solid ${def ? "#f8717155" : C.border}`, background: def ? "#f8717112" : "transparent",
+            padding: "8px 14px", marginBottom: 18, fontSize: 11.5, color: def ? "#f87171" : C.dim, maxWidth: 780,
+          }}>
+            <b style={{ letterSpacing: "0.06em" }}>{def ? "MODO DEFENSA" : "RÉGIMEN NORMAL"}</b>
+            <span style={{ color: def ? "#f87171" : C.dim }}>
+              {" · "}tu canasta de tenencias: {mtr.ret12 >= 0 ? "+" : ""}{mtr.ret12}% en 12m · {mtr.ret1m >= 0 ? "+" : ""}{mtr.ret1m}% en el último mes · drawdown máx {mtr.dd}%
+              {def ? " — la regla (Kaminski-Lo) sugiere reducir equity y refugio en caución/FCI hasta un mes de recuperación" : " — regla Kaminski-Lo: pasa a DEFENSA si los 12 meses acumulan menos de −4%"}
+            </span>
+          </div>
+        );
+      })()}
       {loading ? (
         <div style={{ color: C.dim, fontSize: 13 }}>Cargando…</div>
       ) : !briefs.length ? (
@@ -25094,6 +25122,16 @@ function TvAlertasModule() {
                           // Horizonte del nivel: diario/estructural → TRADE (más largo);
                           // solo horario → SCALP (para ahora). Derivado de la nota del bot.
                           const n = a.nota || "";
+                          // El ratchet lleva su propio badge (stop dinámico de posición).
+                          if (/^RATCHET/i.test(n)) {
+                            return (
+                              <span style={{
+                                marginLeft: 6, fontSize: 8, fontWeight: 700, letterSpacing: "0.08em",
+                                padding: "1px 5px", borderRadius: 3, verticalAlign: "middle",
+                                color: "#a78bfa", border: "1px solid #a78bfa55",
+                              }}>RATCHET</span>
+                            );
+                          }
                           // Los STOP no llevan horizonte (un stop no es un trade).
                           const hz = /(stop|salir)/i.test(n) ? null : /(diario|estructural|año|piso|swing)/i.test(n) ? "TRADE" : /horario/i.test(n) ? "SCALP" : null;
                           if (!hz) return null;
