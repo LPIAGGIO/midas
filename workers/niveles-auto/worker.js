@@ -530,14 +530,28 @@ async function main() {
         mk(yrLow, "down", `AUTO · piso del año ${unit}${fmt(yrLow)} · mínimo 52 semanas (sin soporte de pivote debajo: mínimos nuevos)${warnTxt}`, "piso-anio", { score: null, touches: null });
       }
 
-      if (rows.length) {
-        const { error } = await supabase.from("price_alerts").insert(rows);
+      // Anti-repique: si un nivel IGUAL ya disparó HOY (quedó gris en pantalla),
+      // no se recrea — con el precio pegado al nivel, cada rearme de 15 min
+      // generaba una copia nueva que volvía a sonar (caso YPFD 50,44 ×3).
+      const todayARr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const { data: firedToday } = await supabase.from("price_alerts").select("dir,usd_ref,price")
+        .eq("user_id", job.user_id).eq("ticker", tk).eq("origen", "tv")
+        .not("triggered_at", "is", null).gte("triggered_at", todayARr + "T00:00:00-03:00");
+      const isDupFired = (r) => (firedToday || []).some((f) => f.dir === r.dir &&
+        (r.usd_ref != null && f.usd_ref != null
+          ? Math.abs(Number(f.usd_ref) - r.usd_ref) / r.usd_ref < 0.002
+          : Math.abs(Number(f.price) - r.price) / Math.max(1, r.price) < 0.002));
+      const keepIdx = rows.map((_, i) => i).filter((i) => !isDupFired(rows[i]));
+      const rowsClean = keepIdx.map((i) => rows[i]);
+      const tracksClean = keepIdx.map((i) => tracks[i]);
+      if (rowsClean.length) {
+        const { error } = await supabase.from("price_alerts").insert(rowsClean);
         if (error) throw new Error(error.message);
         // Dedup del feedback loop: el rearme de 15 min re-emite los mismos
         // niveles; solo se registra un nivel si no hay ya un track ABIERTO
         // del mismo tipo a menos de 0,2% (una fila por nivel real emitido).
         const { data: openTr } = await supabase.from("nivel_track").select("tipo,level").eq("user_id", job.user_id).eq("ticker", tk).eq("done", false);
-        const fresh = tracks.filter((t) => !(openTr || []).some((o) => o.tipo === t.tipo && Math.abs(Number(o.level) - t.level) / t.level < 0.002));
+        const fresh = tracksClean.filter((t) => !(openTr || []).some((o) => o.tipo === t.tipo && Math.abs(Number(o.level) - t.level) / t.level < 0.002));
         if (fresh.length) await supabase.from("nivel_track").insert(fresh).then(({ error: e2 }) => { if (e2) log(`[track ${tk}] ${e2.message}`); });
       }
 
