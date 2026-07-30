@@ -4522,23 +4522,26 @@ async function syncFciOps(userId, fciOps) {
   if (!fciOps || !fciOps.length) return { inserted: 0, error: null };
   const { data: existing, error } = await supabase
     .from("positions")
-    .select("ticker, quantity, entry_date, extra")
+    .select("ticker, quantity, entry_date, operation_type, extra")
     .eq("user_id", userId)
     .eq("broker", "cocos")
     .eq("instrument_type", "fci");
   if (error) return { inserted: 0, error: error.message };
-  const lkey = (t, q, d) => `${d}|${t}|${(Number(q) || 0).toFixed(3)}`;
+  // La clave incluye buy/sell: hay suscripción y rescate el mismo día por la
+  // misma cantidad exacta (27/04 Pesos Plus, ida y vuelta de 745,27 cp) — sin
+  // el lado, un sell podía matchear el buy del backfill y colarse duplicado.
+  const lkey = (t, q, d, op) => `${d}|${t}|${op}|${(Number(q) || 0).toFixed(3)}`;
   const byComp = new Set();
   const legacy = new Map(); // filas sin comprobante → cuántas quedan por matchear
   for (const p of existing || []) {
     const comp = p.extra?.libro_comprobante;
     if (comp) byComp.add(comp);
-    else { const k = lkey(p.ticker, p.quantity, p.entry_date); legacy.set(k, (legacy.get(k) || 0) + 1); }
+    else { const k = lkey(p.ticker, p.quantity, p.entry_date, p.operation_type); legacy.set(k, (legacy.get(k) || 0) + 1); }
   }
   const rows = [];
   for (const o of fciOps) {
     if (o.comprobante && byComp.has(o.comprobante)) continue;
-    const k = lkey(o.ticker, o.quantity, o.entry_date);
+    const k = lkey(o.ticker, o.quantity, o.entry_date, o.operation_type);
     const n = legacy.get(k) || 0;
     if (n > 0) { legacy.set(k, n - 1); continue; }
     if (o.comprobante) byComp.add(o.comprobante);
