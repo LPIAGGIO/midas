@@ -4158,6 +4158,14 @@ function ImportCuentaCorrienteModal({ existingComprobantes, onDone, onClose }) {
       if (error) { errs.push(error.message); break; }
       inserted += chunk.length;
     }
+    // FCI: suscripciones/rescates del CSV también crean su fila en positions
+    // (con dedup por comprobante) — si no, quedan solo como caja y el P&L
+    // por Instrumento no los ve.
+    if (!errs.length) {
+      const fciOps = newRows.filter((r) => r.categoria === "fci").map(fciOpFromMov).filter(Boolean);
+      const { error: fciErr } = await syncFciOps(user.id, fciOps);
+      if (fciErr) errs.push(fciErr);
+    }
     setImporting(false);
     setResult({ inserted, errs });
     if (!errs.length) onDone?.();
@@ -4464,11 +4472,90 @@ function useImportBatches() {
 }
 
 // Deriva posiciones + caja del ledger (libro_movimientos). Netea trades por
-// ticker (las patas MEP se cancelan solas porque cantidad viene firmada). FCI
-// viene ×1000 en el CSV → escala /1000. Excluye futuros (los maneja el worker).
+// ticker (las patas MEP se cancelan solas porque cantidad viene firmada).
+// FCI va aparte: cada suscripción/rescate es una fila de positions por
+// operación (fciOps → syncFciOps), no un neteo — así el P&L por Instrumento
+// ve la historia completa. Excluye futuros (los maneja el worker).
 // OJO: letras vencidas aparecen como tenencia (el vencimiento es "Renta y
 // Amortización", no una venta) → por eso hay preview obligatorio.
-const FCI_LEDGER_MAP = { COCORMA: "Cocos Rendimiento - Clase A|rentaMixta" };
+// Símbolo Cocos → clave del catálogo "fondo|categoria" (position.ticker de un
+// FCI; la valuación por VCP la parsea, respetar el formato). Un fondo nuevo
+// que no esté acá NO genera posición (solo caja) — ampliar el mapa.
+const FCI_LEDGER_MAP = {
+  COCORMA: "Cocos Rendimiento - Clase A|rentaMixta",
+  COCOSPPA: "Cocos Pesos Plus - Clase A|rentaFija",
+  COCOAUSD: "Cocos Ahorro - Clase A|rentaFija",
+};
+
+// Movimiento FCI del libro → fila de positions. El CSV trae cuotapartes
+// ×1000 y el VCP es por 1000 cp: quantity = |cantidad|/1000 y
+// entry_price = |total|/|cantidad|×1000 (mismo mapeo que el backfill del
+// 30/07/2026, notes='backfill FCI desde libro_movimientos 30/07').
+function fciOpFromMov(m) {
+  const clave = FCI_LEDGER_MAP[m.ticker];
+  const cant = Math.abs(Number(m.cantidad) || 0);
+  const tot = Math.abs(Number(m.total) || 0);
+  if (!clave) {
+    if (m.ticker) console.warn(`[FCI] fondo sin mapear en FCI_LEDGER_MAP: ${m.ticker} — la operación queda solo como caja`);
+    return null;
+  }
+  if (!cant || !tot || !m.fecha_ejecucion) return null;
+  return {
+    ticker: clave,
+    operation_type: /rescate/i.test(m.tipo_operacion || "") ? "sell" : "buy",
+    quantity: cant / 1000,
+    entry_price: (tot / cant) * 1000,
+    entry_currency: /usd/i.test(m.ticker || "") ? "USD-MEP" : "ARS",
+    entry_date: m.fecha_ejecucion,
+    comprobante: m.nro_comprobante || null,
+  };
+}
+
+// Inserta las operaciones FCI en positions SIN duplicar: por nro_comprobante
+// (extra.libro_comprobante, exacto — re-imports y CSVs solapados) y, para las
+// filas viejas sin comprobante (backfill 30/07 / cargas a mano), por
+// fecha+ticker+cantidad con conteo — hay rescates legítimos repetidos el
+// mismo día con la misma cantidad (05/05: 2 × 7.556,7556 cp), un Set los
+// comería. Estas filas NO son source='derivado_libro': el rebuild del libro
+// no las pisa, el dedup las mantiene únicas.
+async function syncFciOps(userId, fciOps) {
+  if (!fciOps || !fciOps.length) return { inserted: 0, error: null };
+  const { data: existing, error } = await supabase
+    .from("positions")
+    .select("ticker, quantity, entry_date, extra")
+    .eq("user_id", userId)
+    .eq("broker", "cocos")
+    .eq("instrument_type", "fci");
+  if (error) return { inserted: 0, error: error.message };
+  const lkey = (t, q, d) => `${d}|${t}|${(Number(q) || 0).toFixed(3)}`;
+  const byComp = new Set();
+  const legacy = new Map(); // filas sin comprobante → cuántas quedan por matchear
+  for (const p of existing || []) {
+    const comp = p.extra?.libro_comprobante;
+    if (comp) byComp.add(comp);
+    else { const k = lkey(p.ticker, p.quantity, p.entry_date); legacy.set(k, (legacy.get(k) || 0) + 1); }
+  }
+  const rows = [];
+  for (const o of fciOps) {
+    if (o.comprobante && byComp.has(o.comprobante)) continue;
+    const k = lkey(o.ticker, o.quantity, o.entry_date);
+    const n = legacy.get(k) || 0;
+    if (n > 0) { legacy.set(k, n - 1); continue; }
+    if (o.comprobante) byComp.add(o.comprobante);
+    rows.push({
+      user_id: userId, ticker: o.ticker, instrument_type: "fci",
+      operation_type: o.operation_type, quantity: o.quantity,
+      entry_price: o.entry_price, entry_currency: o.entry_currency,
+      entry_date: o.entry_date, broker: "cocos", settlement: "CI",
+      extra: { source: "libro_fci", libro_comprobante: o.comprobante },
+    });
+  }
+  for (let k = 0; k < rows.length; k += 200) {
+    const { error: e } = await supabase.from("positions").insert(rows.slice(k, k + 200));
+    if (e) return { inserted: 0, error: e.message };
+  }
+  return { inserted: rows.length, error: null };
+}
 function deriveFromLedger(movs) {
   const rows = movs || [];
   // Tickers con patas MEP (soberanos hard-dollar dolarizados: Dolar Mep /
@@ -4480,7 +4567,8 @@ function deriveFromLedger(movs) {
     if (m.ticker && /dolar mep|operatoria dolar/i.test(m.tipo_operacion || "")) mepTickers.add(m.ticker);
   }
   const lots = [];             // lotes individuales: cedear/acción/futuro/bono-sin-MEP
-  const netAgg = new Map();    // neteo: bonos-con-MEP + FCI
+  const fciOps = [];           // FCI: una fila de positions por suscripción/rescate
+  const netAgg = new Map();    // neteo: bonos-con-MEP
   const cash = {};
   const comm = {};   // costos por moneda, DESGLOSADOS: { comision, ddmm (derechos de mercado), iva }
   const caucionLegs = [];  // patas de caución (separar interés del principal de una abierta)
@@ -4516,17 +4604,21 @@ function deriveFromLedger(movs) {
     }
 
     const cat = m.categoria;
-    if (!["trade_cedear", "trade_bono", "trade_otro", "fci", "futuro"].includes(cat) || !m.ticker) continue;
-    let type, cur = "ARS", ticker = m.ticker, scale = 1;
+    if (cat === "fci") {
+      const op = fciOpFromMov(m);
+      if (op) fciOps.push(op);
+      continue;
+    }
+    if (!["trade_cedear", "trade_bono", "trade_otro", "futuro"].includes(cat) || !m.ticker) continue;
+    let type, cur = "ARS", ticker = m.ticker;
     if (cat === "trade_cedear") type = "cedear";
     else if (cat === "trade_otro") type = "stock";
     else if (cat === "futuro") type = "future";
-    else if (cat === "trade_bono") type = "bond_ars";
-    else { type = "fci"; scale = 1 / 1000; ticker = FCI_LEDGER_MAP[m.ticker] || m.ticker; cur = /usd/i.test(m.ticker || "") ? "USD-MEP" : "ARS"; }
+    else type = "bond_ars";
 
-    const q = (Number(m.cantidad) || 0) * scale;
+    const q = Number(m.cantidad) || 0;
     if (Math.abs(q) < 1e-12) continue;
-    const useNet = cat === "fci" || (cat === "trade_bono" && mepTickers.has(m.ticker));
+    const useNet = cat === "trade_bono" && mepTickers.has(m.ticker);
     if (useNet) {
       const key = type + "|" + ticker;
       const a = netAgg.get(key) || { type, ticker, cur, srcTicker: m.ticker, netQty: 0, buyVal: 0, buyQty: 0, first: null };
@@ -4567,7 +4659,7 @@ function deriveFromLedger(movs) {
   const cauColoc = caucionResult("coloc");
   const cauTom = caucionResult("tom");
   const cauNet = cauColoc + cauTom; // para el plug: solo el resultado, el principal abierto va al plug
-  return { positions, lots, cash, comm, cauNet, cauColoc, cauTom, pending, caucionOpen };
+  return { positions, lots, fciOps, cash, comm, cauNet, cauColoc, cauTom, pending, caucionOpen };
 }
 
 function ImportacionesModule() {
@@ -4654,6 +4746,13 @@ function ImportacionesView() {
       const { error } = await supabase.from("positions").insert(posRows.slice(k, k + 200));
       if (error) return error.message;
     }
+    // FCI: una fila de positions por suscripción/rescate del libro, con dedup
+    // (comprobante + backfill 30/07). No son 'derivado_libro' a propósito: el
+    // wipe de arriba no las toca y el dedup evita que se dupliquen — pero tras
+    // un "Borrar todo" (que sí las borra, junto con el libro) este mismo sync
+    // las reconstruye completas del libro re-importado.
+    const fciSync = await syncFciOps(user.id, derived.fciOps);
+    if (fciSync.error) return fciSync.error;
     // Caja itemizada: costos DESGLOSADOS (comisión / derechos de mercado / IVA,
     // cada uno alimenta "Comisiones acumuladas") + caución (alimenta su fila en
     // P&L por Instrumento) + un plug por moneda que cuadra al Σtotal del libro.
@@ -4747,7 +4846,7 @@ function ImportacionesView() {
     const err = await applyDerived(derived);
     setImporting(false);
     if (err) { setResult({ err }); return; }
-    setResult({ ok: newRows.length, applied: derived.positions.length + derived.lots.length });
+    setResult({ ok: newRows.length, applied: derived.positions.length + derived.lots.length + (derived.fciOps || []).length });
     setParsed(null); reloadBatches(); reloadMovs();
   };
 
