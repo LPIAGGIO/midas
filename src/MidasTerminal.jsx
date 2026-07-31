@@ -13155,7 +13155,11 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
   const consolidableSplitPositions = [];
   const individualPositions = [];
 
-  const SPLIT_TYPES = new Set(["bond_ars", "bond_usd", "on", "stock", "cedear"]);
+  // FCI entró al split el 31/07/2026: desde que el importador carga la
+  // historia completa (suscripciones Y rescates como filas), el loop
+  // individual valuaba cada rescate como tenencia POSITIVA (mismo bug que
+  // T30J6 en mayo) — con la historia de LP eso inflaba el TOTAL ~+280M.
+  const SPLIT_TYPES = new Set(["bond_ars", "bond_usd", "on", "stock", "cedear", "fci"]);
 
   for (const p of positions) {
     if (p.instrument_type === "future") {
@@ -13218,7 +13222,9 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
   // Sumando linealmente, el total queda correcto porque las cerradas
   // aportan SOLO el P&L (sin doble-contar capital).
   if (consolidableSplitPositions.length > 0) {
-    const groups = consolidatePositions(consolidableSplitPositions, bondPrices, futurePrices, undefined, stockPrices);
+    // fciPrices va acá desde que fci entró a SPLIT_TYPES (sin él los FCI
+    // caerían a costo silenciosamente).
+    const groups = consolidatePositions(consolidableSplitPositions, bondPrices, futurePrices, fciPrices, stockPrices);
     for (const g of groups) {
       if (g.valueAtMarket == null) {
         unvalued++;
