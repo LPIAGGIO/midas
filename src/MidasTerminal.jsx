@@ -14133,7 +14133,13 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
   // Calcular métricas finales para cada grupo
   const result = [];
   for (const g of groups.values()) {
-    const netQty = g.totalBuyQty - g.totalSellQty;
+    // Residuo de punto flotante → 0: las cuotapartes de FCI tienen 7
+    // decimales y compras−ventas que cierran exacto en papel dejan
+    // ~1e-16 acá — sin esto, un fondo cerrado aparecía como SHORT "−0"
+    // (caso Cocos Ahorro USD 31/07). Umbral 1e-6: irrelevante para
+    // cualquier instrumento real (ni una milésima de cuotaparte).
+    let netQty = g.totalBuyQty - g.totalSellQty;
+    if (Math.abs(netQty) < 1e-6) netQty = 0;
     const ppp = g.totalBuyQty > 0
       ? g.weightedBuyPriceNumerator / g.totalBuyQty
       : null;
