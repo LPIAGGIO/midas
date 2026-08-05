@@ -41,7 +41,8 @@ const ZONE_TOL = 0.006; // ±0,6%: pivotes a esa distancia son la misma zona
 
 // Acciones argentinas → su ADR en NYSE (ratio = acciones locales por ADR).
 const ARG_ADR = {
-  YPFD: { adr: "YPF", r: 1 }, GGAL: { adr: "GGAL", r: 10 }, PAMP: { adr: "PAM", r: 25 },
+  YPFD: { adr: "YPF", r: 10 }, // split 10:1 local 04/08/2026 (antes r=1)
+  GGAL: { adr: "GGAL", r: 10 }, PAMP: { adr: "PAM", r: 25 },
   BMA: { adr: "BMA", r: 10 }, CEPU: { adr: "CEPU", r: 10 }, EDN: { adr: "EDN", r: 20 },
   LOMA: { adr: "LOMA", r: 5 }, SUPV: { adr: "SUPV", r: 5 }, TGSU2: { adr: "TGS", r: 5 },
   CRES: { adr: "CRESY", r: 10 }, IRSA: { adr: "IRS", r: 10 }, BBAR: { adr: "BBAR", r: 3 },
@@ -478,6 +479,14 @@ async function main() {
         if (stopLvl && stopLvl > 0 && stopLvl < buyZone.hi) {
           mk(stopLvl, "down", `AUTO · STOP LOSS ${unit}${fmt(stopLvl)} si comprás en ${fmt(buyZone.hi)} · ${stopWhy}`, "stop", { score: null, touches: null });
         }
+        // PAPER IOL (Fase 0 del test de trading automático): si la señal
+        // califica con las reglas escritas — score >=7, R:R >=2, a favor de
+        // tendencia, papel operable en USA — queda registrada como orden
+        // límite SIMULADA en paper_iol_trades. paperPass() la llena y la
+        // maneja sola (stop, trailing, target). Cero plata real.
+        if (modo !== "local_ars" && sc.score >= 7 && rr != null && rr >= 2 && !contraTendencia && stopLvl && stopLvl > 0 && stopLvl < buyZone.hi && sellZone) {
+          await paperSignal(symUsa, tk, buyZone.hi, stopLvl, sellZone.lo, sc.score, rr, `score ${sc.score}/10 · R:R ${fmt1(rr)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}`).catch((e) => log(`[paper ${tk}] ${e.message}`));
+        }
         // 2b. Entrada swing (zona diaria más abajo) — para trade, no scalp.
         // La etiqueta CONTRA-TENDENCIA aplica acá también: la swing es la
         // tentación clásica de la promediada.
@@ -862,9 +871,91 @@ async function regimePass() {
   }
 }
 
+/* ───────── Paper trading IOL Auto (Fase 0, 03/08) ─────────
+ * Simula los trades que el sistema habría ejecutado en el segmento USA de
+ * IOL con las reglas de la Fase 1: solo señales del bot score >=7 y R:R >=2
+ * a favor de tendencia; sizing por riesgo (1,5% del capital de test);
+ * fill de límite pesimista (llena al precio límite, nunca mejor que el
+ * mercado); stop que solo sube por múltiplos de R (mismo espíritu que el
+ * ratchet); salida por stop, trailing o target; fees IOL USA 0,35%+IVA por
+ * pata con mínimo US$2+IVA. Al final del día se lee la tabla y se rinde
+ * cuentas. Cuando los números den, recién ahí se fondea. */
+const PAPER_CAP = 6500;      // USD simulados (≈ $10M al MEP)
+const PAPER_RISK = 0.015;    // riesgo por trade: 1,5% del capital
+const PAPER_FEE = 0.004235;  // 0,35% + IVA por pata
+const PAPER_FEE_MIN = 2.42;  // US$2 + IVA mínimo por pata
+
+async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
+  const { data: ex } = await supabase.from("paper_iol_trades").select("id,status,entry_limit").eq("sym", sym).in("status", ["pending", "open"]);
+  if ((ex || []).some((t) => t.status === "open")) return;          // ya hay posición simulada en el papel
+  const pend = (ex || []).filter((t) => t.status === "pending");
+  if (pend.some((t) => Math.abs(Number(t.entry_limit) - entry) / entry < 0.005)) return; // misma señal (rearme)
+  if (pend.length) await supabase.from("paper_iol_trades").update({ status: "cancelled", exit_reason: "reemplazada por señal nueva" }).in("id", pend.map((t) => t.id));
+  const rpp = entry - stop;
+  let qty = Math.floor((PAPER_CAP * PAPER_RISK) / rpp);
+  // Sin palanca: el capital comprometido en TODAS las órdenes vivas (abiertas
+  // + pendientes de otros papeles) limita la nueva — contado puro, como IOL.
+  const { data: vivas } = await supabase.from("paper_iol_trades").select("sym,qty,entry_limit,entry_price").in("status", ["pending", "open"]).neq("sym", sym);
+  const comprometido = (vivas || []).reduce((s, t) => s + t.qty * Number(t.entry_price ?? t.entry_limit), 0);
+  const disponible = PAPER_CAP - comprometido;
+  qty = Math.min(qty, Math.floor(disponible / entry));
+  if (qty < 1) { log(`[paper ${tk}] señal descartada: capital disponible US$${disponible.toFixed(0)} no alcanza (riesgo US$${rpp.toFixed(2)}/papel)`); return; }
+  const { error } = await supabase.from("paper_iol_trades").insert({ ticker: tk, sym, senal, score, rr, status: "pending", qty, entry_limit: entry, stop, stop_inicial: stop, target, r_value: rpp });
+  if (error) throw new Error(error.message);
+  log(`[paper ${tk}] orden límite simulada: ${qty} × US$${entry.toFixed(2)} · stop ${stop.toFixed(2)} · target ${target.toFixed(2)}`);
+}
+
+async function paperPass() {
+  const { data: trades } = await supabase.from("paper_iol_trades").select("*").in("status", ["pending", "open"]);
+  if (!trades?.length) return;
+  const now = Date.now();
+  for (const t of trades.filter((x) => x.status === "pending" && now - new Date(x.created_at).getTime() > 48 * 3600 * 1000)) {
+    await supabase.from("paper_iol_trades").update({ status: "cancelled", exit_reason: "expirada 48h sin fill" }).eq("id", t.id);
+  }
+  if (!inUsMarketWindow()) return;
+  const usaRes = await fetch("https://data912.com/live/usa_stocks", { headers: UA }).then((r) => r.json()).catch(() => []);
+  const px = {};
+  for (const it of usaRes || []) if (it?.symbol && Number(it.c) > 0) px[it.symbol.toUpperCase()] = Number(it.c);
+  const legFee = (notional) => Math.max(notional * PAPER_FEE, PAPER_FEE_MIN);
+  for (const t of trades) {
+    const p = px[t.sym.toUpperCase()];
+    if (!p) continue;
+    if (t.status === "pending") {
+      if (p <= Number(t.entry_limit)) {
+        await supabase.from("paper_iol_trades").update({ status: "open", entry_price: Math.min(Number(t.entry_limit), p), entry_ts: new Date().toISOString() }).eq("id", t.id);
+        log(`[paper ${t.ticker}] FILL simulado ${t.qty} × US$${Math.min(Number(t.entry_limit), p).toFixed(2)}`);
+      }
+      continue;
+    }
+    const entry = Number(t.entry_price), R = Number(t.r_value);
+    let stop = Number(t.stop);
+    // trailing por R (el poll de 60s hace de máximo desde la entrada):
+    // +1R → breakeven, +2R → protege 1R, ... y NUNCA baja.
+    const k = Math.floor((p - entry) / R);
+    if (k >= 1 && entry + (k - 1) * R > stop) {
+      stop = entry + (k - 1) * R;
+      await supabase.from("paper_iol_trades").update({ stop }).eq("id", t.id);
+      log(`[paper ${t.ticker}] trailing: stop sube a US$${stop.toFixed(2)} (+${k}R)`);
+    }
+    let exit = null, reason = null;
+    if (p <= stop) { exit = Math.min(stop, p); reason = stop > Number(t.stop_inicial) ? "trailing" : "stop"; }
+    else if (p >= Number(t.target)) { exit = Math.max(Number(t.target), p); reason = "target"; }
+    if (exit != null) {
+      const fees = legFee(entry * t.qty) + legFee(exit * t.qty);
+      const pnl = (exit - entry) * t.qty - fees;
+      await supabase.from("paper_iol_trades").update({
+        status: "closed", exit_price: exit, exit_ts: new Date().toISOString(), exit_reason: reason,
+        fees_usd: Math.round(fees * 100) / 100, pnl_usd: Math.round(pnl * 100) / 100,
+        pnl_pct: Math.round((pnl / (entry * t.qty)) * 10000) / 100,
+      }).eq("id", t.id);
+      log(`[paper ${t.ticker}] CIERRE ${reason}: US$${exit.toFixed(2)} · P&L US$${pnl.toFixed(2)}`);
+    }
+  }
+}
+
 /* ───────── Loop persistente ───────── */
 async function loop() {
-  log("niveles-auto v7 arrancando (cola 60s; rearme 15 min; ratchet 30 min; confirmaciones 10 min; tracks 60 min)");
+  log("niveles-auto v7 arrancando (cola 60s; paper IOL 60s; rearme 15 min; ratchet 30 min; confirmaciones 10 min; tracks 60 min)");
   let lastTracks = 0, lastConfirm = 0, lastRearm = 0, lastRatchet = 0, lastRegime = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -882,6 +973,7 @@ async function loop() {
         lastRegime = Date.now();
       }
       await main();
+      await paperPass().catch((e) => log("[paper]", e.message));
       if (Date.now() - lastConfirm > 10 * 60 * 1000) {
         await confirmTouches().catch((e) => log("[confirm]", e.message));
         lastConfirm = Date.now();

@@ -10137,7 +10137,6 @@ function buildCashMovementPayload(position, userId, allPositions) {
  *   - movements:        array completo de movements (ordenado por fecha desc)
  *   - balanceByCurrency: { ARS, "USD-MEP", "USD-CCL" } saldo neto actual
  *   - balanceAt(date, currency): saldo a una fecha específica
- *   - addManualMovement(type, currency, amount, date, notes): inserta deposit/withdrawal
  *   - syncForPosition(position): inserta o actualiza el movement para una position
  *                                 (idempotente: si ya existe, lo updatea; si no, lo crea)
  *   - removeForPosition(positionId): borra el movement asociado (cascade ya lo hace
@@ -10218,39 +10217,8 @@ function useCashMovements() {
     return total;
   }, [movements]);
 
-  /**
-   * Inserta un movement manual (deposit / withdrawal). El amount debe
-   * llegar SIEMPRE positivo; el signo lo da movement_type.
-   */
-  const addManualMovement = useCallback(async ({ movement_type, currency, amount, movement_date, broker, notes }) => {
-    if (!user) throw new Error("No hay sesión activa");
-    if (!["deposit", "withdrawal"].includes(movement_type)) {
-      throw new Error("addManualMovement solo acepta deposit o withdrawal");
-    }
-    if (!amount || amount <= 0) throw new Error("El monto debe ser positivo");
-
-    const row = {
-      user_id: user.id,
-      movement_type,
-      currency,
-      amount,
-      movement_date: movement_date || new Date().toLocaleDateString("en-CA", {
-        timeZone: "America/Argentina/Buenos_Aires",
-      }),
-      related_position_id: null,
-      broker: broker || "manual",
-      notes: notes || null,
-    };
-
-    const { data, error: err } = await supabase
-      .from("cash_movements")
-      .insert([row])
-      .select()
-      .single();
-    if (err) throw err;
-    setMovements((prev) => [data, ...prev]);
-    return data;
-  }, [user]);
+  // addManualMovement se eliminó (05/08/2026): los depósitos y retiros
+  // llegan del import del broker; solo quedan update/delete para corregir.
 
   /**
    * Sincroniza el cash_movement asociado a una position. Si ya existe
@@ -10451,7 +10419,6 @@ function useCashMovements() {
     movements,
     balanceByCurrency,
     balanceAt,
-    addManualMovement,
     updateManualMovement,
     syncForPosition,
     removeForPosition,
@@ -10554,7 +10521,7 @@ function fmtDateShort(iso) {
  * useBondPrices se encarga de fetchear y cachear esos precios.
  */
 
-function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxState, bondPricesState, futurePricesState, stockPricesState, fciPricesState, cashState, futureAdjustmentsState, onIngresar, onRetirar }) {
+function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxState, bondPricesState, futurePricesState, stockPricesState, fciPricesState, cashState, futureAdjustmentsState }) {
   const { fx, loading: fxLoading, error: fxError, lastUpdated: fxLastUpdated, refresh: refreshFx } = fxState;
   const { prices: bondPrices, loading: pricesLoading, error: pricesError, lastFetch: pricesLastFetch, refresh: refreshBondPrices } = bondPricesState;
   // futurePricesState viene de PortfolioDashboard (un solo hook compartido
@@ -10658,8 +10625,6 @@ function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxSt
           valuationCurrency={valuationCurrency}
           balanceByCurrency={balanceWithIol}
           futureAdjLookup={futureAdjLookup}
-          onIngresar={onIngresar}
-          onRetirar={onRetirar}
         />
         <DistributionCard
           positions={positions}
@@ -11110,7 +11075,7 @@ function computeRealizedTodayContado(positions, bondPrices, stockPrices, futureP
   return sum;
 }
 
-function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPrices, valuationCurrency, balanceByCurrency, futureAdjLookup, onIngresar, onRetirar }) {
+function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPrices, valuationCurrency, balanceByCurrency, futureAdjLookup }) {
   const { hidden: privHidden } = usePrivacy();
   // V2: ahora usamos precios de mercado de data912 cuando están disponibles.
   // El P&L se calcula como market - cost. Si no hay precio actualizado para
@@ -11393,76 +11358,9 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
         </div>
       )}
 
-      {/* Botones Ingresar / Retirar (modelo Balanz).
-       *
-       * Se usan para cargar movimientos manuales de cash (depósitos
-       * desde el banco al broker, retiros del broker al banco). Las
-       * compras y ventas mueven cash automático y NO requieren tocar
-       * estos botones. Si onIngresar/onRetirar no fueron pasados (caso
-       * de uso fuera del PortfolioDashboard), los botones no aparecen. */}
-      {(onIngresar || onRetirar) && (
-        <div
-          className="flex gap-2"
-          style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.border}` }}
-        >
-          {onRetirar && (
-            <button
-              onClick={onRetirar}
-              style={{
-                flex: 1,
-                backgroundColor: "transparent",
-                border: `1px solid ${C.border}`,
-                color: C.muted,
-                padding: "7px 10px",
-                fontSize: 11.5,
-                fontFamily: "'Roboto', sans-serif",
-                fontWeight: 500,
-                letterSpacing: "0.02em",
-                cursor: "pointer",
-                transition: "all 120ms ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = C.text;
-                e.currentTarget.style.borderColor = C.borderStrong;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = C.muted;
-                e.currentTarget.style.borderColor = C.border;
-              }}
-            >
-              Retirar
-            </button>
-          )}
-          {onIngresar && (
-            <button
-              onClick={onIngresar}
-              style={{
-                flex: 1,
-                backgroundColor: C.accent,
-                color: C.bg,
-                border: "none",
-                padding: "7px 10px",
-                fontSize: 11.5,
-                fontFamily: "'Roboto', sans-serif",
-                fontWeight: 600,
-                letterSpacing: "0.02em",
-                cursor: "pointer",
-                transition: "transform 120ms ease, box-shadow 120ms ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-1px)";
-                e.currentTarget.style.boxShadow = `0 4px 12px ${C.accentGlow}`;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            >
-              Ingresar
-            </button>
-          )}
-        </div>
-      )}
+      {/* Los depósitos y retiros ya no se cargan a mano: la caja se deriva
+       * del import del broker (libro CSV + movimientos automáticos de cada
+       * operación). Migración 05/08/2026 — la fuente de verdad es el import. */}
     </div>
   );
 }
@@ -15780,12 +15678,9 @@ function PortfolioDashboard({ onNavigate }) {
     });
   }, []);
   const [confirmingDelete, setConfirmingDelete] = useState(null);
-  // Modal de movimiento manual de cash (Ingresar / Retirar). null = cerrado.
-  // Cuando está abierto, contiene el `type` ("deposit" o "withdrawal") para
-  // que el modal sepa qué etiquetas y colores mostrar.
-  const [cashModalType, setCashModalType] = useState(null);
-  // Movement bajo edición. Si está seteado, el modal de cash arranca
-  // en modo edición con los valores precargados.
+  // Movement bajo edición (la CREACIÓN manual de depósitos/retiros se
+  // eliminó el 05/08/2026: la caja se deriva del import del broker; editar
+  // y borrar quedan disponibles para corregir movimientos históricos).
   const [editingCashMovement, setEditingCashMovement] = useState(null);
   // Movement pendiente de confirmación de borrado.
   const [confirmingDeleteCash, setConfirmingDeleteCash] = useState(null);
@@ -16055,8 +15950,6 @@ function PortfolioDashboard({ onNavigate }) {
             fciPricesState={fciPricesState}
             cashState={cashState}
             futureAdjustmentsState={futureAdjustmentsState}
-            onIngresar={() => setCashModalType("deposit")}
-            onRetirar={() => setCashModalType("withdrawal")}
           />
 
           {/* Vista consolidada (Modelo B): agrupa por ticker × moneda × tipo */}
@@ -16140,25 +16033,16 @@ function PortfolioDashboard({ onNavigate }) {
         />
       )}
 
-      {/* Modal de movimiento manual de cash (Ingresar / Retirar / Editar) */}
-      {(cashModalType || editingCashMovement) && (
+      {/* Modal de cash solo en modo edición (la creación manual se migró
+          al import del broker, 05/08/2026) */}
+      {editingCashMovement && (
         <CashMovementModal
           positions={positions}
-          type={cashModalType || editingCashMovement.movement_type}
+          type={editingCashMovement.movement_type}
           editingMovement={editingCashMovement}
-          onCancel={() => {
-            setCashModalType(null);
-            setEditingCashMovement(null);
-          }}
+          onCancel={() => setEditingCashMovement(null)}
           onSubmit={async (payload) => {
-            if (editingCashMovement) {
-              // Modo edición: update del movement existente
-              await cashState.updateManualMovement(editingCashMovement.id, payload);
-            } else {
-              // Modo creación: insert nuevo
-              await cashState.addManualMovement(payload);
-            }
-            setCashModalType(null);
+            await cashState.updateManualMovement(editingCashMovement.id, payload);
             setEditingCashMovement(null);
           }}
         />
@@ -19219,7 +19103,9 @@ function EditablePriceCell({ position, resolved, onSave }) {
  *   - type: "deposit" | "withdrawal" — predetermina título/colores/etiquetas
  *   - onCancel: cierra sin guardar
  *   - onSubmit({movement_type, currency, amount, movement_date, notes}):
- *       el padre se encarga de llamar al hook useCashMovements.addManualMovement
+ *       el padre updatea el movement con useCashMovements.updateManualMovement
+ *       (desde 05/08/2026 el modal solo abre en modo edición: los depósitos
+ *       y retiros nuevos llegan del import del broker)
  */
 function CashMovementModal({ type, editingMovement, onCancel, onSubmit, positions }) {
   const isEditing = Boolean(editingMovement);
