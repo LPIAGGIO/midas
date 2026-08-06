@@ -14756,13 +14756,19 @@ function filterClosedToToday(closedGroups, futurePrices, priorSettleByTicker) {
     if (todayPairs.length === 0) continue;
 
     const isFuture = g.instrument_type === "future";
-    // Settle del día anterior para futuros. Preferimos priorSettleByTicker
-    // (futures_settlements_history → estable, siempre el settle de AYER) y caemos
-    // al feed solo si falta. NO usar solo el feed: tras el cierre rola al settle
-    // de HOY y daría el P&L del día contra la base equivocada.
+    // Settle del día anterior para futuros. Regla del proyecto: la base del P&L
+    // del día es `reference` del feed matba (= settle de AYER, NO rola tras el
+    // cierre, a diferencia de `settlement` que pasa a ser el de HOY). Fallbacks:
+    // priorSettleByTicker (futures_settlements_history) y, último recurso, el
+    // settlement del feed. OJO: el worker futures-settlement se eliminó el
+    // 06/08/2026 → la tabla de historia quedó CONGELADA (última fila 04/08); por
+    // eso ya no puede ser la fuente primaria, solo un fallback si falta reference.
+    const fromFeedRef = Number(futurePrices?.[g.ticker]?.reference);
     const fromHist = priorSettleByTicker ? Number(priorSettleByTicker[g.ticker]) : NaN;
     const priorSettle = isFuture
-      ? (Number.isFinite(fromHist) ? fromHist : Number(futurePrices?.[g.ticker]?.settlement))
+      ? (Number.isFinite(fromFeedRef) && fromFeedRef > 0
+          ? fromFeedRef
+          : (Number.isFinite(fromHist) ? fromHist : Number(futurePrices?.[g.ticker]?.settlement)))
       : null;
 
     // Dos números:
@@ -14847,9 +14853,12 @@ function filterClosedToToday(closedGroups, futurePrices, priorSettleByTicker) {
  * P&L del día agrupado por TICKER (estilo pantalla "P&L Diario" de Cocos):
  * junta el realizado de hoy + el MTM de lo abierto en UN solo número por ticker.
  * Sumar computeDailyPnL sobre las ops crudas ya da el total diario por ticker
- * (cada compra arrastrada vs settle de ayer, cada venta de hoy vs su entrada).
- * Para no-futuros cerrados hoy se suma su realizado (el contado no entra en el
- * MTM de arriba). La suma de todos los tickers = el "P&L hoy" del banner.
+ * (cada compra arrastrada vs cierre de ayer, cada venta de hoy aporta FIJO
+ * (venta − precio_actual) → los pares cerrados hoy quedan INCLUIDOS en el MTM
+ * con base cierre-de-ayer; NO volver a sumarles el realizado, se duplica —
+ * bug SNDK 06/08). Solo los tickers PLANOS (salteados del MTM, caso SPCX)
+ * suman su cerrado-hoy aparte, re-basado al cierre de ayer (bug XOM 06/08).
+ * La suma de todos los tickers = el "P&L hoy" del banner.
  */
 /* P&L del día de FUTUROS por ticker, calculado por NETO (no lote por lote).
  * Clave: todos los lotes ARRASTRADOS de un ticker usan el MISMO settle de ayer,
@@ -14937,9 +14946,44 @@ function computeDailyPnlByTicker(positions, bondPrices, futurePrices, stockPrice
   try {
     const all = consolidatePositions(positions, bondPrices, futurePrices, fciPrices, stockPrices);
     const closedToday = filterClosedToToday(all.filter((g) => g.isClosed), futurePrices);
+    const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const preAgg = preTodayContadoAgg(positions, todayAR);
     for (const g of closedToday) {
       if (g.instrument_type === "future") continue; // futuros ya están en el MTM de arriba
-      const conv = convertValue(g.realizedPnl ?? 0, g.currency || "ARS", valuationCurrency, fx);
+      const tk = (g.ticker || "").trim().toUpperCase();
+      // Ticker NO plano: sus pares cerrados HOY ya están DENTRO del MTM lote-por-lote
+      // de arriba. Desde el fix "venta de hoy aporta fijo" (SNDK 28/07), la venta de
+      // hoy suma (venta − precio_actual) y la pata comprada arrastrada suma
+      // (precio_actual − cierre_ayer): el par completo aporta (venta − cierre_ayer),
+      // que ES su P&L del día. Sumar acá además g.realizedPnl (lifetime,
+      // entrada→salida) lo contaba DOS veces y con base histórica en vez del cierre
+      // de ayer (bug SNDK 06/08: −2,55M en el modal cuando el día real era ~−1,0M:
+      // MTM correcto −0,99M + realizado lifetime −1,55M duplicado). Solo los tickers
+      // PLANOS —salteados del MTM por el caso SPCX— necesitan sumar su cerrado acá.
+      if (!flatTk.has(tk)) continue;
+      // Ticker plano cerrado hoy: el aporte del día NO es el realizado lifetime.
+      // Las unidades ARRASTRADAS de días previos se miden contra el cierre de AYER
+      // (re-base con contadoDayPnlCarried, misma regla que computeRealizedTodayContado
+      // — bug MU 07/07). Sin esto, la pérdida/ganancia vieja de la pata comprada días
+      // atrás caía entera en el "hoy" (bug XOM 06/08: mostraba −140k lifetime por un
+      // lote comprado el 30/07, cuando el P&L del día real era ~0).
+      const isEq = g.instrument_type === "stock" || g.instrument_type === "cedear";
+      const m = isEq ? stockPrices?.[tk] : bondPrices?.[tk];
+      let prev = m?.previousClose;
+      if (prev == null && m?.changePct != null) {
+        const den = 1 + Number(m.changePct) / 100;
+        if (den > 0) prev = Number(m.price) / den;
+      }
+      const a = preAgg.get(tk);
+      const carriedQty = a ? a.qty : 0;
+      let dayValue;
+      if (Math.abs(carriedQty) < 1e-6) {
+        dayValue = g.realizedPnl ?? 0; // intradía puro: realizado completo (venta − compra)
+      } else {
+        const carriedCost = a.qty > 1e-6 ? a.value / a.qty : null;
+        dayValue = contadoDayPnlCarried(g, prev, carriedQty, carriedCost);
+      }
+      const conv = convertValue(dayValue, g.currency || "ARS", valuationCurrency, fx);
       if (conv != null) add(g.ticker, conv);
     }
   } catch (e) { /* noop */ }
