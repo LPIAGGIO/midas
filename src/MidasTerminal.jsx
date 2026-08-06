@@ -17405,6 +17405,41 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
   const [expanded, setExpanded] = useState(new Set());
   const isClosed = variant === "closed";
 
+  // PPP a mostrar en la vista de CERRADAS HOY: costo base de lo cerrado HOY.
+  //
+  // g.ppp trae el PPP histórico de TODAS las compras del ticker (lo arma
+  // consolidatePositions), pero el P&L de la fila es el realizado de los
+  // pares cerrados HOY, cuyo costo base son las compras-espejo de esos
+  // pares (el PPP que la posición tenía justo antes de cada venta de hoy).
+  // Mostrar el PPP histórico al lado de ese P&L es incoherente a simple
+  // vista: ej. SNDK con PPP histórico 10.676 y venta a 11.550 "parece"
+  // ganancia, pero el P&L de la fila es −939k porque los lotes cerrados
+  // hoy costaron ~13.2xx. Acá calculamos el promedio ponderado de las
+  // compras-espejo de los pares con venta de HOY, para que PPP vs "último
+  // precio" cuadre visualmente con el P&L% de la fila. Si el grupo no
+  // tiene pares de hoy (o falta el dato), se cae al g.ppp de siempre.
+  // OJO: es solo presentación — ningún cálculo de P&L usa este número.
+  const pppOverrides = useMemo(() => {
+    if (!isClosed) return null;
+    const today = getTodayStringAR();
+    const m = new Map();
+    for (const g of consolidated) {
+      let qtySum = 0;
+      let valSum = 0;
+      for (const op of g.operations || []) {
+        if (op?.operation_type !== "closed_pair" || op.entry_date !== today) continue;
+        const q = Number(op.quantity) || 0;
+        const bp = Number(op.entry_price); // precio de la compra-espejo del par
+        if (q > 0 && Number.isFinite(bp)) {
+          qtySum += q;
+          valSum += q * bp;
+        }
+      }
+      if (qtySum > 0) m.set(g.groupKey, valSum / qtySum);
+    }
+    return m;
+  }, [consolidated, isClosed]);
+
   // Orden por columna. sortKey null = orden por defecto (valueAtMarket desc,
   // tal como lo deja consolidatePositions). Click en un header cicla el
   // estado: descendente → ascendente → sin orden (vuelve al default).
@@ -17449,7 +17484,10 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
           return Number.isFinite(n) ? n : -Infinity;
         }
         case "ppp": {
-          const n = Number(g.ppp);
+          // En cerradas-hoy ordenamos por el PPP que se MUESTRA (override
+          // del día), no por el histórico — si no, el orden no matchea la
+          // columna que el usuario ve.
+          const n = Number(pppOverrides?.get(g.groupKey) ?? g.ppp);
           return Number.isFinite(n) ? n : -Infinity;
         }
         case "precio": {
@@ -17482,7 +17520,7 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
       return sortDir === "asc" ? cmp : -cmp;
     });
     return rows;
-  }, [consolidated, sortKey, sortDir]);
+  }, [consolidated, sortKey, sortDir, pppOverrides]);
 
   // Agrupado por categoría estilo Cocos: cada categoría lleva su
   // fila-cabecera con subtotales. Dentro de la categoría, filas por valor
@@ -17625,6 +17663,7 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
                     onDelete={onDelete}
                     onUpdatePrice={onUpdatePrice}
                     readOnlyPrice={isClosed}
+                    pppOverride={pppOverrides?.get(g.groupKey) ?? null}
                   />
                 ))}
               </Fragment>
@@ -17637,7 +17676,10 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
 }
 
 
-function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPrices, futureAdjLookup, expanded, onToggle, onEdit, onDelete, onUpdatePrice, readOnlyPrice = false }) {
+// pppOverride: PPP alternativo SOLO para mostrar en la celda PPP (lo pasa la
+// tabla de cerradas-hoy con el costo base de los pares cerrados HOY, para que
+// la celda cuadre con el P&L de la fila). null = usar group.ppp como siempre.
+function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPrices, futureAdjLookup, expanded, onToggle, onEdit, onDelete, onUpdatePrice, readOnlyPrice = false, pppOverride = null }) {
   // Broker(s) del grupo: "iol"/"cocos"/"manual" si es uno solo, "mixed"
   // si la fila consolida operaciones de distintos brokers.
   const rowBroker = groupBroker(group);
@@ -17876,7 +17918,13 @@ function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPric
         </PTd>
         <PTd dense align="right">
           <span className="eco-mono">
-            {group.ppp != null ? fmtNumber(group.ppp, { maxDecimals: 4, smartDecimals: true }) : "—"}
+            {/* En cerradas-hoy, pppOverride trae el costo base de lo cerrado
+                HOY (compras-espejo de los pares del día) — sin él, la celda
+                mostraría el PPP histórico y no cuadraría con el P&L de la
+                fila. Fallback al PPP de siempre si no hay pares de hoy. */}
+            {(pppOverride ?? group.ppp) != null
+              ? fmtNumber(pppOverride ?? group.ppp, { maxDecimals: 4, smartDecimals: true })
+              : "—"}
           </span>
         </PTd>
         <PTd dense align="right" onClick={(e) => e.stopPropagation()}>
