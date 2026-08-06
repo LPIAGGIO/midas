@@ -17602,13 +17602,12 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
             {categorized.map((cat) => (
               <Fragment key={cat.key}>
                 {/* Fila-cabecera de categoría (estilo Cocos): fondo apenas
-                    más claro, nombre a la izquierda y subtotales alineados
-                    con las columnas P&L / Total. El colSpan cubre desde el
-                    chevron hasta la columna previa al P&L (la variante de
-                    cerradas no tiene "P&L Hoy", por eso una celda menos). */}
+                    más claro, solo el nombre. Los subtotales por categoría
+                    se probaron y se sacaron (06/08): al lado del P&L por
+                    fila generaban confusión sobre qué número era de quién. */}
                 <tr style={{ backgroundColor: "rgba(255,255,255,0.035)", borderBottom: `1px solid ${C.border}` }}>
                   <td
-                    colSpan={isClosed ? 5 : 6}
+                    colSpan={isClosed ? 9 : 10}
                     style={{
                       padding: "4px 14px",
                       fontSize: 10.5,
@@ -17620,33 +17619,6 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
                   >
                     {cat.label}
                   </td>
-                  <td
-                    style={{
-                      padding: "4px 14px",
-                      textAlign: "right",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      fontFamily: "'JetBrains Mono', monospace",
-                      color: cat.subtotalPnl == null ? C.dim : cat.subtotalPnl >= 0 ? C.green : C.red,
-                    }}
-                  >
-                    {cat.subtotalPnl != null
-                      ? `${cat.subtotalPnl >= 0 ? "+" : ""}${fmtNumber(cat.subtotalPnl, { maxDecimals: 2 })}`
-                      : ""}
-                  </td>
-                  <td
-                    style={{
-                      padding: "4px 14px",
-                      textAlign: "right",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      fontFamily: "'JetBrains Mono', monospace",
-                      color: C.text,
-                    }}
-                  >
-                    {cat.subtotalValue != null ? fmtNumber(cat.subtotalValue, { maxDecimals: 2 }) : ""}
-                  </td>
-                  <td colSpan={2} />
                 </tr>
                 {cat.rows.map((g) => (
                   <ConsolidatedRow
