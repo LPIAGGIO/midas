@@ -17044,22 +17044,25 @@ function ConsolidatedSection({
         </div>
       </div>
 
-      {/* Filtros (chips por tipo) */}
+      {/* Filtros (chips por tipo). El número del chip es la cantidad de
+          PAPELES distintos (tickers), no de operaciones — 349 filas de
+          historial no le dicen nada al usuario; "Bonos (3)" sí (06/08). */}
       <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 12 }}>
         <FilterChip
           active={filter === "all"}
           onClick={() => setFilter("all")}
-          label={`Todas (${positions.length})`}
+          label={`Todas (${new Set(positions.map((p) => (p.ticker || "").trim().toUpperCase())).size})`}
         />
         {presentTypes.map((type) => {
           const meta = INSTRUMENT_TYPES[type];
           if (!meta) return null;
-          const count =
+          const matches =
             type === "bond"
               ? positions.filter(
                   (p) => p.instrument_type === "bond_ars" || p.instrument_type === "bond_usd"
-                ).length
-              : positions.filter((p) => p.instrument_type === type).length;
+                )
+              : positions.filter((p) => p.instrument_type === type);
+          const count = new Set(matches.map((p) => (p.ticker || "").trim().toUpperCase())).size;
           return (
             <FilterChip
               key={type}
