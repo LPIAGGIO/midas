@@ -10554,6 +10554,7 @@ function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxSt
           valuationCurrency={valuationCurrency}
           balanceByCurrency={balanceWithIol}
           futureAdjLookup={futureAdjLookup}
+          movements={cashState?.movements}
         />
         <DistributionCard
           positions={positions}
@@ -11004,7 +11005,7 @@ function computeRealizedTodayContado(positions, bondPrices, stockPrices, futureP
   return sum;
 }
 
-function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPrices, valuationCurrency, balanceByCurrency, futureAdjLookup }) {
+function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPrices, valuationCurrency, balanceByCurrency, futureAdjLookup, movements }) {
   const { hidden: privHidden } = usePrivacy();
   // V2: ahora usamos precios de mercado de data912 cuando están disponibles.
   // El P&L se calcula como market - cost. Si no hay precio actualizado para
@@ -11121,11 +11122,34 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
     return total;
   }, [balanceByCurrency, valuationCurrency, fx]);
 
-  // Total efectivo en pantalla: posiciones a mercado + cash. El P&L NO
-  // suma cash porque el cash no tiene "ganancia" — es plata depositada
-  // o recibida por venta, ya valuada al 100% de su monto.
+  // Dinero COMPROMETIDO: al saldo liquidado le sumamos los movimientos
+  // fechados a futuro (ventas T+1 pendientes de liquidar, devoluciones de
+  // caución proyectadas). El settled solo castigaba el patrimonio los días
+  // de mucha venta: la plata "a liquidar" existe, solo que llega mañana —
+  // es el "Total dinero" que muestra la app de Cocos (06/08).
+  const pendingCashInValuation = useMemo(() => {
+    if (!movements?.length) return 0;
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const byCur = {};
+    for (const m of movements) {
+      if (!m.movement_date || m.movement_date <= today) continue;
+      const sign = (m.movement_type === "deposit" || m.movement_type === "sale_proceeds") ? 1 : -1;
+      byCur[m.currency] = (byCur[m.currency] || 0) + sign * Number(m.amount || 0);
+    }
+    let total = 0;
+    for (const [cur, amount] of Object.entries(byCur)) {
+      const conv = convertValue(amount, cur, valuationCurrency, fx);
+      if (conv != null) total += conv;
+    }
+    return total;
+  }, [movements, valuationCurrency, fx]);
+  const committedCash = cashInValuation + pendingCashInValuation;
+
+  // Total efectivo en pantalla: posiciones a mercado + dinero comprometido.
+  // El P&L NO suma cash porque el cash no tiene "ganancia" — es plata
+  // depositada o recibida por venta, ya valuada al 100% de su monto.
   const positionsValue = totals.value ?? 0;
-  const totalWithCash = positionsValue + cashInValuation;
+  const totalWithCash = positionsValue + committedCash;
 
   // Si todas las posiciones cayeron al fallback "a costo" (sin precio de
   // mercado), mostramos el badge "A costo" porque el total no refleja
@@ -11158,11 +11182,31 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
             letterSpacing: "-0.02em",
           }}
         >
-          {(totals.value !== null || cashInValuation !== 0)
+          {(totals.value !== null || committedCash !== 0)
             ? maskAmount(fmtCurrencyValue(totalWithCash, valuationCurrency === "ARS" ? "ARS" : "USD"), privHidden)
             : "—"}
         </span>
         <InlinePrivacyEye size={18} />
+      </div>
+
+      {/* Desglose estilo Cocos (06/08, pedido de LP): la tenencia real por
+          un lado y el dinero (la palanca, en negativo) por el otro — el
+          número grande de arriba es el patrimonio que resulta de los dos.
+          Sin esto, el total neteado escondía cuánta caución hay detrás. */}
+      <div className="flex items-center gap-3" style={{ marginBottom: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5 }}>
+        <span style={{ color: C.muted, fontFamily: "'Roboto', sans-serif", fontSize: 10 }}>Tenencia</span>
+        <span style={{ color: C.text, fontWeight: 600 }}>
+          {maskAmount(fmtCurrencyValue(positionsValue, valuationCurrency === "ARS" ? "ARS" : "USD"), privHidden)}
+        </span>
+        <span style={{ color: C.muted, fontFamily: "'Roboto', sans-serif", fontSize: 10 }}>· Dinero</span>
+        <span style={{ color: committedCash < 0 ? C.red : C.text, fontWeight: 600 }}>
+          {maskAmount(fmtCurrencyValue(committedCash, valuationCurrency === "ARS" ? "ARS" : "USD"), privHidden)}
+        </span>
+        {pendingCashInValuation !== 0 && (
+          <span style={{ color: C.dim, fontFamily: "'Roboto', sans-serif", fontSize: 9.5 }}>
+            (incl. {maskAmount(fmtCurrencyValue(pendingCashInValuation, valuationCurrency === "ARS" ? "ARS" : "USD"), privHidden)} a liquidar)
+          </span>
+        )}
       </div>
 
       {/* P&L: aparece solo si hay precio de mercado real para al menos
