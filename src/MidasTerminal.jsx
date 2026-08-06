@@ -11189,24 +11189,29 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
         <InlinePrivacyEye size={18} />
       </div>
 
-      {/* Desglose estilo Cocos (06/08, pedido de LP): la tenencia real por
-          un lado y el dinero (la palanca, en negativo) por el otro — el
-          número grande de arriba es el patrimonio que resulta de los dos.
-          Sin esto, el total neteado escondía cuánta caución hay detrás. */}
-      <div className="flex items-center gap-3" style={{ marginBottom: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5 }}>
-        <span style={{ color: C.muted, fontFamily: "'Roboto', sans-serif", fontSize: 10 }}>Tenencia</span>
-        <span style={{ color: C.text, fontWeight: 600 }}>
-          {maskAmount(fmtCurrencyValue(positionsValue, valuationCurrency === "ARS" ? "ARS" : "USD"), privHidden)}
-        </span>
-        <span style={{ color: C.muted, fontFamily: "'Roboto', sans-serif", fontSize: 10 }}>· Dinero</span>
-        <span style={{ color: committedCash < 0 ? C.red : C.text, fontWeight: 600 }}>
-          {maskAmount(fmtCurrencyValue(committedCash, valuationCurrency === "ARS" ? "ARS" : "USD"), privHidden)}
-        </span>
-        {pendingCashInValuation !== 0 && (
-          <span style={{ color: C.dim, fontFamily: "'Roboto', sans-serif", fontSize: 9.5 }}>
-            (incl. {maskAmount(fmtCurrencyValue(pendingCashInValuation, valuationCurrency === "ARS" ? "ARS" : "USD"), privHidden)} a liquidar)
-          </span>
-        )}
+      {/* Desglose estilo Cocos (06/08, pedido de LP): dos bloques con el
+          número arriba y la etiqueta abajo — "Tenencia valorizada" (lo que
+          hay en cartera, en grande) y "Total dinero" (la palanca, en rojo
+          cuando es negativa) separados por un divisor vertical, igual que
+          la app del broker. El número grande de arriba es el patrimonio. */}
+      <div className="flex items-start gap-4" style={{ marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono', monospace" }}>
+            {maskAmount(fmtCurrencyValue(positionsValue, valuationCurrency === "ARS" ? "ARS" : "USD"), privHidden)}
+          </div>
+          <div style={{ fontSize: 9.5, color: C.muted, fontFamily: "'Roboto', sans-serif", marginTop: 2 }}>
+            Tenencia valorizada
+          </div>
+        </div>
+        <div style={{ width: 1, alignSelf: "stretch", backgroundColor: C.border }} />
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: committedCash < 0 ? C.red : C.text, fontFamily: "'JetBrains Mono', monospace" }}>
+            {maskAmount(fmtCurrencyValue(committedCash, valuationCurrency === "ARS" ? "ARS" : "USD"), privHidden)}
+          </div>
+          <div style={{ fontSize: 9.5, color: C.muted, fontFamily: "'Roboto', sans-serif", marginTop: 2 }}>
+            Total dinero{pendingCashInValuation !== 0 ? " · incl. a liquidar" : ""}
+          </div>
+        </div>
       </div>
 
       {/* P&L: aparece solo si hay precio de mercado real para al menos
@@ -15688,12 +15693,10 @@ function PortfolioDashboard({ onNavigate }) {
     const iolCashTotal = Object.values(iolCashByCurrency || {})
       .reduce((s, v) => s + (Number(v) || 0), 0);
     if (iolCashTotal !== 0) set.add("iol");
-    const ordered = ["iol", "cocos", "balanz", "eco", "manual"].filter((b) => set.has(b));
-    const manualCash = cashState?.balanceByCurrency || {};
-    if (Object.values(manualCash).some((v) => Number(v) !== 0)) {
-      ordered.push("efectivo");
-    }
-    return ordered;
+    // El chip "Efectivo" se sacó (06/08, pedido de LP): el desglose
+    // Tenencia · Dinero de la tarjeta Total ya cuenta esa historia y el
+    // toggle solo agregaba un click confuso.
+    return ["iol", "cocos", "balanz", "eco", "manual"].filter((b) => set.has(b));
   }, [positions, cashState, iolCashByCurrency]);
 
   // Posiciones tras aplicar el filtro de broker. Es la base GLOBAL: la
