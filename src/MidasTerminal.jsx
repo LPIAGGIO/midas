@@ -17045,35 +17045,46 @@ function ConsolidatedSection({
       </div>
 
       {/* Filtros (chips por tipo). El número del chip es la cantidad de
-          PAPELES distintos (tickers), no de operaciones — 349 filas de
-          historial no le dicen nada al usuario; "Bonos (3)" sí (06/08). */}
-      <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 12 }}>
-        <FilterChip
-          active={filter === "all"}
-          onClick={() => setFilter("all")}
-          label={`Todas (${new Set(positions.map((p) => (p.ticker || "").trim().toUpperCase())).size})`}
-        />
-        {presentTypes.map((type) => {
-          const meta = INSTRUMENT_TYPES[type];
-          if (!meta) return null;
-          const matches =
-            type === "bond"
-              ? positions.filter(
-                  (p) => p.instrument_type === "bond_ars" || p.instrument_type === "bond_usd"
-                )
-              : positions.filter((p) => p.instrument_type === type);
-          const count = new Set(matches.map((p) => (p.ticker || "").trim().toUpperCase())).size;
-          return (
+          papeles con posición ABIERTA (neto ≠ 0), no de operaciones ni de
+          tickers históricos — "Bonos (3)" es lo que hay en cartera HOY. */}
+      {(() => {
+        const nets = new Map(); // ticker → { net, type }
+        for (const p of positions) {
+          const tk = (p.ticker || "").trim().toUpperCase();
+          if (!tk) continue;
+          const q = (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+          const prev = nets.get(tk) || { net: 0, type: p.instrument_type };
+          prev.net += q;
+          nets.set(tk, prev);
+        }
+        const open = [...nets.values()].filter((x) => Math.abs(x.net) > 1e-6);
+        const countFor = (type) =>
+          type === "bond"
+            ? open.filter((x) => x.type === "bond_ars" || x.type === "bond_usd").length
+            : open.filter((x) => x.type === type).length;
+        return (
+          <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 12 }}>
             <FilterChip
-              key={type}
-              active={filter === type}
-              onClick={() => setFilter(type)}
-              label={`${meta.label} (${count})`}
-              color={meta.color}
+              active={filter === "all"}
+              onClick={() => setFilter("all")}
+              label={`Todas (${open.length})`}
             />
-          );
-        })}
-      </div>
+            {presentTypes.map((type) => {
+              const meta = INSTRUMENT_TYPES[type];
+              if (!meta) return null;
+              return (
+                <FilterChip
+                  key={type}
+                  active={filter === type}
+                  onClick={() => setFilter(type)}
+                  label={`${meta.label} (${countFor(type)})`}
+                  color={meta.color}
+                />
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Banner de ajustes pendientes de futuros: aparece solo si hay
           al menos un ajuste con status='pending'. Click → abre modal
