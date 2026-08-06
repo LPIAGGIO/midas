@@ -200,21 +200,8 @@ const NAV = [
       { id: "base-monetaria", label: "Base Monetaria", icon: Coins },
     ],
   },
-  {
-    id: "mercado",
-    label: "Mercado",
-    icon: TrendingUp,
-    type: "group",
-    children: [
-      { id: "acciones", label: "Acciones", icon: LineChart },
-      { id: "cedears", label: "Cedears", icon: Globe },
-      { id: "ons", label: "ONs", icon: Building2 },
-      { id: "bonos", label: "Bonos Soberanos", icon: Landmark },
-      { id: "lecaps", label: "Lecaps", icon: Receipt },
-      { id: "cer", label: "CER", icon: Percent },
-      { id: "duales", label: "Duales", icon: Split },
-    ],
-  },
+  // El grupo "Mercado" (7 pantallas de historial de precios genéricas) se
+  // eliminó el 06/08/2026 a pedido de LP: cero uso, puro peso muerto.
   {
     id: "analizadores",
     label: "Analizadores",
@@ -1456,64 +1443,6 @@ function MidasApp({ allowedModules = null }) {
                 linkedBrokers={linkedBrokers}
                 brokersLoading={brokersLoading}
                 refetchBrokers={refetchBrokers}
-              />
-            ) : active === "bonos" ? (
-              <PriceHistoryModule
-                key={active}
-                title="Bonos Soberanos"
-                category="soberano"
-                defaultTicker="AL30"
-                quickPicks={["AL30", "GD30", "AE38", "AL35", "GD35", "AL41"]}
-              />
-            ) : active === "lecaps" ? (
-              <PriceHistoryModule
-                key={active}
-                title="Lecaps"
-                category="lecap"
-                defaultTicker="T30J6"
-                quickPicks={["T30J6", "S30O6", "S31G6", "T15E7", "T30A7", "S30N6"]}
-              />
-            ) : active === "duales" ? (
-              <PriceHistoryModule
-                key={active}
-                title="Duales"
-                category="dual"
-                defaultTicker="TTJ26"
-                quickPicks={["TTJ26", "TTS26", "TTD26"]}
-              />
-            ) : active === "cer" ? (
-              <PriceHistoryModule
-                key={active}
-                title="CER"
-                category="cer"
-                defaultTicker="TX26"
-                quickPicks={["TX26", "TZX26", "TZX27", "TZXD6", "TZXD7", "DICP"]}
-              />
-            ) : active === "ons" ? (
-              <PriceHistoryModule
-                key={active}
-                title="ONs"
-                category="on"
-                defaultTicker="YMCWO"
-                quickPicks={["YMCWO", "MU32O", "YM35O", "TTCDO"]}
-              />
-            ) : active === "acciones" ? (
-              <PriceHistoryModule
-                key={active}
-                title="Acciones"
-                source="equity"
-                kind="stock"
-                defaultTicker="GGAL"
-                quickPicks={["GGAL", "COME", "BYMA", "TXAR", "SUPV", "TRAN"]}
-              />
-            ) : active === "cedears" ? (
-              <PriceHistoryModule
-                key={active}
-                title="CEDEARs"
-                source="equity"
-                kind="cedear"
-                defaultTicker="AMZN"
-                quickPicks={["AMZN", "GOOGL", "MSTR", "NU", "GLOB"]}
               />
             ) : active === "bandas-cambiarias" ? (
               <BandasCambiariasModule key={active} />
@@ -12083,6 +12012,408 @@ function flowsTdStyle(align) {
 }
 
 
+/* ─────────────── PortfolioCocosSection ───────────────
+ *
+ * Réplica del layout de la app de Cocos ("Expresado en AR$"): tarjetas de
+ * Dinero por moneda arriba + tabla de Instrumentos agrupada por CATEGORÍA
+ * (Bonos públicos / ONs / Cedears / Acciones / Fondos / Futuros / Cauciones),
+ * cada una con su fila-cabecera de subtotal.
+ *
+ * ¿Por qué existe si ya está ConsolidatedSection? Porque la vista del broker
+ * agrupa por categoría con subtotales y doble columna día/histórico — es la
+ * foto mental que LP ya tiene de la app de Cocos y sirve para conciliar
+ * contra el broker de un vistazo. Además mejora a Cocos en un punto: los
+ * futuros, que Cocos muestra valuados en $0, acá muestran el MTM pendiente
+ * de acreditar (misma matemática que TotalCard vía computeFutureUncreditedPnl)
+ * y el nocional como referencia de exposición.
+ *
+ * Toda la valuación va en ARS (como Cocos). No es colapsable a propósito:
+ * es una vista de conciliación, tiene que estar siempre a la vista.
+ */
+function PortfolioCocosSection({ positions, fxState, bondPricesState, futurePricesState, stockPricesState, fciPricesState, cashState, futureAdjustmentsState }) {
+  const fx = fxState?.fx;
+  const bondPrices = bondPricesState?.prices || {};
+  const futurePrices = futurePricesState?.prices || {};
+  const stockPrices = stockPricesState?.prices || {};
+  const fciPrices = fciPricesState?.prices || {};
+  const movements = cashState?.movements || [];
+
+  // Mismo lookup de adjustments que usan TotalCard/DistributionCard: el valor
+  // de un futuro acá es SOLO el P&L no acreditado (lo acreditado ya está en
+  // la caja; sumarlo de nuevo sería double-counting).
+  const pendingAdjustments = futureAdjustmentsState?.pendingAdjustments || [];
+  const confirmedAdjustments = futureAdjustmentsState?.confirmedAdjustments || [];
+  const futureAdjLookup = useMemo(
+    () => buildFutureAdjLookup(pendingAdjustments, confirmedAdjustments),
+    [pendingAdjustments, confirmedAdjustments]
+  );
+
+  // ── Tarjetas de Dinero por moneda ─────────────────────────────────────
+  // Cocos separa el saldo en "Hoy (C.I.)" / "24hs" / "Más de 24hs" porque la
+  // liquidación bursátil es T+1: la plata de una venta de hoy recién está
+  // disponible mañana hábil. Replicamos el bucketeo por movement_date:
+  //   - settled: fecha <= hoy (zona AR) → disponible contado inmediato
+  //   - t1:      fecha en el próximo día hábil → "24hs"
+  //   - later:   fecha posterior → "Más de 24hs"
+  const cashCards = useMemo(() => {
+    const today = getTodayStringAR();
+    const nextBiz = addBusinessDays(today, 1);
+    const buckets = {};
+    for (const m of movements) {
+      const cur = m.currency;
+      if (!cur) continue;
+      if (!buckets[cur]) buckets[cur] = { settled: 0, t1: 0, later: 0 };
+      // Signo por tipo: deposit/sale_proceeds suman, withdrawal/purchase_cost
+      // restan (misma convención que balanceByCurrency de useCashMovements).
+      const sign = (m.movement_type === "deposit" || m.movement_type === "sale_proceeds") ? 1 : -1;
+      const amt = sign * (Number(m.amount) || 0);
+      if (!m.movement_date || m.movement_date <= today) buckets[cur].settled += amt;
+      else if (m.movement_date <= nextBiz) buckets[cur].t1 += amt;
+      else buckets[cur].later += amt;
+    }
+    const ORDER = ["ARS", "USD-MEP", "USD-CCL"];
+    const TITLES = { "ARS": "Peso Argentino", "USD-MEP": "Dólar MEP", "USD-CCL": "Dólar Cable" };
+    return ORDER
+      .filter((cur) => {
+        const b = buckets[cur];
+        // Solo monedas con algún saldo: una card en $0 es ruido visual.
+        return b && (Math.abs(b.settled) > 0.005 || Math.abs(b.t1) > 0.005 || Math.abs(b.later) > 0.005);
+      })
+      .map((cur) => ({
+        cur,
+        title: TITLES[cur],
+        ...buckets[cur],
+        total: buckets[cur].settled + buckets[cur].t1 + buckets[cur].later,
+      }));
+  }, [movements]);
+
+  // ── Grupos consolidados (misma fuente que el resto del dashboard) ─────
+  const consolidated = useMemo(
+    () => consolidatePositions(positions, bondPrices, futurePrices, fciPrices, stockPrices),
+    [positions, bondPrices, futurePrices, fciPrices, stockPrices]
+  );
+
+  // P&L del día por ticker, ya convertido a ARS. Es la MISMA función que
+  // alimenta el modal "P&L Diario" de TotalCard — así la doble columna
+  // día/histórico de esta tabla siempre cuadra con el banner de arriba.
+  const dailyByTicker = useMemo(() => {
+    const map = new Map();
+    for (const r of computeDailyPnlByTicker(positions, bondPrices, futurePrices, stockPrices, futureAdjLookup, fciPrices, fx, "ARS")) {
+      map.set(r.ticker, r.pnl);
+    }
+    return map;
+  }, [positions, bondPrices, futurePrices, stockPrices, futureAdjLookup, fciPrices, fx]);
+
+  // MTM no acreditado por ticker de futuro. Sumamos sobre TODOS los grupos
+  // del ticker (abierto + cerrado del split de consolidatePositions) porque
+  // un round-trip cerrado hoy también tiene realizado pendiente de acreditar
+  // — exactamente como lo suma computePortfolioTotals para el patrimonio.
+  const futureUncreditedByTicker = useMemo(() => {
+    const map = new Map();
+    const futs = (positions || []).filter((p) => p.instrument_type === "future");
+    if (futs.length === 0) return map;
+    const groups = consolidatePositions(futs, bondPrices, futurePrices);
+    for (const g of groups) {
+      const u = computeFutureUncreditedPnl(g, futureAdjLookup);
+      if (u == null) continue;
+      const tk = (g.ticker || "").toUpperCase();
+      map.set(tk, (map.get(tk) || 0) + u);
+    }
+    return map;
+  }, [positions, bondPrices, futurePrices, futureAdjLookup]);
+
+  // ── Armado de categorías (orden fijo estilo Cocos) ────────────────────
+  const built = useMemo(() => {
+    const CATEGORIES = [
+      { key: "bonos",     label: "Bonos públicos", types: ["bond_ars", "bond_usd"] },
+      { key: "ons",       label: "ONs",            types: ["on"] },
+      { key: "cedears",   label: "Cedears",        types: ["cedear"] },
+      { key: "acciones",  label: "Acciones",       types: ["stock"] },
+      { key: "fondos",    label: "Fondos",         types: ["fci"] },
+      { key: "futuros",   label: "Futuros",        types: ["future"] },
+      { key: "cauciones", label: "Cauciones",      types: ["caucion"] },
+    ];
+    // Solo tenencia viva: epsilon 1e-6 (residuo de punto flotante de FCI con
+    // 7 decimales — mismo umbral que usa consolidatePositions).
+    const live = consolidated.filter((g) => Math.abs(g.netQty || 0) > 1e-6);
+
+    const cats = [];
+    for (const cat of CATEGORIES) {
+      const groups = live.filter((g) => cat.types.includes(g.instrument_type));
+      if (groups.length === 0) continue;
+      const isFut = cat.key === "futuros";
+
+      const rows = groups.map((g) => {
+        const tk = (g.ticker || "").toUpperCase();
+        let importeArs = null;
+        let nocionalArs = null;
+        if (isFut) {
+          // Futuros: el "Importe" es el MTM pendiente de acreditar, NO el
+          // nocional (no pagaste capital al abrir). El nocional va como
+          // línea chica de referencia de exposición.
+          const unc = futureUncreditedByTicker.get(tk);
+          if (unc != null) importeArs = unc; // futuros siempre en ARS
+          if (g.currentPrice != null) nocionalArs = g.netQty * g.currentPrice * 1000;
+        } else {
+          importeArs = g.valueAtMarket != null
+            ? convertValue(g.valueAtMarket, g.currency || "ARS", "ARS", fx)
+            : null;
+        }
+        const dayArs = dailyByTicker.has(tk) ? dailyByTicker.get(tk) : null;
+        const resultArs = g.pnl != null
+          ? convertValue(g.pnl, g.currency || "ARS", "ARS", fx)
+          : null;
+        // % variación HISTÓRICA = pnl / costo total. Para futuros el costo es
+        // 0 por definición, así que cae al pnlPct del grupo (pnl / nocional).
+        const costAbs = g.valueAtCost != null ? Math.abs(g.valueAtCost) : 0;
+        const varPct = (g.pnl != null && costAbs > 0)
+          ? (g.pnl / costAbs) * 100
+          : g.pnlPct;
+        return {
+          key: g.groupKey,
+          ticker: tk,
+          qty: g.netQty,
+          price: g.currentPrice,
+          ppc: g.ppp,
+          importeArs,
+          nocionalArs,
+          dayArs,
+          varPct,
+          resultArs,
+          isFut,
+        };
+      });
+
+      const sum = (sel) => rows.reduce((s, r) => {
+        const v = sel(r);
+        return v != null && Number.isFinite(v) ? s + v : s;
+      }, 0);
+      cats.push({
+        ...cat,
+        isFut,
+        rows,
+        importeTotal: rows.some((r) => r.importeArs != null) ? sum((r) => r.importeArs) : null,
+        dayTotal: rows.some((r) => r.dayArs != null) ? sum((r) => r.dayArs) : null,
+        resultTotal: rows.some((r) => r.resultArs != null) ? sum((r) => r.resultArs) : null,
+      });
+    }
+
+    // Denominador del % Portfolio: importes POSITIVOS de las categorías
+    // no-futuro (los futuros no son capital invertido, son exposición — si
+    // entraran, un MTM negativo grande achicaría el denominador y los
+    // porcentajes del resto quedarían inflados sin sentido).
+    let denom = 0;
+    for (const cat of cats) {
+      if (cat.isFut) continue;
+      for (const r of cat.rows) {
+        if (r.importeArs != null && r.importeArs > 0) denom += r.importeArs;
+      }
+    }
+    return { cats, denom };
+  }, [consolidated, dailyByTicker, futureUncreditedByTicker, fx]);
+
+  const { cats, denom } = built;
+
+  // Sin caja y sin tenencia → no renderizamos nada (usuario nuevo o filtro
+  // de brokers que dejó todo afuera; la pantalla degrada sin placeholder).
+  if (cashCards.length === 0 && cats.length === 0) return null;
+
+  const mono = "'JetBrains Mono', monospace";
+  const roboto = "'Roboto', sans-serif";
+  const pnlColor = (v) => (v == null ? C.dim : v >= 0 ? C.green : C.red);
+  const fmtPct = (v) => (v == null || !Number.isFinite(v) ? "—" : `${fmtNumber(v, { maxDecimals: 2 })}%`);
+  const thStyle = (align) => ({
+    textAlign: align,
+    padding: "6px 12px",
+    fontSize: 9,
+    fontWeight: 600,
+    color: C.dim,
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
+    fontFamily: roboto,
+    borderBottom: `1px solid ${C.border}`,
+    whiteSpace: "nowrap",
+  });
+  const tdStyle = (align) => ({
+    textAlign: align,
+    padding: "6px 12px",
+    verticalAlign: "middle",
+    whiteSpace: "nowrap",
+  });
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      {/* Eyebrow de sección, mismo tratamiento que "Posiciones consolidadas" */}
+      <div style={{ fontSize: 9, letterSpacing: "0.22em", color: C.dim, textTransform: "uppercase", fontWeight: 600, marginBottom: 12 }}>
+        Portfolio · vista Cocos
+      </div>
+
+      {/* 1. Tarjetas de Dinero por moneda */}
+      {cashCards.length > 0 && (
+        <div
+          className="grid"
+          style={{
+            gridTemplateColumns: `repeat(${Math.min(cashCards.length, 3)}, minmax(0, 1fr))`,
+            gap: 14,
+            marginBottom: 14,
+          }}
+        >
+          {cashCards.map((card) => (
+            <div key={card.cur} style={{ backgroundColor: C.panel, border: `1px solid ${C.border}`, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, fontFamily: roboto, marginBottom: 8 }}>
+                {card.title}
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: card.total < 0 ? C.red : C.text, fontFamily: mono, letterSpacing: "-0.02em", marginBottom: 10 }}>
+                {fmtCurrencyValue(card.total, card.cur === "ARS" ? "ARS" : "USD")}
+              </div>
+              {[
+                { label: "Hoy (C.I.)", value: card.settled },
+                { label: "24hs", value: card.t1 },
+                { label: "Más de 24hs", value: card.later },
+              ].map((row) => (
+                <div key={row.label} className="flex items-center justify-between" style={{ marginTop: 4 }}>
+                  <span style={{ fontSize: 11, color: C.muted, fontFamily: roboto }}>{row.label}</span>
+                  <span style={{ fontSize: 11.5, color: row.value < 0 ? C.red : (Math.abs(row.value) > 0.005 ? C.text : C.dim), fontFamily: mono }}>
+                    {fmtCurrencyValue(row.value, card.cur === "ARS" ? "ARS" : "USD")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 2. Tabla de instrumentos agrupada por categoría */}
+      {cats.length > 0 && (
+        <div style={{ backgroundColor: C.panel, border: `1px solid ${C.border}` }}>
+          {/* Header estilo Cocos: título plano + leyenda de la doble columna */}
+          <div className="flex items-center justify-between" style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: C.text, fontFamily: roboto }}>
+              Instrumentos
+            </span>
+            <span style={{ fontSize: 10, color: C.dim, fontFamily: roboto }}>
+              · doble columna: día / histórico
+            </span>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={thStyle("left")}>Especie</th>
+                  <th style={thStyle("right")}>Cantidad</th>
+                  <th style={thStyle("right")}>Precio</th>
+                  <th style={thStyle("right")}>Importe</th>
+                  <th style={thStyle("right")}>% Portfolio</th>
+                  <th style={thStyle("right")}>Costo</th>
+                  <th style={thStyle("right")}>Rdo. (1D)</th>
+                  <th style={thStyle("right")}>% Variación</th>
+                  <th style={thStyle("right")}>Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cats.map((cat) => {
+                  const catPct = (!cat.isFut && denom > 0 && cat.importeTotal != null)
+                    ? (cat.importeTotal / denom) * 100
+                    : null;
+                  return (
+                    <Fragment key={cat.key}>
+                      {/* Fila-cabecera de subtotal de la categoría */}
+                      <tr style={{ backgroundColor: "rgba(246,247,246,0.04)", borderTop: `1px solid ${C.borderStrong}` }}>
+                        <td colSpan={3} style={{ ...tdStyle("left"), padding: "7px 12px" }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 700, color: C.text, fontFamily: roboto, letterSpacing: "0.03em" }}>
+                            {cat.label}
+                          </span>
+                        </td>
+                        <td style={tdStyle("right")}>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: cat.isFut ? pnlColor(cat.importeTotal) : C.text, fontFamily: mono }}>
+                            {cat.importeTotal != null ? fmtCurrencyValue(cat.importeTotal, "ARS") : "—"}
+                          </span>
+                        </td>
+                        <td style={tdStyle("right")}>
+                          <span style={{ fontSize: 11, color: C.muted, fontFamily: mono }}>{fmtPct(catPct)}</span>
+                        </td>
+                        <td style={tdStyle("right")} />
+                        <td style={tdStyle("right")}>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: pnlColor(cat.dayTotal), fontFamily: mono }}>
+                            {cat.dayTotal != null ? fmtCurrencyValue(cat.dayTotal, "ARS") : "—"}
+                          </span>
+                        </td>
+                        <td style={tdStyle("right")} />
+                        <td style={tdStyle("right")}>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: pnlColor(cat.resultTotal), fontFamily: mono }}>
+                            {cat.resultTotal != null ? fmtCurrencyValue(cat.resultTotal, "ARS") : "—"}
+                          </span>
+                        </td>
+                      </tr>
+                      {/* Filas de instrumentos de la categoría */}
+                      {cat.rows.map((r) => {
+                        const rowPct = (!r.isFut && denom > 0 && r.importeArs != null)
+                          ? (r.importeArs / denom) * 100
+                          : null;
+                        return (
+                          <tr key={r.key} style={{ borderTop: `1px solid ${C.border}` }}>
+                            <td style={tdStyle("left")}>
+                              <div>
+                                <span style={{ fontSize: 11.5, fontWeight: 600, color: C.text, fontFamily: mono }}>{r.ticker}</span>
+                                {r.isFut && r.nocionalArs != null && (
+                                  // La ventaja sobre Cocos: exposición real del
+                                  // futuro a la vista (Cocos lo muestra en $0).
+                                  <div style={{ fontSize: 9.5, color: C.dim, fontFamily: mono, marginTop: 1 }}>
+                                    nocional {fmtCurrencyValue(r.nocionalArs, "ARS")}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td style={tdStyle("right")}>
+                              <span style={{ fontSize: 11.5, color: C.muted, fontFamily: mono }}>{fmtNumber(r.qty, { maxDecimals: 2 })}</span>
+                            </td>
+                            <td style={tdStyle("right")}>
+                              <span style={{ fontSize: 11.5, color: C.text, fontFamily: mono }}>
+                                {r.price != null ? fmtNumber(r.price, { smartDecimals: true, maxDecimals: 4 }) : "—"}
+                              </span>
+                            </td>
+                            <td style={tdStyle("right")}>
+                              <span style={{ fontSize: 11.5, color: r.isFut ? pnlColor(r.importeArs) : C.text, fontWeight: 500, fontFamily: mono }}>
+                                {r.importeArs != null ? fmtCurrencyValue(r.importeArs, "ARS") : "—"}
+                              </span>
+                            </td>
+                            <td style={tdStyle("right")}>
+                              <span style={{ fontSize: 11, color: C.muted, fontFamily: mono }}>{fmtPct(rowPct)}</span>
+                            </td>
+                            <td style={tdStyle("right")}>
+                              <span style={{ fontSize: 11.5, color: C.muted, fontFamily: mono }}>
+                                {r.ppc != null ? fmtNumber(r.ppc, { smartDecimals: true, maxDecimals: 4 }) : "—"}
+                              </span>
+                            </td>
+                            <td style={tdStyle("right")}>
+                              <span style={{ fontSize: 11.5, color: pnlColor(r.dayArs), fontFamily: mono }}>
+                                {r.dayArs != null ? fmtCurrencyValue(r.dayArs, "ARS") : "—"}
+                              </span>
+                            </td>
+                            <td style={tdStyle("right")}>
+                              <span style={{ fontSize: 11, color: pnlColor(r.varPct), fontFamily: mono }}>{fmtPct(r.varPct)}</span>
+                            </td>
+                            <td style={tdStyle("right")}>
+                              <span style={{ fontSize: 11.5, color: pnlColor(r.resultArs), fontFamily: mono }}>
+                                {r.resultArs != null ? fmtCurrencyValue(r.resultArs, "ARS") : "—"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 /* ─────────────── Helpers de cálculo ─────────────── */
 
 function cardBaseStyle() {
@@ -15943,6 +16274,22 @@ function PortfolioDashboard({ onNavigate }) {
             positions={brokerFilteredPositions}
             excludedBrokers={excludedBrokers}
             iolCashByCurrency={iolCashByCurrency}
+            fxState={fxState}
+            bondPricesState={bondPricesState}
+            futurePricesState={futurePricesState}
+            stockPricesState={stockPricesState}
+            fciPricesState={fciPricesState}
+            cashState={cashState}
+            futureAdjustmentsState={futureAdjustmentsState}
+          />
+
+          {/* Portfolio estilo Cocos: tarjetas de Dinero + tabla de
+              Instrumentos por categoría con subtotales. Recibe las MISMAS
+              posiciones ya filtradas por broker que el resto del dashboard,
+              así los tres bloques (cards, vista Cocos, consolidada) siempre
+              cuentan la misma historia. */}
+          <PortfolioCocosSection
+            positions={brokerFilteredPositions}
             fxState={fxState}
             bondPricesState={bondPricesState}
             futurePricesState={futurePricesState}
@@ -23530,322 +23877,6 @@ function DashboardModule() {
   );
 }
 
-/* ─────────────── usePriceHistory ───────────────
- *
- * Serie diaria de precio de cierre de un ticker, desde daily_close_prices
- * (cierre oficial del boletin MAE). El frontend solo LEE.
- *
- * Limpieza de la serie (la data cruda tiene varias filas por dia):
- *   - moneda '$' (ARS) y segmentos SPOT {2,3,4,5} (se excluyen 7/8/9, que
- *     son pase/aforo/financiamiento y cotizan distinto).
- *   - una fila por dia: la de mayor `monto` (la mas liquida/representativa).
- *   - precio = precio_cierre_hoy (fallback precio_ultimo).
- *   - convencion MAE dual: los tickers "por 1 VN" (precio < 10, ej. lecaps
- *     sin sufijo) se llevan a base 100 VN (x100) para matchear la escala del
- *     resto de Midas. Misma heuristica que useBondPrices.
- *
- * Pedimos las ultimas ~1000 ruedas (order desc + limit) para no chocar con
- * el cap de filas de PostgREST a medida que crece el historico, y ordenamos
- * ascendente en JS (lightweight-charts requiere time creciente y unico).
- */
-function usePriceHistory(ticker, source = "mae") {
-  const [data, setData] = useState([]); // línea: { time, value }
-  const [candles, setCandles] = useState([]); // velas: { time, open, high, low, close }
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (!ticker) {
-      setData([]);
-      setCandles([]);
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    // Equity (acciones/CEDEARs): equity_daily_close, solo cierre — data912 no
-    // da OHLC intradía, así que las velas quedan body-only (sin mechas) y la
-    // vista útil es la línea. Una fila por (trade_date, ticker), sin
-    // convención por-VN ni dedup (la tabla ya es única por día).
-    if (source === "equity") {
-      supabase
-        .from("equity_daily_close")
-        .select("trade_date, close")
-        .eq("ticker", ticker)
-        .order("trade_date", { ascending: false })
-        .limit(1000)
-        .then(({ data: rows, error: err }) => {
-          if (cancelled) return;
-          if (err) {
-            setError(err.message);
-            setData([]);
-            setCandles([]);
-            setLoading(false);
-            return;
-          }
-          const days = (rows || [])
-            .map((r) => ({ time: r.trade_date, close: Number(r.close) }))
-            .filter((d) => Number.isFinite(d.close) && d.close > 0)
-            .sort((a, b) => (a.time < b.time ? -1 : 1));
-          const line = [];
-          const candleArr = [];
-          let prevClose = null;
-          for (const d of days) {
-            const c = d.close;
-            const o = prevClose != null ? prevClose : c;
-            line.push({ time: d.time, value: c });
-            candleArr.push({ time: d.time, open: o, high: Math.max(o, c), low: Math.min(o, c), close: c });
-            prevClose = c;
-          }
-          setData(line);
-          setCandles(candleArr);
-          setLoading(false);
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    supabase
-      .from("daily_close_prices")
-      .select(
-        "trade_date, precio_cierre_hoy, precio_cierre_ayer, precio_ultimo, precio_minimo, precio_promedio_ponderado, monto"
-      )
-      .eq("ticker", ticker)
-      .eq("moneda_codigo", "$")
-      .in("segmento_codigo", ["2", "3", "4", "5"])
-      .order("trade_date", { ascending: false })
-      .limit(1000)
-      .then(({ data: rows, error: err }) => {
-        if (cancelled) return;
-        if (err) {
-          setError(err.message);
-          setData([]);
-          setCandles([]);
-          setLoading(false);
-          return;
-        }
-        // Una fila por día: la de mayor monto (la más líquida).
-        const byDate = new Map();
-        for (const r of rows || []) {
-          const close = Number(r.precio_cierre_hoy) || Number(r.precio_ultimo);
-          if (!Number.isFinite(close) || close <= 0) continue;
-          const amount = Number(r.monto) || 0;
-          const prev = byDate.get(r.trade_date);
-          if (!prev || amount > prev.amount) byDate.set(r.trade_date, { r, close, amount });
-        }
-        const days = Array.from(byDate.entries())
-          .map(([time, v]) => ({ time, ...v }))
-          .sort((a, b) => (a.time < b.time ? -1 : 1));
-
-        // num positivo o null
-        const num = (x) => {
-          const n = Number(x);
-          return Number.isFinite(n) && n > 0 ? n : null;
-        };
-
-        const line = [];
-        const candleArr = [];
-        let prevClose = null;
-        for (const d of days) {
-          // Convención MAE: tickers "por 1 VN" (precio < 10) → base 100 VN.
-          const mult = d.close < 10 ? 100 : 1;
-          const c = d.close * mult;
-          // Open ≈ cierre anterior (el boletín no trae apertura). Fallback al
-          // cierre del día previo de la serie.
-          const ayer = num(d.r.precio_cierre_ayer);
-          const o = ayer != null ? ayer * mult : prevClose != null ? prevClose : c;
-          const lastP = num(d.r.precio_ultimo);
-          const vwap = num(d.r.precio_promedio_ponderado);
-          const lo = num(d.r.precio_minimo);
-          // High aproximado: MAE no publica precio_maximo (siempre vacío), así
-          // que tomamos el máximo entre open/close/último/VWAP. La mecha
-          // superior puede quedar corta. Low SÍ es real (precio_minimo).
-          const ups = [o, c];
-          if (lastP != null) ups.push(lastP * mult);
-          if (vwap != null) ups.push(vwap * mult);
-          let high = Math.max(...ups);
-          let low = Math.min(...ups, lo != null ? lo * mult : Infinity);
-          high = Math.max(high, o, c);
-          low = Math.min(low, o, c);
-          line.push({ time: d.time, value: c });
-          candleArr.push({ time: d.time, open: o, high, low, close: c });
-          prevClose = c;
-        }
-        setData(line);
-        setCandles(candleArr);
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ticker, source]);
-
-  return { data, candles, loading, error };
-}
-
-/* ─────────────── useChartTickers ───────────────
- * Lista de tickers disponibles para el selector, vía RPC chart_tickers
- * (equity por kind desde equity_daily_close; mae desde daily_close_prices).
- */
-function useChartTickers(source, kind = null, category = null) {
-  const [options, setOptions] = useState([]);
-  useEffect(() => {
-    let cancelled = false;
-    supabase
-      .rpc("chart_tickers", { p_source: source, p_kind: kind, p_category: category })
-      .then(({ data, error }) => {
-        if (cancelled || error) return;
-        setOptions((data || []).map((r) => ({ ticker: r.ticker, name: r.name || null })));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [source, kind, category]);
-  return options;
-}
-
-/* ─────────────── TickerCombobox ───────────────
- * Buscador desplegable de tickers: input con filtro + lista scrolleable.
- * Permite tipear cualquiera (Enter) o elegir de la lista. Reemplaza los
- * botones de quick-picks (que no mostraban todo el universo).
- */
-function TickerCombobox({ value, options, onSelect }) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const boxRef = useRef(null);
-
-  useEffect(() => {
-    const onDocClick = (e) => {
-      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  const q = query.trim().toUpperCase();
-  const filtered = (
-    q
-      ? options.filter((o) => o.ticker.includes(q) || (o.name && o.name.toUpperCase().includes(q)))
-      : options
-  ).slice(0, 300);
-
-  const pick = (t) => {
-    const v = String(t || "").toUpperCase().trim();
-    if (!v) return;
-    onSelect(v);
-    setQuery("");
-    setOpen(false);
-  };
-
-  return (
-    <div ref={boxRef} style={{ position: "relative", width: 260 }}>
-      <input
-        value={open ? query : value}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => {
-          setQuery("");
-          setOpen(true);
-        }}
-        onClick={() => {
-          if (!open) {
-            setQuery("");
-            setOpen(true);
-          }
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") pick(q || value);
-          if (e.key === "Escape") setOpen(false);
-        }}
-        placeholder="Buscar ticker…"
-        spellCheck={false}
-        style={{
-          width: "100%",
-          padding: "7px 10px",
-          fontSize: 12,
-          color: C.text,
-          background: C.deep,
-          border: `1px solid ${open ? C.accentBorder : C.border}`,
-          borderRadius: 4,
-          outline: "none",
-          textTransform: "uppercase",
-        }}
-      />
-      {open && filtered.length > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            right: 0,
-            zIndex: 50,
-            maxHeight: 300,
-            overflowY: "auto",
-            background: C.panel,
-            border: `1px solid ${C.borderStrong}`,
-            borderRadius: 4,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-          }}
-        >
-          {filtered.map((o) => {
-            const isSel = o.ticker === value;
-            const reg = BOND_REGISTRY[o.ticker];
-            const detail = reg
-              ? `${reg.type.toUpperCase()} · vto ${fmtMaturityShort(reg.maturityDate)}`
-              : o.name;
-            return (
-              <div
-                key={o.ticker}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  pick(o.ticker);
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: 8,
-                  padding: "6px 10px",
-                  fontSize: 12,
-                  background: isSel ? C.accentSoft : "transparent",
-                  cursor: "pointer",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = C.deep;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = isSel ? C.accentSoft : "transparent";
-                }}
-              >
-                <span style={{ color: isSel ? C.accent : C.text, fontWeight: 600, flex: "0 0 60px" }}>
-                  {o.ticker}
-                </span>
-                {detail && (
-                  <span
-                    style={{
-                      color: C.muted,
-                      fontSize: 11,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {detail}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ─────────────── PriceHistoryChart ───────────────
  * Wrapper de TradingView Lightweight Charts (area series) sobre nuestra data.
  * autoSize sigue el tamaño del contenedor; el contenedor define la altura.
@@ -23911,235 +23942,6 @@ function PriceHistoryChart({ type, data, height = 420 }) {
   }, [data, type]);
 
   return <div ref={containerRef} style={{ width: "100%", height }} />;
-}
-
-/* ─────────────── PriceHistoryModule ───────────────
- * Vista generica de historia de precios: selector de ticker (input libre +
- * accesos rapidos) y el grafico. Se cablea por leaf del menu (bonos hoy;
- * reusable para lecaps/cer/duales pasando otros quickPicks).
- */
-function PriceHistoryModule({ title, defaultTicker, quickPicks = [], source = "mae", kind = null, category = null }) {
-  const [ticker, setTicker] = useState(defaultTicker);
-  const [input, setInput] = useState(defaultTicker);
-  const [chartType, setChartType] = useState("area");
-  const [range, setRange] = useState("all");
-  const { data, candles, loading, error } = usePriceHistory(ticker, source);
-  const isEquity = source === "equity";
-  const tickerOptions = useChartTickers(source, isEquity ? kind : null, isEquity ? null : category);
-
-  // Filtro de rango temporal sobre la serie ya cargada (1M/3M/6M/Todo).
-  const ranged = useMemo(() => {
-    if (range === "all") return { line: data, candles };
-    const days = range === "1M" ? 31 : range === "3M" ? 93 : 186;
-    const d = new Date();
-    d.setDate(d.getDate() - days);
-    const cutoff = d.toISOString().slice(0, 10);
-    return {
-      line: data.filter((p) => p.time >= cutoff),
-      candles: candles.filter((p) => p.time >= cutoff),
-    };
-  }, [data, candles, range]);
-
-  const apply = (t) => {
-    const v = String(t || "").toUpperCase().trim();
-    if (!v) return;
-    setInput(v);
-    setTicker(v);
-  };
-
-  const last = data.length ? data[data.length - 1] : null;
-  const fmt = (n) =>
-    Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const _reg = BOND_REGISTRY[ticker];
-  const tickerName = _reg
-    ? `${_reg.type.toUpperCase()} · vto ${fmtMaturityShort(_reg.maturityDate)}`
-    : tickerOptions.find((o) => o.ticker === ticker)?.name || null;
-  // Variación % sobre el rango visible (primer punto vs último).
-  const rangeChange =
-    ranged.line.length >= 2
-      ? ((ranged.line[ranged.line.length - 1].value - ranged.line[0].value) / ranged.line[0].value) * 100
-      : null;
-
-  const chipStyle = (isActive) => ({
-    padding: "5px 10px",
-    fontSize: 11,
-    fontWeight: 600,
-    letterSpacing: "0.02em",
-    color: isActive ? C.bg : C.muted,
-    background: isActive ? C.accent : "transparent",
-    border: `1px solid ${isActive ? C.accent : C.border}`,
-    borderRadius: 4,
-    cursor: "pointer",
-  });
-
-  return (
-    <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>
-          {title}
-        </h1>
-        <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", letterSpacing: "0.02em" }}>
-          {isEquity
-            ? "Cierre diario en pesos (Yahoo Finance .BA + data912). Histórico desde 2024, actualizado a diario."
-            : "Historia de precio de cierre diario (boletín oficial MAE). Precio por 100 VN, en pesos."}
-        </p>
-      </div>
-
-      <div className="flex items-center gap-3" style={{ marginBottom: 16, flexWrap: "wrap" }}>
-        <TickerCombobox
-          value={ticker}
-          options={tickerOptions.length ? tickerOptions : quickPicks.map((t) => ({ ticker: t, name: null }))}
-          onSelect={apply}
-        />
-        {tickerOptions.length > 0 && (
-          <span style={{ fontSize: 10, color: C.dim, letterSpacing: "0.04em" }}>
-            {tickerOptions.length} tickers
-          </span>
-        )}
-      </div>
-
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, background: C.panel, padding: 16 }}>
-        <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-          <div className="flex items-baseline gap-2" style={{ minWidth: 0, marginRight: 12 }}>
-            <span style={{ fontSize: 15, fontWeight: 600, color: C.text, flexShrink: 0 }}>{ticker}</span>
-            {tickerName && (
-              <span
-                style={{
-                  fontSize: 12,
-                  color: C.muted,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {tickerName}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            <div
-              className="flex items-center"
-              style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}
-            >
-              {[
-                { k: "1M", label: "1M" },
-                { k: "3M", label: "3M" },
-                { k: "6M", label: "6M" },
-                { k: "all", label: "Todo" },
-              ].map((opt) => {
-                const on = range === opt.k;
-                return (
-                  <button
-                    key={opt.k}
-                    onClick={() => setRange(opt.k)}
-                    style={{
-                      padding: "4px 9px",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: on ? C.bg : C.muted,
-                      background: on ? C.accent : "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-            {!isEquity && (
-            <div
-              className="flex items-center"
-              style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}
-            >
-              {[
-                { k: "area", label: "Línea" },
-                { k: "candles", label: "Velas" },
-              ].map((opt) => {
-                const on = chartType === opt.k;
-                return (
-                  <button
-                    key={opt.k}
-                    onClick={() => setChartType(opt.k)}
-                    style={{
-                      padding: "4px 11px",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: on ? C.bg : C.muted,
-                      background: on ? C.accent : "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-            )}
-            {last && (
-              <span style={{ fontSize: 18, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>
-                {fmt(last.value)}
-              </span>
-            )}
-            {rangeChange != null && (
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: rangeChange >= 0 ? C.green : C.red,
-                  background: rangeChange >= 0 ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)",
-                  padding: "2px 7px",
-                  borderRadius: 4,
-                  fontVariantNumeric: "tabular-nums",
-                }}
-              >
-                {rangeChange >= 0 ? "+" : ""}
-                {rangeChange.toFixed(2)}%
-              </span>
-            )}
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center" style={{ height: 420 }}>
-            <Loader2 size={24} color={C.muted} className="eco-spin" strokeWidth={1.5} />
-          </div>
-        ) : error ? (
-          <div
-            className="flex items-center justify-center"
-            style={{ height: 420, fontSize: 12, color: C.red }}
-          >
-            Error leyendo el histórico: {error}
-          </div>
-        ) : data.length === 0 ? (
-          <div
-            className="flex items-center justify-center"
-            style={{ height: 420, fontSize: 12, color: C.muted }}
-          >
-            Sin datos históricos para {ticker}.
-          </div>
-        ) : data.length < 2 ? (
-          <div
-            className="flex items-center justify-center"
-            style={{ height: 420, fontSize: 12, color: C.muted, textAlign: "center", padding: "0 40px", lineHeight: 1.6 }}
-          >
-            {isEquity
-              ? `Acumulando histórico (${data.length} día). El gráfico se llena a medida que el worker corre cada día hábil (18hs ART).`
-              : `Solo ${data.length} rueda de datos para ${ticker}.`}
-          </div>
-        ) : (
-          <PriceHistoryChart type={isEquity ? "area" : chartType} data={(isEquity ? "area" : chartType) === "candles" ? ranged.candles : ranged.line} />
-        )}
-
-        {ranged.line.length > 0 && (
-          <div style={{ fontSize: 11, color: C.dim, marginTop: 10, letterSpacing: "0.02em" }}>
-            {ranged.line.length} ruedas · {ranged.line[0].time} → {ranged.line[ranged.line.length - 1].time}
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 /* ─────────────── useMacroSeries ───────────────
