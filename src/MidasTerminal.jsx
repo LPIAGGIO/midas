@@ -214,6 +214,7 @@ const NAV = [
       { id: "carry-trade", label: "Carry Trade", icon: ArrowRightLeft },
       { id: "futuros-caucion", label: "Futuros vs Caución", icon: Scale },
       { id: "sintetico-dlr", label: "Sintético DLR", icon: Layers },
+      { id: "mapa-posiciones", label: "Mapa de Posiciones", icon: Layers, type: "single", requiresAuth: true },
       { id: "curva-tasas", label: "Curva de Tasas", icon: Spline },
       { id: "spread-cer-fija", label: "Spread CER / Fija", icon: Diff },
       { id: "desarbitrajes", label: "Desarbitrajes MEP", icon: Repeat },
@@ -1431,6 +1432,8 @@ function MidasApp({ allowedModules = null }) {
               <FuturosVsCaucionModule />
             ) : active === "sintetico-dlr" ? (
               <SinteticoDolarModule />
+            ) : active === "mapa-posiciones" ? (
+              <MapaPosicionesModule />
             ) : active === "portfolio-ia" ? (
               <PortfolioIAModule onNavigate={setActive} />
             ) : active === "importaciones" ? (
@@ -39579,4 +39582,740 @@ function formatDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "2-digit" }).replace(/\./g, "");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * MAPA DE POSICIONES
+ *
+ * Nuestra versión del "mapa de liquidaciones" que venden por ahí (el de
+ * tradingdifferent y compañía), pero sin inventar nada: allá dibujan dónde
+ * *suponen* que están los stops apalancados; acá mostramos únicamente datos
+ * duros que el mercado argentino publica.
+ *
+ * Dos solapas, dos preguntas distintas:
+ *
+ *   1) FUTUROS DLR — el interés abierto por vencimiento. Es el único dato
+ *      público que dice, sin estimaciones, cuánta gente está efectivamente
+ *      parada en cada punto de la curva del dólar. Encima le marcamos DÓNDE
+ *      está parado el usuario, que es la información que ningún proveedor
+ *      externo le puede dar.
+ *
+ *   2) PERFIL DE VOLUMEN — para los papeles, el equivalente conceptual: a
+ *      qué precios se operó de verdad el último año. El POC y el área de
+ *      valor son zonas donde hay inventario real, no líneas mágicas.
+ *
+ * Ninguna de las dos solapas predice nada. Muestran dónde está la plata
+ * puesta hoy, que es un insumo para decidir, no una señal de compra.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+/** Cada contrato DLR de Matba-Rofex es por USD 1.000 de nocional. */
+const DLR_CONTRACT_NOTIONAL_USD = 1000;
+
+/** Meses en español tal como los codifica el símbolo de A3 ('DLR/AGO26'). */
+const MESES_ES_A_NUM = {
+  ENE: 0, FEB: 1, MAR: 2, ABR: 3, MAY: 4, JUN: 5,
+  JUL: 6, AGO: 7, SEP: 8, OCT: 9, NOV: 10, DIC: 11,
+};
+
+/**
+ * Parsea el sufijo de vencimiento de un símbolo A3 ('DLR/AGO26').
+ * Devuelve null si no matchea el formato (símbolos raros del feed).
+ * El sortKey (año*12+mes) permite ordenar cronológicamente sin fabricar Dates.
+ */
+function parseVtoFuturoEs(symbol) {
+  const raw = String(symbol || "").toUpperCase();
+  const code = (raw.includes("/") ? raw.split("/")[1] : raw.slice(3)).trim();
+  const m = code.match(/^([A-Z]{3})(\d{2})$/);
+  if (!m) return null;
+  const mes = MESES_ES_A_NUM[m[1]];
+  if (mes == null) return null;
+  const anio = 2000 + Number(m[2]);
+  return { code, mes, anio, sortKey: anio * 12 + mes, label: `${m[1]} ${m[2]}` };
+}
+
+/**
+ * Normaliza un ticker de futuro para poder cruzar dos fuentes que lo
+ * escriben distinto: mtr_market_data usa 'DLR/SEP26' y la tabla positions
+ * usa 'DLRSEP26'. Sacamos la barra y mayúsculas y listo.
+ */
+function normalizarTickerFuturo(t) {
+  return String(t || "").toUpperCase().replace(/[/\s]/g, "");
+}
+
+/** Entero con separador de miles es-AR. */
+function fmtEnteroAR(n) {
+  if (n == null || !isFinite(n)) return "—";
+  return Math.round(n).toLocaleString("es-AR");
+}
+
+/** Precio con 2 decimales y prefijo según moneda del perfil de volumen. */
+function fmtPrecioMoneda(n, moneda) {
+  if (n == null || !isFinite(n)) return "—";
+  const pref = moneda === "USD" ? "US$" : "$";
+  return `${pref}${Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * Interés abierto de los futuros DLR vivos.
+ *
+ * Dos filtros que no son opcionales:
+ *   - updated_at > hoy-3d: los contratos vencidos quedan CONGELADOS en la
+ *     tabla con su último tick. Si no los cortamos por frescura, el DLR/MAY26
+ *     sigue apareciendo con 1,6M de contratos que ya no existen.
+ *   - open_interest > 0: contratos listados pero sin posiciones abiertas.
+ */
+function useDlrOpenInterest() {
+  const [contratos, setContratos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const corte = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error: err } = await supabase
+        .from("mtr_market_data")
+        .select("symbol, settlement, last, open_interest, volume, updated_at, segment")
+        .like("symbol", "DLR/%")
+        .gt("updated_at", corte)
+        .gt("open_interest", 0);
+      if (err) throw err;
+
+      const filas = (data || [])
+        .map((r) => {
+          const vto = parseVtoFuturoEs(r.symbol);
+          if (!vto) return null;
+          const oi = Number(r.open_interest) || 0;
+          if (oi <= 0) return null;
+          return {
+            symbol: r.symbol,
+            key: normalizarTickerFuturo(r.symbol),
+            vto,
+            oi,
+            settlement: r.settlement != null ? Number(r.settlement) : null,
+            last: r.last != null ? Number(r.last) : null,
+            volume: r.volume != null ? Number(r.volume) : null,
+            updatedAt: r.updated_at ? new Date(r.updated_at) : null,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.vto.sortKey - b.vto.sortKey);
+
+      setContratos(filas);
+      // El "actualizado" del panel es el tick más nuevo del lote.
+      const masNuevo = filas.reduce((acc, f) => (f.updatedAt && (!acc || f.updatedAt > acc) ? f.updatedAt : acc), null);
+      setUpdatedAt(masNuevo);
+    } catch (e) {
+      setError(e.message || "Error al leer mtr_market_data");
+      setContratos([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  return { contratos, loading, error, updatedAt, refresh: cargar };
+}
+
+/** Perfiles de volumen que dejó el worker niveles-auto (pasada cada 12hs). */
+function useVolumeProfiles() {
+  const [perfiles, setPerfiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error: err } = await supabase
+        .from("volume_profile")
+        .select("ticker, sym, moneda, spot, poc, va_low, va_high, bins, updated_at")
+        .order("ticker", { ascending: true });
+      if (err) throw err;
+      const filas = (data || []).map((r) => ({
+        ticker: String(r.ticker || "").toUpperCase(),
+        sym: r.sym,
+        moneda: r.moneda || "USD",
+        spot: r.spot != null ? Number(r.spot) : null,
+        poc: r.poc != null ? Number(r.poc) : null,
+        vaLow: r.va_low != null ? Number(r.va_low) : null,
+        vaHigh: r.va_high != null ? Number(r.va_high) : null,
+        // bins viene jsonb; blindamos por si alguna fila quedó a medias.
+        bins: Array.isArray(r.bins)
+          ? r.bins
+              .map((b) => ({ lo: Number(b.lo), hi: Number(b.hi), vol: Number(b.vol) || 0, pct: Number(b.pct) || 0 }))
+              .filter((b) => isFinite(b.lo) && isFinite(b.hi))
+          : [],
+        updatedAt: r.updated_at ? new Date(r.updated_at) : null,
+      }));
+      setPerfiles(filas);
+    } catch (e) {
+      setError(e.message || "Error al leer volume_profile");
+      setPerfiles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  return { perfiles, loading, error, refresh: cargar };
+}
+
+/* ─────────── Solapa 1: futuros DLR ─────────── */
+
+function MapaFuturosDlrTab({ contratos, loading, error, netoPorTicker }) {
+  const totalOi = contratos.reduce((acc, c) => acc + c.oi, 0);
+  const maxOi = contratos.reduce((acc, c) => Math.max(acc, c.oi), 0);
+  const mayor = contratos.reduce((acc, c) => (!acc || c.oi > acc.oi ? c : acc), null);
+
+  return (
+    <div>
+      {/* Qué estoy mirando. Va arriba porque el interés abierto es un dato
+          que mucha gente ve por primera vez acá. */}
+      <div
+        className="flex items-start gap-2 mb-4 px-4 py-3"
+        style={{ backgroundColor: "rgba(91, 141, 214, 0.05)", borderLeft: `2px solid ${C.accent}` }}
+      >
+        <Info size={13} color={C.accent} strokeWidth={1.8} style={{ flexShrink: 0, marginTop: 2 }} />
+        <p style={{ fontSize: 11.5, color: C.muted, margin: 0, lineHeight: 1.55 }}>
+          El <span style={{ color: C.text, fontWeight: 500 }}>interés abierto</span> es la cantidad de contratos vivos:
+          dónde está parada la multitud en la curva del dólar. Los vencimientos con más interés abierto son los que
+          concentran la pelea, y suelen tener más liquidez y movimientos más violentos al vencer.
+        </p>
+      </div>
+
+      {error && (
+        <div className="flex items-start gap-3 p-4 mb-4" style={{ backgroundColor: "rgba(248,113,113,0.08)", border: `1px solid rgba(248,113,113,0.25)` }}>
+          <AlertTriangle size={16} color={C.red} strokeWidth={1.8} />
+          <div className="flex flex-col gap-0.5">
+            <span style={{ fontSize: 12, color: C.text, fontWeight: 500 }}>No se pudo cargar el interés abierto</span>
+            <span style={{ fontSize: 11, color: C.muted }}>{error}</span>
+          </div>
+        </div>
+      )}
+
+      {loading && contratos.length === 0 ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 size={18} color={C.accent} className="eco-spin" strokeWidth={1.8} />
+        </div>
+      ) : contratos.length === 0 && !error ? (
+        <div className="px-4 py-10 text-center" style={{ backgroundColor: C.panel, border: `1px solid ${C.border}` }}>
+          <p style={{ fontSize: 12, color: C.muted, margin: 0 }}>
+            No hay contratos DLR con interés abierto y datos frescos (últimos 3 días).
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Resumen: el titular de la solapa en una línea */}
+          <div
+            className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-4 px-4 py-3"
+            style={{ backgroundColor: C.panel, borderLeft: `2px solid ${C.cat.cyan}` }}
+          >
+            <div className="flex flex-col gap-0.5">
+              <span style={{ fontSize: 9, color: C.dim, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 500 }}>
+                Interés abierto total
+              </span>
+              <span className="eco-mono" style={{ fontSize: 15, color: C.text, fontWeight: 600 }}>
+                {fmtEnteroAR(totalOi)} <span style={{ fontSize: 10.5, color: C.muted, fontWeight: 400 }}>contratos</span>
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span style={{ fontSize: 9, color: C.dim, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 500 }}>
+                Nocional
+              </span>
+              <span className="eco-mono" style={{ fontSize: 15, color: C.text, fontWeight: 600 }}>
+                US${fmtEnteroAR(totalOi * DLR_CONTRACT_NOTIONAL_USD)}
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span style={{ fontSize: 9, color: C.dim, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 500 }}>
+                Mayor concentración
+              </span>
+              <span className="eco-mono" style={{ fontSize: 15, color: C.cat.cyan, fontWeight: 600 }}>
+                {mayor ? mayor.vto.label : "—"}
+                {mayor && totalOi > 0 && (
+                  <span style={{ fontSize: 10.5, color: C.muted, fontWeight: 400 }}>
+                    {" "}· {((mayor.oi / totalOi) * 100).toFixed(1)}%
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+
+          <SectionLabel>Interés abierto por vencimiento</SectionLabel>
+          <div style={{ backgroundColor: C.panel, borderTop: `2px solid ${C.cat.cyan}`, padding: "14px 16px" }}>
+            {contratos.map((c) => {
+              const ancho = maxOi > 0 ? (c.oi / maxOi) * 100 : 0;
+              const share = totalOi > 0 ? (c.oi / totalOi) * 100 : 0;
+              const neto = netoPorTicker.get(c.key) || 0;
+              const tieneNeto = Math.abs(neto) > 0.0001;
+              // El % del usuario se mide contra el OI TOTAL de la curva, no
+              // contra el del contrato: la pregunta es qué porción de toda la
+              // pelea del dólar es suya.
+              const shareUsuario = totalOi > 0 ? (Math.abs(neto) / totalOi) * 100 : 0;
+              const colorNeto = neto > 0 ? C.green : C.red;
+              return (
+                <div key={c.key} style={{ marginBottom: 14 }}>
+                  {/* Renglón de encabezado del contrato */}
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1" style={{ marginBottom: 5 }}>
+                    <div className="flex items-baseline gap-2.5 flex-wrap">
+                      <span className="eco-mono" style={{ fontSize: 13, color: C.text, fontWeight: 600, letterSpacing: "0.02em" }}>
+                        {c.vto.label}
+                      </span>
+                      <span style={{ fontSize: 10, color: C.dim, letterSpacing: "0.10em", textTransform: "uppercase" }}>
+                        settle
+                      </span>
+                      <span className="eco-mono" style={{ fontSize: 12, color: C.muted }}>
+                        {c.settlement != null ? `$${fmtARS(c.settlement)}` : "—"}
+                      </span>
+                      {tieneNeto && (
+                        <span
+                          className="eco-mono"
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            color: colorNeto,
+                            backgroundColor: neto > 0 ? "rgba(74, 222, 128, 0.10)" : "rgba(248, 113, 113, 0.10)",
+                            border: `1px solid ${neto > 0 ? "rgba(74, 222, 128, 0.32)" : "rgba(248, 113, 113, 0.32)"}`,
+                            padding: "1px 7px",
+                            letterSpacing: "0.02em",
+                          }}
+                        >
+                          {neto > 0 ? "+" : ""}{fmtEnteroAR(neto)} {neto > 0 ? "long" : "short"} · {shareUsuario < 0.01 ? "<0,01" : shareUsuario.toFixed(2).replace(".", ",")}% del OI
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-baseline gap-3">
+                      <span className="eco-mono" style={{ fontSize: 12, color: C.text }}>
+                        {fmtEnteroAR(c.oi)} <span style={{ fontSize: 10, color: C.dim }}>ctr</span>
+                      </span>
+                      <span className="eco-mono" style={{ fontSize: 11.5, color: C.muted }}>
+                        US${fmtEnteroAR(c.oi * DLR_CONTRACT_NOTIONAL_USD)}
+                      </span>
+                      <span className="eco-mono" style={{ fontSize: 11.5, color: C.cat.cyan, minWidth: 46, textAlign: "right" }}>
+                        {share.toFixed(1).replace(".", ",")}%
+                      </span>
+                    </div>
+                  </div>
+                  {/* Barra: ancho relativo al contrato más grande (el mayor = 100%) */}
+                  <div style={{ position: "relative", height: 14, backgroundColor: C.deep, border: `1px solid ${C.border}` }}>
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: `${ancho}%`,
+                        backgroundColor: tieneNeto ? colorNeto : C.accent,
+                        opacity: tieneNeto ? 0.75 : 0.55,
+                        transition: "width 240ms ease",
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─────────── Solapa 2: perfil de volumen ─────────── */
+
+function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
+  const [seleccion, setSeleccion] = useState(null);
+
+  // Default: el primer ticker que ADEMÁS esté en la cartera del usuario.
+  // Si no hay match, el primero alfabético. Solo se fija una vez (cuando
+  // llegan los datos) para no pisar la elección manual del usuario.
+  useEffect(() => {
+    if (seleccion || perfiles.length === 0) return;
+    const enCartera = perfiles.find((p) => tickersCartera.has(p.ticker));
+    setSeleccion((enCartera || perfiles[0]).ticker);
+  }, [perfiles, tickersCartera, seleccion]);
+
+  const perfil = useMemo(
+    () => perfiles.find((p) => p.ticker === seleccion) || null,
+    [perfiles, seleccion]
+  );
+
+  if (error) {
+    return (
+      <div className="flex items-start gap-3 p-4" style={{ backgroundColor: "rgba(248,113,113,0.08)", border: `1px solid rgba(248,113,113,0.25)` }}>
+        <AlertTriangle size={16} color={C.red} strokeWidth={1.8} />
+        <div className="flex flex-col gap-0.5">
+          <span style={{ fontSize: 12, color: C.text, fontWeight: 500 }}>No se pudo cargar el perfil de volumen</span>
+          <span style={{ fontSize: 11, color: C.muted }}>{error}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading && perfiles.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 size={18} color={C.accent} className="eco-spin" strokeWidth={1.8} />
+      </div>
+    );
+  }
+
+  if (perfiles.length === 0) {
+    return (
+      <div className="px-6 py-12 text-center" style={{ backgroundColor: C.panel, border: `1px solid ${C.border}` }}>
+        <BarChart3 size={22} color={C.dim} strokeWidth={1.5} style={{ margin: "0 auto 10px" }} />
+        <p style={{ fontSize: 12.5, color: C.text, margin: "0 0 4px 0", fontWeight: 500 }}>
+          Todavía no hay perfiles cargados
+        </p>
+        <p style={{ fontSize: 11.5, color: C.muted, margin: 0, lineHeight: 1.5 }}>
+          El worker de niveles llena esta tabla en la próxima pasada (corre cada 12 horas) con los papeles del
+          tablero de alertas y los de tu cartera.
+        </p>
+      </div>
+    );
+  }
+
+  const bins = perfil?.bins || [];
+  const maxPct = bins.reduce((acc, b) => Math.max(acc, b.pct), 0);
+  const precioMin = bins.length ? bins[0].lo : null;
+  const precioMax = bins.length ? bins[bins.length - 1].hi : null;
+
+  // Lectura automática de una línea: dónde está el spot respecto del área
+  // de valor. Es la conclusión práctica de todo el histograma.
+  let lectura = null;
+  if (perfil && perfil.spot != null && perfil.vaLow != null && perfil.vaHigh != null) {
+    if (perfil.spot > perfil.vaHigh) {
+      lectura = { texto: "El precio está arriba del área de valor: aire abajo hasta el POC.", color: C.green };
+    } else if (perfil.spot < perfil.vaLow) {
+      lectura = { texto: "El precio está abajo del área de valor: aire arriba hasta el POC.", color: C.red };
+    } else {
+      lectura = { texto: "El precio está dentro del área de valor: zona de equilibrio/pelea.", color: C.cat.yellow };
+    }
+  }
+
+  // El histograma se dibuja de mayor a menor precio (arriba = más caro),
+  // que es como se lee un perfil de volumen en cualquier plataforma.
+  const filas = [...bins].reverse();
+  const ALTO_FILA = 17;
+  const altoTotal = filas.length * ALTO_FILA;
+
+  // Posición vertical del spot: interpolación lineal sobre el rango total.
+  // Los bins son de ancho uniforme, así que el mapeo precio→píxel es exacto.
+  let topSpot = null;
+  if (perfil?.spot != null && precioMin != null && precioMax != null && precioMax > precioMin) {
+    const t = (precioMax - perfil.spot) / (precioMax - precioMin);
+    topSpot = Math.min(altoTotal, Math.max(0, t * altoTotal));
+  }
+
+  return (
+    <div>
+      <div
+        className="flex items-start gap-2 mb-4 px-4 py-3"
+        style={{ backgroundColor: "rgba(91, 141, 214, 0.05)", borderLeft: `2px solid ${C.accent}` }}
+      >
+        <Info size={13} color={C.accent} strokeWidth={1.8} style={{ flexShrink: 0, marginTop: 2 }} />
+        <p style={{ fontSize: 11.5, color: C.muted, margin: 0, lineHeight: 1.55 }}>
+          Cuánto volumen se operó en cada franja de precio del último año. El{" "}
+          <span style={{ color: C.text, fontWeight: 500 }}>POC</span> es el precio donde más se operó y el{" "}
+          <span style={{ color: C.text, fontWeight: 500 }}>área de valor</span> el rango que concentra el 70% del
+          volumen: ahí hay inventario real, no líneas dibujadas a ojo.
+        </p>
+      </div>
+
+      {/* Selector de ticker */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <span style={{ fontSize: 10, color: C.dim, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 500 }}>
+          Papel
+        </span>
+        <select
+          value={seleccion || ""}
+          onChange={(e) => setSeleccion(e.target.value)}
+          className="eco-mono"
+          style={{
+            backgroundColor: C.deep,
+            color: C.text,
+            border: `1px solid ${C.borderStrong}`,
+            padding: "6px 10px",
+            fontSize: 12,
+            outline: "none",
+            cursor: "pointer",
+          }}
+        >
+          {perfiles.map((p) => (
+            <option key={p.ticker} value={p.ticker} style={{ backgroundColor: C.deep, color: C.text }}>
+              {p.ticker}{tickersCartera.has(p.ticker) ? " · en cartera" : ""}
+            </option>
+          ))}
+        </select>
+        {perfil?.updatedAt && (
+          <span style={{ fontSize: 10.5, color: C.dim }}>
+            Actualizado {perfil.updatedAt.toLocaleString("es-AR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+          </span>
+        )}
+      </div>
+
+      {!perfil || bins.length === 0 ? (
+        <div className="px-4 py-10 text-center" style={{ backgroundColor: C.panel, border: `1px solid ${C.border}` }}>
+          <p style={{ fontSize: 12, color: C.muted, margin: 0 }}>Este papel no tiene bins cargados todavía.</p>
+        </div>
+      ) : (
+        <>
+          <SectionLabel>Volumen por nivel de precio · {perfil.ticker}</SectionLabel>
+          <div style={{ backgroundColor: C.panel, borderTop: `2px solid ${C.accent}`, padding: "14px 16px" }}>
+            <div style={{ position: "relative", height: altoTotal }}>
+              {filas.map((b, i) => {
+                const esPoc = perfil.poc != null && perfil.poc >= b.lo && perfil.poc < b.hi;
+                const enVa =
+                  perfil.vaLow != null && perfil.vaHigh != null &&
+                  b.hi > perfil.vaLow && b.lo < perfil.vaHigh;
+                const ancho = maxPct > 0 ? (b.pct / maxPct) * 100 : 0;
+                const color = esPoc
+                  ? C.accent
+                  : enVa
+                    ? "rgba(91, 141, 214, 0.42)"
+                    : "rgba(246, 247, 246, 0.11)";
+                return (
+                  <div key={i} className="flex items-center" style={{ height: ALTO_FILA }}>
+                    <span
+                      className="eco-mono"
+                      style={{ width: 76, flexShrink: 0, fontSize: 10.5, color: esPoc ? C.text : C.dim, textAlign: "right", paddingRight: 8 }}
+                    >
+                      {b.lo.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <div style={{ flex: 1, position: "relative", height: ALTO_FILA - 4 }}>
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: `${ancho}%`,
+                          backgroundColor: color,
+                          transition: "width 200ms ease",
+                        }}
+                      />
+                      {esPoc && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            left: `calc(${ancho}% + 6px)`,
+                            top: 0,
+                            fontSize: 9,
+                            letterSpacing: "0.16em",
+                            fontWeight: 600,
+                            color: C.accent,
+                            lineHeight: `${ALTO_FILA - 4}px`,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          POC
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      className="eco-mono"
+                      style={{ width: 52, flexShrink: 0, fontSize: 10, color: C.dim, textAlign: "right" }}
+                    >
+                      {b.pct.toFixed(1).replace(".", ",")}%
+                    </span>
+                  </div>
+                );
+              })}
+
+              {/* Marca del spot: línea punteada sobre todo el histograma */}
+              {topSpot != null && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 76,
+                    right: 52,
+                    top: topSpot,
+                    borderTop: `1px dashed ${C.cat.emerald}`,
+                    pointerEvents: "none",
+                  }}
+                >
+                  <span
+                    className="eco-mono"
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: -14,
+                      fontSize: 9.5,
+                      fontWeight: 600,
+                      color: C.cat.emerald,
+                      backgroundColor: C.panel,
+                      padding: "0 4px",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    SPOT {fmtPrecioMoneda(perfil.spot, perfil.moneda)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Números duros + lectura */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+            <KpiCard label="POC" value={fmtPrecioMoneda(perfil.poc, perfil.moneda)} sub="Precio de mayor volumen" color={C.accent} />
+            <KpiCard
+              label="Área de valor"
+              value={`${fmtPrecioMoneda(perfil.vaLow, perfil.moneda)} – ${fmtPrecioMoneda(perfil.vaHigh, perfil.moneda)}`}
+              sub="70% del volumen"
+              color={C.cat.violet}
+            />
+            <KpiCard label="Spot" value={fmtPrecioMoneda(perfil.spot, perfil.moneda)} sub={`Cierre · ${perfil.sym || perfil.ticker}`} color={C.cat.emerald} />
+            <KpiCard
+              label="Rango del perfil"
+              value={`${fmtPrecioMoneda(precioMin, perfil.moneda)} – ${fmtPrecioMoneda(precioMax, perfil.moneda)}`}
+              sub={`${bins.length} franjas · 1 año`}
+              color={C.cat.teal}
+            />
+          </div>
+
+          {lectura && (
+            <div
+              className="flex items-start gap-2 mt-3 px-4 py-3"
+              style={{ backgroundColor: "rgba(246, 247, 246, 0.025)", borderLeft: `2px solid ${lectura.color}` }}
+            >
+              <Activity size={13} color={lectura.color} strokeWidth={1.8} style={{ flexShrink: 0, marginTop: 2 }} />
+              <p style={{ fontSize: 12, color: C.text, margin: 0, lineHeight: 1.55 }}>{lectura.texto}</p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─────────── Módulo ─────────── */
+
+function MapaPosicionesModule() {
+  const [tab, setTab] = useState("futuros");
+  const { positions } = useUserPositions();
+  const { contratos, loading: loadingOi, error: errorOi, updatedAt, refresh: refreshOi } = useDlrOpenInterest();
+  const { perfiles, loading: loadingVp, error: errorVp, refresh: refreshVp } = useVolumeProfiles();
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Posición neta del usuario por contrato de futuro (compras − ventas).
+  // La clave está normalizada sin barra para poder cruzar 'DLRSEP26' de
+  // positions con 'DLR/SEP26' de mtr_market_data.
+  const netoPorTicker = useMemo(() => {
+    const m = new Map();
+    for (const p of positions || []) {
+      if (p.instrument_type !== "future" || !p.ticker) continue;
+      const k = normalizarTickerFuturo(p.ticker);
+      if (!k) continue;
+      const signo = p.operation_type === "sell" ? -1 : 1;
+      m.set(k, (m.get(k) || 0) + signo * (Number(p.quantity) || 0));
+    }
+    return m;
+  }, [positions]);
+
+  // Tickers de papeles en cartera — se usa para elegir el default del
+  // selector del perfil de volumen y para marcarlos en la lista.
+  const tickersCartera = useMemo(() => {
+    const s = new Set();
+    for (const p of positions || []) {
+      if (p.instrument_type !== "cedear" && p.instrument_type !== "stock") continue;
+      const t = String(p.ticker || "").trim().toUpperCase();
+      if (t) s.add(t);
+    }
+    return s;
+  }, [positions]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshOi(), refreshVp()]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const tabs = [
+    { id: "futuros", label: "Futuros DLR", count: contratos.length },
+    { id: "perfil", label: "Perfil de volumen", count: perfiles.length },
+  ];
+
+  return (
+    <div className="px-6 py-5 eco-fade-in" style={{ minHeight: "100%" }}>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-6 mb-5 flex-wrap">
+        <div className="flex flex-col gap-1.5">
+          <span style={{ fontSize: 9, color: C.dim, letterSpacing: "0.22em", textTransform: "uppercase", fontWeight: 500 }}>
+            Analizadores · Mapa de Posiciones
+          </span>
+          <h1 className="eco-display" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.01em", color: C.text, lineHeight: 1.1, margin: 0 }}>
+            Mapa de Posiciones
+          </h1>
+          <p style={{ fontSize: 11.5, color: C.muted, letterSpacing: "0.005em", maxWidth: 760, margin: "4px 0 0 0", lineHeight: 1.5 }}>
+            Dónde está parada la plata: interés abierto de los futuros del dólar y volumen operado por nivel de precio
+            en los papeles. Todo con datos publicados del mercado argentino — acá no se estima dónde están los stops
+            de nadie.
+          </p>
+        </div>
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          {updatedAt && (
+            <span style={{ fontSize: 10.5, color: C.dim }}>
+              Feed {updatedAt.toLocaleString("es-AR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+          <RefreshButton onClick={handleRefresh} spinning={refreshing} />
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4" style={{ borderBottom: `1px solid ${C.border}` }}>
+        {tabs.map((t) => {
+          const isActive = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                padding: "8px 16px",
+                fontSize: 11.5,
+                fontWeight: isActive ? 600 : 500,
+                letterSpacing: "0.05em",
+                color: isActive ? C.text : C.muted,
+                background: "transparent",
+                border: "none",
+                borderBottom: `2px solid ${isActive ? C.accent : "transparent"}`,
+                cursor: "pointer",
+                transition: "all 120ms ease",
+                marginBottom: -1,
+              }}
+            >
+              {t.label}
+              <span className="eco-mono" style={{ color: C.dim, marginLeft: 6, fontSize: 10.5 }}>
+                ({t.count})
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "futuros" ? (
+        <MapaFuturosDlrTab
+          contratos={contratos}
+          loading={loadingOi}
+          error={errorOi}
+          netoPorTicker={netoPorTicker}
+        />
+      ) : (
+        <MapaPerfilVolumenTab
+          perfiles={perfiles}
+          loading={loadingVp}
+          error={errorVp}
+          tickersCartera={tickersCartera}
+        />
+      )}
+    </div>
+  );
 }

@@ -871,6 +871,88 @@ async function regimePass() {
   }
 }
 
+/* ───────── Perfil de volumen (Mapa de posiciones, 08/08) ─────────
+ * El análogo honesto del "mapa de liquidaciones" para mercados sin
+ * derivados: en vez de inventar dónde estarían los stops, muestra a qué
+ * PRECIOS se operó de verdad el último año. Los niveles con volumen
+ * concentrado son zonas de pelea (imanes); los huecos son aire por donde
+ * el precio viaja rápido. Reusa las velas que el motor ya baja.
+ * Calcula 30 bins, el POC (precio con más volumen) y el área de valor
+ * (el rango que concentra el 70% del volumen, método estándar de Market
+ * Profile: se arranca en el POC y se suman los vecinos más pesados). */
+function buildProfile(daily, nBins = 30) {
+  const lo = Math.min(...daily.map((c) => c.l)), hi = Math.max(...daily.map((c) => c.h));
+  if (!(hi > lo)) return null;
+  const w = (hi - lo) / nBins;
+  const vols = new Array(nBins).fill(0);
+  for (const c of daily) {
+    const px = (c.h + c.l + c.c) / 3; // precio típico de la rueda
+    const i = Math.min(nBins - 1, Math.max(0, Math.floor((px - lo) / w)));
+    vols[i] += c.v || 0;
+  }
+  const total = vols.reduce((s, v) => s + v, 0);
+  if (!(total > 0)) return null;
+  const pocIdx = vols.indexOf(Math.max(...vols));
+  // Área de valor: 70% del volumen alrededor del POC.
+  let lo_i = pocIdx, hi_i = pocIdx, acc = vols[pocIdx];
+  while (acc < total * 0.7 && (lo_i > 0 || hi_i < nBins - 1)) {
+    const down = lo_i > 0 ? vols[lo_i - 1] : -1;
+    const up = hi_i < nBins - 1 ? vols[hi_i + 1] : -1;
+    if (up >= down) { hi_i++; acc += vols[hi_i]; } else { lo_i--; acc += vols[lo_i]; }
+  }
+  return {
+    poc: lo + (pocIdx + 0.5) * w,
+    va_low: lo + lo_i * w,
+    va_high: lo + (hi_i + 1) * w,
+    bins: vols.map((v, i) => ({
+      lo: Math.round((lo + i * w) * 100) / 100,
+      hi: Math.round((lo + (i + 1) * w) * 100) / 100,
+      vol: Math.round(v),
+      pct: Math.round((v / total) * 10000) / 100,
+    })),
+  };
+}
+
+async function volumeProfilePass() {
+  // Universo: lo que está en el tablero de alertas + lo que hay en cartera.
+  const [{ data: al }, { data: pos }] = await Promise.all([
+    supabase.from("price_alerts").select("ticker").eq("canal", "screen"),
+    supabase.from("positions").select("ticker").in("instrument_type", ["cedear", "stock"]),
+  ]);
+  const tks = new Set();
+  for (const r of [...(al || []), ...(pos || [])]) {
+    const t = (r.ticker || "").trim().toUpperCase();
+    if (t) tks.add(t);
+  }
+  let ok = 0;
+  for (const tk of tks) {
+    try {
+      const adr = ARG_ADR[tk] || null;
+      const sym = adr ? adr.adr : tk;
+      let daily = await yahooCandles(sym, "1d", "1y");
+      let usedSym = sym, moneda = "USD";
+      if (!daily) {
+        usedSym = tk + ".BA";
+        daily = await yahooCandles(usedSym, "1d", "1y");
+        moneda = "ARS";
+        if (!daily) continue;
+      }
+      const p = buildProfile(daily);
+      if (!p) continue;
+      await supabase.from("volume_profile").upsert({
+        ticker: tk, sym: usedSym, moneda,
+        spot: Math.round(daily[daily.length - 1].c * 100) / 100,
+        poc: Math.round(p.poc * 100) / 100,
+        va_low: Math.round(p.va_low * 100) / 100,
+        va_high: Math.round(p.va_high * 100) / 100,
+        bins: p.bins, updated_at: new Date().toISOString(),
+      }, { onConflict: "ticker" });
+      ok++;
+    } catch (e) { log(`[perfil ${tk}] ${e.message}`); }
+  }
+  log(`perfil de volumen: ${ok}/${tks.size} papeles`);
+}
+
 /* ───────── Paper trading IOL Auto (Fase 0, 03/08) ─────────
  * Simula los trades que el sistema habría ejecutado en el segmento USA de
  * IOL con las reglas de la Fase 1: solo señales del bot score >=7 y R:R >=2
@@ -956,7 +1038,7 @@ async function paperPass() {
 /* ───────── Loop persistente ───────── */
 async function loop() {
   log("niveles-auto v7 arrancando (cola 60s; paper IOL 60s; rearme 15 min; ratchet 30 min; confirmaciones 10 min; tracks 60 min)");
-  let lastTracks = 0, lastConfirm = 0, lastRearm = 0, lastRatchet = 0, lastRegime = 0;
+  let lastTracks = 0, lastConfirm = 0, lastRearm = 0, lastRatchet = 0, lastRegime = 0, lastProfile = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
@@ -971,6 +1053,10 @@ async function loop() {
       if (Date.now() - lastRegime > 4 * 60 * 60 * 1000) {
         await regimePass().catch((e) => log("[regimen]", e.message));
         lastRegime = Date.now();
+      }
+      if (Date.now() - lastProfile > 12 * 60 * 60 * 1000) {
+        await volumeProfilePass().catch((e) => log("[perfil]", e.message));
+        lastProfile = Date.now();
       }
       await main();
       await paperPass().catch((e) => log("[paper]", e.message));
