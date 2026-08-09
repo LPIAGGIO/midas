@@ -367,6 +367,21 @@ async function main() {
       const estr = estructuraDe(dp.los, dp.his);
       const gaps = openGaps(daily);
       const poc = pocOf(daily);
+      // v8 (08/08): respaldo de VOLUMEN de cada zona. Antes el motor solo
+      // premiaba la coincidencia exacta con el POC (un único precio); ahora
+      // mide qué porcentaje del volumen del año se operó DENTRO del rango de
+      // la zona. Un soporte donde se operó mucho es una zona de pelea real;
+      // uno en un hueco del perfil no frena nada — el precio lo atraviesa.
+      const prof = buildProfile(daily);
+      const volEnZona = (lo, hi) => {
+        if (!prof || !(hi > lo)) return null;
+        let acc = 0;
+        for (const b of prof.bins) {
+          const ov = Math.min(hi, b.hi) - Math.max(lo, b.lo); // solape zona↔bin
+          if (ov > 0) acc += b.pct * (ov / (b.hi - b.lo));
+        }
+        return acc; // % del volumen anual dentro de la zona
+      };
       const gapUp = gaps.filter((g) => g.lo > spot && (g.lo - spot) / spot <= 0.15).sort((a, b) => a.lo - b.lo)[0] || null;
       const gapDn = gaps.filter((g) => g.hi < spot && (spot - g.hi) / spot <= 0.15).sort((a, b) => b.hi - a.hi)[0] || null;
 
@@ -459,6 +474,13 @@ async function main() {
         if (pat) { sig.push(`${pat.k} ${pat.when}`); if (pat.bull) sc.score += 1; }
         if (div.bull) { sig.push("divergencia RSI alcista"); sc.score += 1; }
         if (poc && Math.abs(poc - buyZone.avg) / buyZone.avg <= 0.01) { sig.push("es el POC del año"); sc.score += 1; }
+        // Respaldo de volumen: con 30 bins, el reparto parejo daría 3,3% por
+        // zona; arriba de 6% es concentración real, abajo de 1,5% es hueco.
+        const vz = volEnZona(buyZone.lo, buyZone.hi);
+        if (vz != null) {
+          if (vz >= 6) { sig.push(`respaldo de volumen fuerte (${vz.toFixed(1)}% del año)`); sc.score += 1; }
+          else if (vz < 1.5) { sig.push(`zona sin volumen (${vz.toFixed(1)}%): el precio la atraviesa rápido`); sc.score -= 1; }
+        }
         if (estr === "alcista") sc.score += 1; else if (estr === "bajista") sc.score -= 1;
         if (contraTendencia) { sig.push("CONTRA-TENDENCIA"); sc.score = Math.min(sc.score, 4); }
         sc.score = Math.max(1, Math.min(10, sc.score));
@@ -504,6 +526,11 @@ async function main() {
         if (pat) { sig.push(`${pat.k} ${pat.when}`); if (pat.bull === false) sc.score += 1; }
         if (div.bear) { sig.push("divergencia RSI bajista"); sc.score += 1; }
         if (poc && Math.abs(poc - sellZone.avg) / sellZone.avg <= 0.01) { sig.push("es el POC del año"); sc.score += 1; }
+        const vzr = volEnZona(sellZone.lo, sellZone.hi);
+        if (vzr != null) {
+          if (vzr >= 6) { sig.push(`respaldo de volumen fuerte (${vzr.toFixed(1)}% del año)`); sc.score += 1; }
+          else if (vzr < 1.5) { sig.push(`zona sin volumen (${vzr.toFixed(1)}%): puede romperla de largo`); sc.score -= 1; }
+        }
         sc.score = Math.max(1, Math.min(10, sc.score));
         const sigTxt = sig.length ? " · " + sig.join(" · ") : "";
         const above = [...bigRes.filter((z) => z.lo > sellZone.hi * 1.005).map((z) => z.lo), yrHigh > sellZone.hi * 1.005 ? yrHigh : null].filter((x) => x != null);

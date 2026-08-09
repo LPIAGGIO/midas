@@ -172,19 +172,10 @@ const NAV = [
   { id: "research-dia", label: "Research del día", icon: Newspaper, type: "single", requiresAuth: true },
   { id: "alertas-tv", label: "Alertas TV · Bot", icon: LineChart, type: "single", requiresAuth: true },
   { id: "importaciones", label: "Importaciones", icon: Upload, type: "single", requiresAuth: true },
-  {
-    // Trading automatizado / estrategias bot. Reservado para futuros
-    // agentes que efectivamente ejecuten órdenes (vía API IOL, único
-    // broker con API de trade disponible). Hoy es un placeholder con
-    // mensaje "Próximamente"; las herramientas observacionales (como
-    // el Sintético DLR) viven bajo "Analizadores", no acá.
-    id: "bot-trading",
-    label: "Bot Trading",
-    icon: Sparkles,
-    type: "single",
-    badge: "BETA",
-    requiresAuth: true,
-  },
+  // "Bot Trading" se sacó del nav (08/08): era un placeholder "Próximamente"
+  // sin funcionalidad. El trading automatizado real vive hoy en el paper de
+  // IOL (worker niveles-auto) y en la rotación de momentum; cuando haya
+  // pantalla propia se vuelve a agregar con contenido.
   { id: "alertas", label: "Alertas", icon: Bell, type: "single", requiresAuth: true },
   {
     id: "bcra",
@@ -31087,19 +31078,10 @@ function EmptyWorkspace({ active }) {
   const item = flattenNav(NAV).find((i) => i.id === active);
   const Icon = item?.icon || Activity;
   const isDashboard = active === "dashboard";
-  // Bot Trading tiene un placeholder específico: marca claramente que el
-  // espacio está RESERVADO para agentes automatizados que operen vía API
-  // IOL (único broker con trade API). Las herramientas observacionales
-  // (Sintético DLR, Carry Trade, etc.) viven bajo Analizadores.
-  const isBotTrading = active === "bot-trading";
 
   // Subtítulo según la pantalla. Default: el genérico "Módulo en
-  // construcción". Casos especiales: Dashboard (layout placeholder) y
-  // Bot Trading (mensaje claro de roadmap).
-  let subtitle;
-  if (isDashboard) subtitle = "Layout v1.0 — Esperando módulo";
-  else if (isBotTrading) subtitle = "Próximamente — Agentes vía API IOL";
-  else subtitle = "Módulo en construcción";
+  // construcción"; el Dashboard tiene el suyo (layout placeholder).
+  const subtitle = isDashboard ? "Layout v1.0 — Esperando módulo" : "Módulo en construcción";
 
   return (
     <div className="absolute inset-0 flex items-center justify-center px-6">
@@ -31147,22 +31129,6 @@ function EmptyWorkspace({ active }) {
             {subtitle}
           </span>
         </div>
-
-        {isBotTrading && (
-          <div
-            style={{
-              maxWidth: 380,
-              textAlign: "center",
-              fontSize: 11.5,
-              color: C.dim,
-              lineHeight: 1.6,
-              letterSpacing: "0.005em",
-              marginTop: 4,
-            }}
-          >
-            Este espacio queda reservado para bots que efectivamente ejecuten órdenes. Las herramientas observacionales (Sintético DLR, Carry Trade, Futuros vs Caución) viven bajo <span style={{ color: C.text, fontWeight: 500 }}>Analizadores</span>.
-          </div>
-        )}
 
         {isDashboard && (
           <div
@@ -39765,6 +39731,89 @@ function useVolumeProfiles() {
   return { perfiles, loading, error, refresh: cargar };
 }
 
+/**
+ * Etiqueta operativa de un nivel del bot, derivada de la nota con el mismo
+ * criterio (y el mismo orden de prioridad) que usa la pantalla Alertas TV ·
+ * Bot: primero stop, después compra, después venta. Si la nota no dice nada
+ * reconocible queda como nivel a secas — no inventamos intención.
+ */
+function etiquetaNivelBot(nota) {
+  const n = String(nota || "");
+  if (/stop|salir/i.test(n)) return { label: "STOP", color: C.red };
+  if (/compra|soporte|piso/i.test(n)) return { label: "COMPRA", color: C.green };
+  if (/venta|resistencia|vender|ganancia/i.test(n)) return { label: "VENTA", color: C.accent };
+  return { label: "NIVEL", color: C.muted };
+}
+
+/**
+ * Niveles vivos que el bot de alertas tiene cargados para un papel.
+ *
+ * Dos cosas que importan:
+ *   - Solo alertas sin disparar (triggered_at IS NULL) y del canal 'screen',
+ *     que es el que usa el tablero de niveles. Las ya disparadas son historia.
+ *   - La moneda del perfil manda: si el perfil está en USD el nivel comparable
+ *     es usd_ref; si está en ARS es price. La alerta que no tenga el campo de
+ *     esa moneda se descarta, porque cruzarla con los bins sería mentira.
+ *
+ * Sin usuario logueado no hay nada que traer (las alertas son por usuario).
+ */
+function useNivelesBot(ticker, moneda) {
+  const { user } = useAuth();
+  const [niveles, setNiveles] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!user || !ticker) {
+      setNiveles([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    let cancelado = false;
+    setLoading(true);
+    setError(null);
+    supabase
+      .from("price_alerts")
+      .select("id, ticker, price, dir, nota, usd_ref")
+      .eq("user_id", user.id)
+      .eq("ticker", ticker)
+      .eq("canal", "screen")
+      .is("triggered_at", null)
+      .then(({ data, error: err }) => {
+        if (cancelado) return;
+        if (err) {
+          setError(err.message || "Error al leer price_alerts");
+          setNiveles([]);
+        } else {
+          const enUsd = String(moneda || "USD").toUpperCase() === "USD";
+          const filas = (data || [])
+            .map((r) => {
+              const crudo = enUsd ? r.usd_ref : r.price;
+              const nivel = crudo != null ? Number(crudo) : null;
+              if (nivel == null || !isFinite(nivel) || nivel <= 0) return null;
+              const et = etiquetaNivelBot(r.nota);
+              return {
+                id: r.id,
+                nivel,
+                dir: r.dir || null,
+                nota: r.nota || null,
+                etiqueta: et.label,
+                color: et.color,
+              };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.nivel - a.nivel);
+          setNiveles(filas);
+        }
+        setLoading(false);
+      });
+    return () => { cancelado = true; };
+  }, [user, ticker, moneda]);
+
+  return { niveles, loading, error, hayUsuario: !!user };
+}
+
 /* ─────────── Solapa 1: futuros DLR ─────────── */
 
 function MapaFuturosDlrTab({ contratos, loading, error, netoPorTicker }) {
@@ -39945,6 +39994,16 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
     [perfiles, seleccion]
   );
 
+  // Niveles del bot de alertas del papel elegido, ya expresados en la moneda
+  // del perfil. Se pide acá arriba (antes de los early return) porque los
+  // hooks no pueden quedar atrás de un return condicional.
+  const {
+    niveles: nivelesBot,
+    loading: loadingNiveles,
+    error: errorNiveles,
+    hayUsuario,
+  } = useNivelesBot(perfil?.ticker || null, perfil?.moneda || null);
+
   if (error) {
     return (
       <div className="flex items-start gap-3 p-4" style={{ backgroundColor: "rgba(248,113,113,0.08)", border: `1px solid rgba(248,113,113,0.25)` }}>
@@ -40011,6 +40070,71 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
     const t = (precioMax - perfil.spot) / (precioMax - precioMin);
     topSpot = Math.min(altoTotal, Math.max(0, t * altoTotal));
   }
+
+  // Mismo mapeo precio→píxel que el spot, reutilizado por los niveles del bot.
+  const topDePrecio = (p) => {
+    if (p == null || !isFinite(p) || precioMin == null || precioMax == null || precioMax <= precioMin) return null;
+    const t = (precioMax - p) / (precioMax - precioMin);
+    return Math.min(altoTotal, Math.max(0, t * altoTotal));
+  };
+
+  /* ── Cruce niveles del bot × perfil de volumen ────────────────────────────
+     Los cortes por tercios se calculan sobre la distribución de pct de TODOS
+     los bins del papel, no sobre un umbral fijo: un 2% puede ser mucho o poco
+     según lo concentrado que esté el perfil. */
+  const pctsOrdenados = bins.map((b) => b.pct).sort((a, b) => a - b);
+  const corteEn = (q) =>
+    pctsOrdenados.length ? pctsOrdenados[Math.min(pctsOrdenados.length - 1, Math.floor(q * pctsOrdenados.length))] : 0;
+  const corteTercioBajo = corteEn(1 / 3);
+  const corteTercioAlto = corteEn(2 / 3);
+
+  const confluencias = nivelesBot.map((n) => {
+    // Bin que contiene el nivel: lo <= nivel < hi. El borde superior del
+    // último bin se cuenta adentro, si no un nivel justo en el máximo del año
+    // quedaría "fuera de rango" por un centavo.
+    let bin = bins.find((b) => n.nivel >= b.lo && n.nivel < b.hi) || null;
+    if (!bin && bins.length && n.nivel === bins[bins.length - 1].hi) bin = bins[bins.length - 1];
+
+    let veredicto;
+    if (!bin) {
+      veredicto = { texto: "fuera del rango del año", color: C.dim };
+    } else if (bin.pct >= corteTercioAlto) {
+      veredicto = { texto: "respaldado por volumen (nivel fuerte)", color: C.green, fuerte: true };
+    } else if (bin.pct >= corteTercioBajo) {
+      veredicto = { texto: "volumen medio", color: C.muted };
+    } else {
+      veredicto = { texto: "hueco: el precio pasa rápido", color: C.cat.orange };
+    }
+
+    const enVa =
+      perfil?.vaLow != null && perfil?.vaHigh != null &&
+      n.nivel >= perfil.vaLow && n.nivel <= perfil.vaHigh;
+
+    return { ...n, bin, veredicto, enVa };
+  });
+
+  const nivelesFuertes = confluencias.filter((c) => c.veredicto.fuerte).length;
+
+  // Marcas sobre el histograma. Las etiquetas van a la derecha por defecto;
+  // si dos caen demasiado cerca, la segunda se manda a la izquierda y, si
+  // tampoco entra, se empuja unos píxeles para abajo. Simple y sin pisarse.
+  const SEP_ETIQUETA = 13;
+  const ultimoY = { der: -Infinity, izq: -Infinity };
+  const marcas = confluencias
+    .map((c) => ({ ...c, top: topDePrecio(c.nivel) }))
+    .filter((c) => c.top != null)
+    .sort((a, b) => a.top - b.top)
+    .map((c) => {
+      let lado = "der";
+      if (c.top - ultimoY.der < SEP_ETIQUETA) {
+        lado = c.top - ultimoY.izq >= SEP_ETIQUETA
+          ? "izq"
+          : (ultimoY.izq <= ultimoY.der ? "izq" : "der");
+      }
+      const y = Math.max(c.top, ultimoY[lado] + SEP_ETIQUETA);
+      ultimoY[lado] = y;
+      return { ...c, lado, etiquetaTop: y };
+    });
 
   return (
     <div>
@@ -40157,6 +40281,42 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
                   </span>
                 </div>
               )}
+
+              {/* Niveles del bot superpuestos: línea fina + etiqueta chica */}
+              {marcas.map((m) => (
+                <Fragment key={m.id}>
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 76,
+                      right: 52,
+                      top: m.top,
+                      borderTop: `1px solid ${m.color}`,
+                      opacity: 0.55,
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <span
+                    className="eco-mono"
+                    style={{
+                      position: "absolute",
+                      top: m.etiquetaTop - 6,
+                      [m.lado === "der" ? "right" : "left"]: m.lado === "der" ? 56 : 80,
+                      fontSize: 9,
+                      fontWeight: 600,
+                      lineHeight: "12px",
+                      color: m.color,
+                      backgroundColor: C.panel,
+                      padding: "0 4px",
+                      whiteSpace: "nowrap",
+                      letterSpacing: "0.04em",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {m.etiqueta} {fmtPrecioMoneda(m.nivel, perfil.moneda)}
+                  </span>
+                </Fragment>
+              ))}
             </div>
           </div>
 
@@ -40185,6 +40345,149 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
             >
               <Activity size={13} color={lectura.color} strokeWidth={1.8} style={{ flexShrink: 0, marginTop: 2 }} />
               <p style={{ fontSize: 12, color: C.text, margin: 0, lineHeight: 1.55 }}>{lectura.texto}</p>
+            </div>
+          )}
+
+          {/* ── Confluencia: los niveles del bot contra el volumen real ──────
+              Sin usuario logueado no se muestra nada: las alertas son por
+              usuario y el perfil se ve igual sin estar adentro. */}
+          {hayUsuario && (
+            <div className="mt-5">
+              <SectionLabel>Niveles del bot × volumen · {perfil.ticker}</SectionLabel>
+
+              {errorNiveles ? (
+                <div
+                  className="flex items-start gap-3 p-4"
+                  style={{ backgroundColor: "rgba(248,113,113,0.08)", border: `1px solid rgba(248,113,113,0.25)` }}
+                >
+                  <AlertTriangle size={16} color={C.red} strokeWidth={1.8} />
+                  <div className="flex flex-col gap-0.5">
+                    <span style={{ fontSize: 12, color: C.text, fontWeight: 500 }}>No se pudieron cargar los niveles del bot</span>
+                    <span style={{ fontSize: 11, color: C.muted }}>{errorNiveles}</span>
+                  </div>
+                </div>
+              ) : loadingNiveles ? (
+                <div
+                  className="flex items-center justify-center py-8"
+                  style={{ backgroundColor: C.panel, border: `1px solid ${C.border}` }}
+                >
+                  <Loader2 size={16} color={C.accent} className="eco-spin" strokeWidth={1.8} />
+                </div>
+              ) : confluencias.length === 0 ? (
+                <div className="px-4 py-6 text-center" style={{ backgroundColor: C.panel, border: `1px solid ${C.border}` }}>
+                  <p style={{ fontSize: 11.5, color: C.muted, margin: 0, lineHeight: 1.5 }}>
+                    {perfil.ticker} no tiene alertas vivas del bot: los niveles se cargan desde la pantalla{" "}
+                    <span style={{ color: C.text, fontWeight: 500 }}>Alertas TV · Bot</span>.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ backgroundColor: C.panel, borderTop: `2px solid ${C.accent}` }}>
+                  {/* Resumen de una línea: la conclusión antes del detalle */}
+                  <div
+                    className="flex items-start gap-2 px-4 py-3"
+                    style={{ borderBottom: `1px solid ${C.border}` }}
+                  >
+                    <Bell size={13} color={C.accent} strokeWidth={1.8} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <p style={{ fontSize: 12, color: C.text, margin: 0, lineHeight: 1.55 }}>
+                      <span style={{ fontWeight: 600, color: nivelesFuertes > 0 ? C.green : C.cat.orange }}>
+                        {nivelesFuertes} de {confluencias.length}
+                      </span>{" "}
+                      {confluencias.length === 1 ? "nivel del bot cae" : "niveles del bot caen"} en zonas con volumen
+                      real.
+                    </p>
+                  </div>
+
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+                      <thead>
+                        <tr>
+                          {[
+                            { l: "Nivel", a: "left" },
+                            { l: "Precio", a: "right" },
+                            { l: "% vol. anual", a: "right" },
+                            { l: "Confluencia", a: "left" },
+                          ].map((h) => (
+                            <th
+                              key={h.l}
+                              style={{
+                                textAlign: h.a,
+                                padding: "8px 14px",
+                                fontSize: 9,
+                                letterSpacing: "0.16em",
+                                textTransform: "uppercase",
+                                fontWeight: 500,
+                                color: C.dim,
+                                borderBottom: `1px solid ${C.border}`,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {h.l}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {confluencias.map((c) => (
+                          <tr key={c.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                            <td style={{ padding: "8px 14px", whiteSpace: "nowrap" }}>
+                              <span
+                                style={{
+                                  fontSize: 9.5,
+                                  fontWeight: 600,
+                                  letterSpacing: "0.10em",
+                                  color: c.color,
+                                }}
+                              >
+                                {c.etiqueta}
+                              </span>
+                              {c.nota && (
+                                <span style={{ fontSize: 10.5, color: C.dim, marginLeft: 8 }} title={c.nota}>
+                                  {c.nota.length > 40 ? `${c.nota.slice(0, 40)}…` : c.nota}
+                                </span>
+                              )}
+                            </td>
+                            <td
+                              className="eco-mono"
+                              style={{ padding: "8px 14px", fontSize: 11.5, color: C.text, textAlign: "right", whiteSpace: "nowrap" }}
+                            >
+                              {fmtPrecioMoneda(c.nivel, perfil.moneda)}
+                            </td>
+                            <td
+                              className="eco-mono"
+                              style={{ padding: "8px 14px", fontSize: 11.5, color: c.bin ? C.text : C.dim, textAlign: "right", whiteSpace: "nowrap" }}
+                            >
+                              {c.bin ? `${c.bin.pct.toFixed(1).replace(".", ",")}%` : "—"}
+                            </td>
+                            <td style={{ padding: "8px 14px" }}>
+                              <span style={{ fontSize: 11.5, color: c.veredicto.color, lineHeight: 1.4 }}>
+                                {c.veredicto.texto}
+                              </span>
+                              {c.enVa && (
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    marginLeft: 8,
+                                    fontSize: 9,
+                                    fontWeight: 600,
+                                    letterSpacing: "0.08em",
+                                    color: C.cat.violet,
+                                    backgroundColor: "rgba(167, 139, 250, 0.10)",
+                                    border: `1px solid rgba(167, 139, 250, 0.30)`,
+                                    padding: "1px 6px",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  área de valor
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </>
