@@ -40441,7 +40441,7 @@ function useVolumeProfiles() {
     try {
       const { data, error: err } = await supabase
         .from("volume_profile")
-        .select("ticker, sym, moneda, spot, poc, va_low, va_high, bins, updated_at")
+        .select("ticker, sym, moneda, spot, poc, va_low, va_high, sma200w, bins, updated_at")
         .order("ticker", { ascending: true });
       if (err) throw err;
       const filas = (data || []).map((r) => ({
@@ -40452,6 +40452,7 @@ function useVolumeProfiles() {
         poc: r.poc != null ? Number(r.poc) : null,
         vaLow: r.va_low != null ? Number(r.va_low) : null,
         vaHigh: r.va_high != null ? Number(r.va_high) : null,
+        sma200w: r.sma200w != null ? Number(r.sma200w) : null,
         // bins viene jsonb; blindamos por si alguna fila quedó a medias.
         bins: Array.isArray(r.bins)
           ? r.bins
@@ -41079,6 +41080,29 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
               sub={`${bins.length} franjas · 1 año`}
               color={C.cat.teal}
             />
+            {/* Base estructural: la media de 200 SEMANAS (~4 años de precio).
+                NO es señal de compra —comprar su toque es el caso
+                contra-tendencia que pierde 6 de 10 (AQR), y el backtest propio
+                dio 54% de acierto— pero mide cuánto AIRE hay debajo del precio
+                antes del piso multianual, que es información de riesgo real:
+                un papel a +358% de su base no tiene red cerca. */}
+            {perfil.sma200w != null && perfil.spot != null && (() => {
+              const dist = (perfil.spot / perfil.sma200w - 1) * 100;
+              const col = dist > 150 ? C.red : dist > 60 ? C.cat.orange : dist > 15 ? C.cat.yellow : C.green;
+              const lec = dist > 150 ? "sin red cerca: aire enorme abajo"
+                : dist > 60 ? "muy por encima de su base"
+                : dist > 15 ? "por encima de su base"
+                : dist > -10 ? "cerca de su base multianual"
+                : "debajo de su base: estructura rota";
+              return (
+                <KpiCard
+                  label="Base 200 semanas"
+                  value={`${fmtPrecioMoneda(perfil.sma200w, perfil.moneda)} · ${dist >= 0 ? "+" : ""}${dist.toFixed(0)}%`}
+                  sub={lec}
+                  color={col}
+                />
+              );
+            })()}
           </div>
 
           {lectura && (

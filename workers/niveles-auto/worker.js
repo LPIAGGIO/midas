@@ -966,12 +966,27 @@ async function volumeProfilePass() {
       }
       const p = buildProfile(daily);
       if (!p) continue;
+
+      // SMA de 200 SEMANAS (~4 años): la base estructural del papel. No es
+      // señal —comprar su toque es el caso contra-tendencia de AQR— pero mide
+      // cuánto aire hay debajo del precio antes del piso multianual. Un papel
+      // a +358% de su base (MU hoy) no tiene red cerca; uno a +37% (XOM) sí.
+      let sma200w = null;
+      try {
+        const wk = await yahooCandles(usedSym, "1wk", "5y");
+        if (wk && wk.length >= 200) {
+          const ult = wk.slice(-200);
+          sma200w = Math.round((ult.reduce((s, c) => s + c.c, 0) / 200) * 100) / 100;
+        }
+      } catch { /* sin la semanal el perfil sigue sirviendo */ }
+
       await supabase.from("volume_profile").upsert({
         ticker: tk, sym: usedSym, moneda,
         spot: Math.round(daily[daily.length - 1].c * 100) / 100,
         poc: Math.round(p.poc * 100) / 100,
         va_low: Math.round(p.va_low * 100) / 100,
         va_high: Math.round(p.va_high * 100) / 100,
+        sma200w,
         bins: p.bins, updated_at: new Date().toISOString(),
       }, { onConflict: "ticker" });
       ok++;
