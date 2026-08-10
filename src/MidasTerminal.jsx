@@ -10956,7 +10956,23 @@ function preTodayContadoAgg(positions, todayStr) {
 function contadoDayPnlCarried(g, prev, carriedQty, carriedCost) {
   const lifetime = g.realizedPnl ?? 0;
   if (!(prev > 0) || carriedCost == null || !Number.isFinite(carriedCost)) return lifetime;
-  const adj = applyConventionToValue(g.instrument_type, 1, carriedQty * (prev - carriedCost));
+  // Se re-basan SOLO las unidades arrastradas que efectivamente se CERRARON HOY.
+  // `carriedQty` es el NETO arrastrado del ticker (incluye el lote que sigue
+  // VIVO), mientras que `lifetime` es el realizado de los pares cerrados hoy:
+  // re-basar con el neto entero escala el ajuste por (arrastrado / vendido).
+  // Bug MU 10/08/2026: 50 papeles vendidos hoy sobre 251 arrastrados → ajuste
+  // ×5,02 → la fila mostraba +895.291,6 de "ganancia del día" cuando el día
+  // real era 50 × (282.100 − 277.932) = +208,4k. Tope por MAGNITUD conservando
+  // el signo (un short arrastrado tiene carriedQty < 0). Si sobra qty vendida
+  // por encima de lo arrastrado, ese excedente salió de compras de HOY: su base
+  // ya es el precio de hoy y no necesita re-base.
+  const closedToday = Number(g.closedQty) > 0
+    ? Number(g.closedQty)
+    : (g.operations || []).reduce((s, p) => s + Math.abs(Number(p.quantity) || 0), 0);
+  const rebaseQty = closedToday > 0
+    ? Math.sign(carriedQty) * Math.min(Math.abs(carriedQty), closedToday)
+    : carriedQty;
+  const adj = applyConventionToValue(g.instrument_type, 1, rebaseQty * (prev - carriedCost));
   return lifetime - adj;
 }
 
@@ -14505,16 +14521,18 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
           ? (closedPnl / Math.abs(closedValueAtCost)) * 100
           : null;
 
-        // P&L LIFETIME del ticker: realizado de las ventas pasadas + no
-        // realizado del lote vivo. Ambas filas del split lo comparten.
-        // % lifetime sobre el costo total invertido en compras (toda la
-        // historia). Si openPnl es null (sin precio actual), el lifetime
-        // se reduce al realized.
-        const lifetimePnl = (openPnl ?? 0) + closedPnl;
-        const lifetimeCostBasis = applyConventionToValue(g.instrument_type, g.totalBuyQty, ppp);
-        const lifetimePnlPct = (lifetimeCostBasis != null && Math.abs(lifetimeCostBasis) > 0)
-          ? (lifetimePnl / Math.abs(lifetimeCostBasis)) * 100
-          : null;
+        // HISTÓRICO de las dos filas del split = el REALIZADO histórico del
+        // ticker (lo ya cobrado por las ventas pasadas), NO realizado + MTM.
+        // La UI lo pinta bajo el label "Realizado histórico" y el no-realizado
+        // del lote vivo ya se muestra como P&L TOTAL en la fila abierta:
+        // mezclarlos daba un número que no era ninguna de las dos cosas.
+        // Bug MU 10/08/2026: la fila cerrada mostraba "REALIZADO HISTÓRICO
+        // −2.022.599,94 (−0,12%)" = realizado (≈−1,0M) + MTM del lote vivo de
+        // 201 papeles (≈−1,0M), con el % sobre TODAS las compras (6.065) en vez
+        // de sobre lo vendido. Esto ya estaba resuelto así en la rama de
+        // futuros (ver los dos push de arriba); acá había quedado sin alinear.
+        const lifetimePnl = closedPnl;
+        const lifetimePnlPct = closedPnlPct;
 
         // Push entrada ABIERTA
         result.push({
@@ -14539,6 +14557,10 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
           pnlPct: openPnlPct,
           realizedPnl: 0,
           unrealizedPnl: openPnl,
+          // Igual que en futuros: marca la fila como "abierta de un cierre
+          // parcial" para que el label del histórico sea "Realizado histórico"
+          // (que es lo que ahora contiene lifetimePnl).
+          isPartialOpen: true,
           lifetimePnl,
           lifetimePnlPct,
           notional: null,
@@ -16957,17 +16979,32 @@ function ConsolidatedSection({
       if (prev == null || !(prev > 0)) return g; // sin cierre de ayer: dejamos el realizado
       const carriedCost = a.qty > 1e-6 ? a.value / a.qty : null;
       const dayPnl = contadoDayPnlCarried(g, prev, carriedQty, carriedCost);
-      // % sobre el costo de lo vendido hoy (a PPP de los pares).
-      let costRaw = 0;
+      // Costo y cantidad de lo cerrado HOY (pares sintéticos con venta de hoy).
+      let costRaw = 0, qtyToday = 0;
       for (const pair of (g.operations || [])) {
         const qty = Number(pair.quantity) || 0, bp = pair.entry_price;
-        if (qty > 0 && bp != null) costRaw += qty * bp;
+        if (qty > 0 && bp != null) { costRaw += qty * bp; qtyToday += qty; }
       }
-      const costVal = applyConventionToValue(g.instrument_type, 1, costRaw);
-      const dayPct = Math.abs(costVal) > 0 ? (dayPnl / Math.abs(costVal)) * 100 : g.pnlPct;
+      // BASE DEL DÍA por unidad: el precio contra el que se mide el P&L que la
+      // fila muestra. Para las unidades ARRASTRADAS es el cierre de AYER; para
+      // las compradas hoy, su propio precio de compra. Se despeja del mismo
+      // re-base que aplica contadoDayPnlCarried, así la celda cuadra con la
+      // fila: pnl_día = qtyHoy × (precio de venta − base del día). Sin esto la
+      // fila mostraba costo histórico de los lotes vendidos al lado de un P&L
+      // del día y no cerraba a mano (bug MU 10/08/2026).
+      let dayBasePrice = null;
+      if (qtyToday > 0 && carriedCost != null) {
+        const rebaseQty = Math.sign(carriedQty) * Math.min(Math.abs(carriedQty), qtyToday);
+        dayBasePrice = (costRaw + rebaseQty * (prev - carriedCost)) / qtyToday;
+      }
+      // % del día sobre el capital que estuvo en juego valuado a la base del día.
+      const baseVal = dayBasePrice != null
+        ? applyConventionToValue(g.instrument_type, qtyToday, dayBasePrice)
+        : applyConventionToValue(g.instrument_type, 1, costRaw);
+      const dayPct = Math.abs(baseVal) > 0 ? (dayPnl / Math.abs(baseVal)) * 100 : g.pnlPct;
       // pnl/valueAtMarket → tramo del día; lifetimePnl queda como el realizado
-      // total del trade (se ve en la fila expandida como "Histórico del ticker").
-      return { ...g, pnl: dayPnl, realizedPnl: dayPnl, valueAtMarket: dayPnl, pnlPct: dayPct };
+      // total del trade (se ve en la fila expandida como "Realizado histórico").
+      return { ...g, pnl: dayPnl, realizedPnl: dayPnl, valueAtMarket: dayPnl, pnlPct: dayPct, dayBasePrice };
     });
   })();
 
@@ -17518,11 +17555,20 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
   // precio" cuadre visualmente con el P&L% de la fila. Si el grupo no
   // tiene pares de hoy (o falta el dato), se cae al g.ppp de siempre.
   // OJO: es solo presentación — ningún cálculo de P&L usa este número.
+  //
+  // 10/08/2026: cuando el P&L de la fila es la GANANCIA DEL DÍA (lote arrastrado
+  // vendido hoy, re-basado al cierre de ayer), el número que hace cuadrar la
+  // celda ya no es el costo de los pares sino la BASE DEL DÍA que calcula
+  // PortfolioSection (g.dayBasePrice). Se prefiere esa cuando existe; el costo
+  // de los pares queda como fallback (round-trip intradía puro o ticker sin
+  // cierre de ayer, donde base del día === costo de los pares).
   const pppOverrides = useMemo(() => {
     if (!isClosed) return null;
     const today = getTodayStringAR();
     const m = new Map();
     for (const g of consolidated) {
+      const db = Number(g.dayBasePrice);
+      if (Number.isFinite(db) && db > 0) { m.set(g.groupKey, db); continue; }
       let qtySum = 0;
       let valSum = 0;
       for (const op of g.operations || []) {
@@ -17688,7 +17734,11 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
               <PTh dense style={{ width: 28 }}>{""}</PTh>
               <PTh dense {...sortProps("ticker")}>Ticker</PTh>
               <PTh dense align="right" {...sortProps("cantidad")}>Cantidad / VN</PTh>
-              <PTh dense align="right" {...sortProps("ppp")}>PPP</PTh>
+              {/* En cerradas-hoy la celda no muestra el PPP histórico sino la
+                  BASE DEL DÍA (cierre de ayer para lo arrastrado, precio de
+                  compra para lo operado hoy): es el número contra el que se
+                  mide el P&L de la fila. */}
+              <PTh dense align="right" {...sortProps("ppp")}>{isClosed ? "Base día" : "PPP"}</PTh>
               <PTh dense align="right" {...sortProps("precio")}>{isClosed ? "Último precio" : "Precio actual"}</PTh>
               {!isClosed && <PTh dense align="right">P&amp;L Hoy</PTh>}
               <PTh dense align="right" {...sortProps("pnl")}>{isClosed ? "P&L" : "P&L Total"}</PTh>
@@ -17989,10 +18039,11 @@ function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPric
         </PTd>
         <PTd dense align="right">
           <span className="eco-mono">
-            {/* En cerradas-hoy, pppOverride trae el costo base de lo cerrado
-                HOY (compras-espejo de los pares del día) — sin él, la celda
-                mostraría el PPP histórico y no cuadraría con el P&L de la
-                fila. Fallback al PPP de siempre si no hay pares de hoy. */}
+            {/* En cerradas-hoy, pppOverride trae la BASE DEL DÍA de lo cerrado
+                hoy (cierre de ayer para las unidades arrastradas, costo del par
+                para lo comprado hoy) — sin él, la celda mostraría el PPP
+                histórico y no cuadraría con el P&L de la fila. Fallback al PPP
+                de siempre si no hay pares de hoy. */}
             {(pppOverride ?? group.ppp) != null
               ? fmtNumber(pppOverride ?? group.ppp, { maxDecimals: 4, smartDecimals: true })
               : "—"}
