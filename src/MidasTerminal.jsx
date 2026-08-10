@@ -63,6 +63,7 @@ import {
   LogOut,
   LogIn,
   User,
+  Users,
   Briefcase,
   Sparkles,
   ShieldCheck,
@@ -243,6 +244,7 @@ const NAV = [
       { id: "dividendos", label: "Dividendos", icon: Coins },
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
       { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
+      { id: "superinversores", label: "Superinversores", icon: Users, type: "single", requiresAuth: true },
     ],
   },
 ];
@@ -1501,6 +1503,8 @@ function MidasApp({ allowedModules = null }) {
               <SimuladorVentaCedearModule key={active} onPopOut={() => openCedearPip("venta")} pipActive={cedearPip?.view === "venta"} />
             ) : active === "paper-cedears" ? (
               <PaperCedearsModule key={active} />
+            ) : active === "superinversores" ? (
+              <SuperinversoresModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
             ) : active === "calc-montecarlo" ? (
@@ -30456,6 +30460,694 @@ function ReporteCarteraModule() {
       <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, maxWidth: 900 }}>
         Solo posiciones de contado abiertas (bonos, ONs, acciones, CEDEARs, FCI); futuros y cauciones están en P&L por Instrumento. En «Todos» un ticker que tenés en Cocos + IOL se muestra combinado; filtrá por broker para verlo separado. DPT = días desde la primera compra; TNA = rendimiento total anualizado (% R. × 365 / DPT), se muestra solo con ≥30 días de tenencia (anualizar pocos días no tiene sentido); % Cart. sobre el valor a mercado total del filtro.
       </p>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Superinversores · 13F de la SEC
+ *
+ * Qué muestra: en qué papeles coinciden los grandes gestores
+ * institucionales de EE.UU., según los formularios 13F que presentan ante
+ * la SEC. Los datos los deja un worker cada mañana en dos tablas:
+ * superinvestors (una fila por gestor, con su último filing) y si_holdings
+ * (una fila por papel y por trimestre reportado).
+ *
+ * POR QUÉ la fecha del reporte aparece en TODAS las vistas: el 13F se
+ * presenta hasta 45 días DESPUÉS del cierre del trimestre, así que el dato
+ * es viejo por diseño. Y como cada gestor presenta cuando quiere dentro de
+ * ese plazo, conviven dos trimestres distintos en la misma tabla. Una
+ * pantalla que diga "Buffett tiene X" sin aclarar "al 31/03" miente por
+ * omisión: para cuando lo leemos la posición puede no existir más. Por eso
+ * cada fila, cada expansión y cada gestor llevan su período reportado y el
+ * atraso en días bien a la vista.
+ *
+ * REGLA DE JOIN: si_holdings guarda histórico. Para quedarse SOLO con el
+ * filing más reciente de cada gestor hay que unir por (cik, report_date =
+ * superinvestors.last_report_date). Sin eso se mezclan trimestres y el
+ * conteo de "cuántos gestores lo tienen" queda inflado (el mismo gestor
+ * cuenta una vez por trimestre que tenga cargado).
+ * ═══════════════════════════════════════════════════════════════════════ */
+const SI_MS_DIA = 86400000;
+
+/* "2026-03-31" → "31/03/2026". Se corta el string a mano en vez de usar
+ * new Date(iso): eso parsea en UTC y en AR (UTC-3) corre la fecha un día
+ * para atrás — un cierre de trimestre se mostraría como el 30. */
+function siFmtFecha(iso) {
+  if (!iso || String(iso).length < 10) return "—";
+  const s = String(iso);
+  return `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`;
+}
+function siFmtFechaCorta(iso) {
+  if (!iso || String(iso).length < 10) return "—";
+  const s = String(iso);
+  return `${s.slice(8, 10)}/${s.slice(5, 7)}`;
+}
+
+/* Días entre el cierre del trimestre reportado y hoy: es "cuán viejo" es el
+ * dato que estamos mirando. No se mide contra la fecha de presentación
+ * porque lo que envejece es la foto de la cartera, no el trámite. */
+function siDiasAtraso(iso, hoyIso) {
+  if (!iso || !hoyIso) return null;
+  const a = Date.parse(`${String(iso).slice(0, 10)}T00:00:00Z`);
+  const b = Date.parse(`${String(hoyIso).slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.round((b - a) / SI_MS_DIA);
+}
+function siColorAtraso(dias) {
+  if (dias == null) return C.dim;
+  if (dias < 60) return C.green;          // recién presentado, la foto sirve
+  if (dias <= 120) return C.cat.amber;    // ya hay un trimestre entero sin ver
+  return C.red;                           // más de un trimestre de ceguera
+}
+
+/* Etiqueta del rango de reportes que respalda una fila del ranking. Si todos
+ * los gestores son del mismo trimestre se muestra la fecha completa; si hay
+ * más de uno, los días y meses cortos ("31/03 y 30/06") para que se vea de
+ * un saque que la fila mezcla dos fotos tomadas en momentos distintos. */
+function siLabelFechas(fechas) {
+  if (!fechas || !fechas.length) return "—";
+  if (fechas.length === 1) return siFmtFecha(fechas[0]);
+  if (fechas.length === 2) return fechas.map(siFmtFechaCorta).join(" y ");
+  return fechas.map(siFmtFechaCorta).join(" · ");
+}
+
+/* Valores agregados de 13F: la unidad natural es miles de millones de USD.
+ * Debajo de 0,01 B se pasa a millones porque "US$ 0,00 B" no dice nada. */
+function siFmtUsdB(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  const b = n / 1e9;
+  if (Math.abs(b) < 0.01) {
+    return `US$ ${(n / 1e6).toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} M`;
+  }
+  return `US$ ${b.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} B`;
+}
+function siFmtPct(v, dec = 2) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toLocaleString("es-AR", { minimumFractionDigits: dec, maximumFractionDigits: dec })}%`;
+}
+function siFmtCantidad(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  const dec = Math.abs(n % 1) > 1e-6 ? 2 : 0;
+  return n.toLocaleString("es-AR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
+/* Veredicto de acompañamiento para "Mi cartera". Los cortes son arbitrarios
+ * pero la idea no: sobre un panel de 19 gestores, que ninguno tenga el papel
+ * no lo hace malo — hace que la tesis sea tuya y de nadie más. */
+function siVeredicto(n) {
+  if (n === 0) return { txt: "solo", color: "rgba(248, 113, 113, 0.82)", detalle: "ningún gestor del panel lo declara" };
+  if (n <= 3) return { txt: "poco acompañado", color: C.cat.orange, detalle: "confluencia flaca" };
+  if (n <= 9) return { txt: "acompañado", color: "rgba(74, 222, 128, 0.78)", detalle: "confluencia razonable" };
+  return { txt: "muy acompañado", color: C.green, detalle: "posición de consenso" };
+}
+
+function SiAtrasoBadge({ dias, sufijo = "d" }) {
+  if (dias == null) return null;
+  const col = siColorAtraso(dias);
+  return (
+    <span
+      className="eco-mono"
+      title={`${dias} días desde el cierre del trimestre reportado`}
+      style={{
+        display: "inline-block", padding: "1px 5px", borderRadius: 3, fontSize: 9.5, fontWeight: 500,
+        color: col, border: `1px solid ${col}55`, background: `${col}14`, whiteSpace: "nowrap",
+      }}
+    >
+      +{dias}{sufijo}
+    </span>
+  );
+}
+
+function SuperinversoresModule() {
+  const { user } = useAuth();
+  const [tab, setTab] = useState("ranking");     // ranking | cartera | gestores
+  const [data, setData] = useState(null);        // { gestores, holdings } — holdings ya filtrado al último filing
+  const [error, setError] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [sortKey, setSortKey] = useState("gestores");  // "gestores" | "valor"
+  const [sortDir, setSortDir] = useState(-1);
+  const [abierto, setAbierto] = useState(null);  // ticker con la fila expandida
+  const [pos, setPos] = useState(null);
+  const [posError, setPosError] = useState(null);
+
+  // Hoy en local (no UTC): el atraso se cuenta en días calendario de acá.
+  const hoyIso = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }, [tick]);
+
+  useEffect(() => {
+    let vivo = true;
+    setData(null); setError(null);
+    (async () => {
+      try {
+        const { data: g, error: eg } = await supabase
+          .from("superinvestors")
+          .select("cik,nombre,gestor,last_report_date,last_filing_date,holdings_count,total_value_usd");
+        if (eg) throw eg;
+
+        // si_holdings tiene histórico y el query builder de supabase-js no
+        // expresa un join compuesto (cik + report_date), así que se pagina
+        // todo con orden estable y el filtro por último filing se hace en
+        // memoria. Son ~1.6k filas, no vale la pena una RPC.
+        let hs = [], desde = 0;
+        for (;;) {
+          const { data: d, error: eh } = await supabase
+            .from("si_holdings")
+            .select("cik,report_date,cusip,issuer,ticker,value_usd,shares,pct_portfolio")
+            .order("cik", { ascending: true })
+            .order("report_date", { ascending: true })
+            .order("cusip", { ascending: true })
+            .range(desde, desde + 999);
+          if (eh) throw eh;
+          if (!d || !d.length) break;
+          hs = hs.concat(d);
+          if (d.length < 1000) break;
+          desde += 1000;
+        }
+        if (!vivo) return;
+        const ultimo = new Map((g || []).map((r) => [r.cik, r.last_report_date]));
+        const holdings = hs.filter((h) => ultimo.get(h.cik) === h.report_date);
+        setData({ gestores: g || [], holdings });
+      } catch (e) {
+        if (vivo) setError(e?.message || String(e));
+      }
+    })();
+    return () => { vivo = false; };
+  }, [tick]);
+
+  // Posiciones propias: solo lo que se cruza contra un 13F (acciones USA y
+  // CEDEARs, que representan la misma empresa). Se netea compras menos
+  // ventas por ticker para quedarse con la tenencia abierta.
+  useEffect(() => {
+    let vivo = true;
+    if (!user) { setPos([]); setPosError(null); return () => { vivo = false; }; }
+    setPos(null); setPosError(null);
+    (async () => {
+      const { data: d, error: e } = await supabase
+        .from("positions")
+        .select("ticker,instrument_type,operation_type,quantity")
+        .eq("user_id", user.id)
+        .in("instrument_type", ["cedear", "stock"])
+        .limit(5000);
+      if (!vivo) return;
+      if (e) { setPosError(e.message); setPos([]); return; }
+      setPos(d || []);
+    })();
+    return () => { vivo = false; };
+  }, [user, tick]);
+
+  const gestorPorCik = useMemo(
+    () => new Map((data?.gestores || []).map((g) => [g.cik, g])),
+    [data]
+  );
+
+  // Ranking por papel. Se ignoran las filas sin ticker (papeles que el worker
+  // no pudo mapear a nuestro universo) pero se cuentan para el pie de tabla:
+  // esconderlas sin decirlo daría la sensación de que los gestores tienen
+  // menos posiciones de las que declaran.
+  const ranking = useMemo(() => {
+    if (!data) return null;
+    const mapa = new Map();
+    for (const h of data.holdings) {
+      const t = (h.ticker || "").trim().toUpperCase();
+      if (!t) continue;
+      let e = mapa.get(t);
+      if (!e) {
+        e = { ticker: t, issuer: h.issuer || t, valor: 0, maxPct: 0, maxPctGestor: null, fechas: new Set(), tenedores: [] };
+        mapa.set(t, e);
+      }
+      const g = gestorPorCik.get(h.cik);
+      const pct = Number(h.pct_portfolio) || 0;
+      const val = Number(h.value_usd) || 0;
+      e.valor += val;
+      if (pct > e.maxPct) { e.maxPct = pct; e.maxPctGestor = g?.gestor || h.cik; }
+      e.fechas.add(h.report_date);
+      e.tenedores.push({
+        cik: h.cik, gestor: g?.gestor || h.cik, nombre: g?.nombre || "", pct, valor: val,
+        shares: Number(h.shares) || 0, reportDate: h.report_date, filingDate: g?.last_filing_date || null,
+      });
+    }
+    return [...mapa.values()].map((e) => {
+      e.tenedores.sort((a, b) => b.pct - a.pct);
+      e.nGestores = new Set(e.tenedores.map((t) => t.cik)).size;
+      e.fechasOrd = [...e.fechas].sort();
+      // Para el badge del rango se toma la fecha MÁS vieja: es el peor caso
+      // de vejez que respalda la fila.
+      e.atrasoMax = siDiasAtraso(e.fechasOrd[0], hoyIso);
+      return e;
+    });
+  }, [data, gestorPorCik, hoyIso]);
+
+  const rankingOrd = useMemo(() => {
+    if (!ranking) return [];
+    const arr = [...ranking];
+    arr.sort((a, b) => {
+      const av = sortKey === "valor" ? a.valor : a.nGestores;
+      const bv = sortKey === "valor" ? b.valor : b.nGestores;
+      if (av !== bv) return (av - bv) * sortDir;
+      return b.valor - a.valor;   // desempate estable por tamaño agregado
+    });
+    return arr;
+  }, [ranking, sortKey, sortDir]);
+
+  const sinTicker = useMemo(
+    () => (data ? data.holdings.filter((h) => !(h.ticker || "").trim()).length : 0),
+    [data]
+  );
+
+  // Distribución de gestores por trimestre reportado: es el dato que hace
+  // honesto al banner (hoy conviven dos cierres distintos).
+  const trimestres = useMemo(() => {
+    if (!data) return [];
+    const m = new Map();
+    for (const g of data.gestores) {
+      if (!g.last_report_date) continue;
+      m.set(g.last_report_date, (m.get(g.last_report_date) || 0) + 1);
+    }
+    return [...m.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([fecha, n]) => ({ fecha, n, atraso: siDiasAtraso(fecha, hoyIso) }));
+  }, [data, hoyIso]);
+
+  const cartera = useMemo(() => {
+    if (!pos || !ranking) return null;
+    const neto = new Map();
+    for (const p of pos) {
+      const t = (p.ticker || "").trim().toUpperCase();
+      if (!t) continue;
+      const q = Number(p.quantity) || 0;
+      const signo = p.operation_type === "sell" ? -1 : 1;
+      neto.set(t, (neto.get(t) || 0) + signo * q);
+    }
+    const porTicker = new Map(ranking.map((r) => [r.ticker, r]));
+    const filas = [];
+    for (const [t, q] of neto) {
+      if (Math.abs(q) <= 1e-6) continue;   // cerrada: compras y ventas se anulan
+      const r = porTicker.get(t) || null;
+      const n = r ? r.nGestores : 0;
+      filas.push({
+        ticker: t, cantidad: q, nGestores: n, top: r ? r.tenedores.slice(0, 3) : [],
+        valor: r ? r.valor : 0, fechasOrd: r ? r.fechasOrd : [], atrasoMax: r ? r.atrasoMax : null,
+        issuer: r ? r.issuer : null, veredicto: siVeredicto(n),
+      });
+    }
+    // Ascendente por cantidad de gestores: arriba quedan los papeles donde
+    // estás solo, que son los que hay que mirar de verdad.
+    filas.sort((a, b) => a.nGestores - b.nGestores || (a.ticker < b.ticker ? -1 : 1));
+    return filas;
+  }, [pos, ranking]);
+
+  const gestoresOrd = useMemo(() => {
+    if (!data) return [];
+    return [...data.gestores].sort((a, b) => (Number(b.total_value_usd) || 0) - (Number(a.total_value_usd) || 0));
+  }, [data]);
+
+  const ordenarPor = (k) => {
+    if (sortKey === k) setSortDir((d) => -d);
+    else { setSortKey(k); setSortDir(-1); }
+  };
+
+  const th = { padding: "8px 12px", fontSize: 10.5, fontWeight: 500, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap", textAlign: "right" };
+  const thL = { ...th, textAlign: "left" };
+  const td = { padding: "9px 12px", fontSize: 12.5, color: C.text, whiteSpace: "nowrap", textAlign: "right" };
+  const tdL = { ...td, textAlign: "left" };
+  const thSort = (k, label, extra = {}) => (
+    <th
+      onClick={() => ordenarPor(k)}
+      style={{ ...th, ...extra, cursor: "pointer", userSelect: "none", color: sortKey === k ? C.text : C.dim }}
+    >
+      {label}{sortKey === k ? (sortDir < 0 ? " ↓" : " ↑") : ""}
+    </th>
+  );
+
+  const cargando = data === null && !error;
+  const vacio = !!data && !data.gestores.length;
+
+  const tabBtn = (id, label) => (
+    <button
+      key={id}
+      onClick={() => setTab(id)}
+      style={{
+        padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", borderRadius: 6,
+        border: `1px solid ${tab === id ? C.accent : C.border}`,
+        background: tab === id ? C.accentSoft : "transparent",
+        color: tab === id ? C.accent : C.muted,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1180, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Superinversores</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 880 }}>
+            En qué papeles coinciden los grandes gestores institucionales de EE.UU., según lo que declaran en el
+            formulario <strong>13F</strong> ante la SEC. Sirve para ver <strong>confluencia</strong>: si una idea tuya
+            la comparte gente que hace research a tiempo completo, o si estás solo en el trade.
+          </p>
+        </div>
+        <button
+          onClick={() => setTick((t) => t + 1)}
+          style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}
+        >
+          Actualizar
+        </button>
+      </div>
+
+      {/* ── Banner fijo: las tres advertencias que hacen honesta la pantalla.
+           Va arriba de las tres solapas porque el atraso del 13F aplica a
+           todo lo que se muestre debajo, no a una vista en particular. ── */}
+      <div
+        style={{
+          border: `1px solid ${C.borderStrong}`, background: C.deep, borderRadius: 8,
+          padding: "12px 14px", marginBottom: 16, display: "flex", flexDirection: "column", gap: 7,
+        }}
+      >
+        <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+          <AlertTriangle size={13} color={C.cat.amber} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+            <b style={{ color: C.text }}>El dato llega con atraso, por diseño.</b> El 13F vence{" "}
+            <b style={{ color: C.text }}>45 días después del cierre del trimestre</b>, y cada gestor presenta cuando
+            quiere dentro de ese plazo — así que conviven trimestres distintos.{" "}
+            {trimestres.length ? (
+              <span>
+                Hoy{" "}
+                {trimestres.map((t, i) => (
+                  <Fragment key={t.fecha}>
+                    {i > 0 && (i === trimestres.length - 1 ? " y " : ", ")}
+                    <b style={{ color: C.text }}>{t.n}</b> {t.n === 1 ? "gestor reporta" : "gestores reportan"} al{" "}
+                    <b className="eco-mono" style={{ color: siColorAtraso(t.atraso) }}>{siFmtFecha(t.fecha)}</b>
+                  </Fragment>
+                ))}
+                . Cada fila de esta pantalla dice a qué fecha corresponde.
+              </span>
+            ) : (
+              <span>La fecha del último reporte de cada gestor se muestra en cada fila.</span>
+            )}
+          </span>
+        </div>
+        <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+          <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+            <b style={{ color: C.text }}>El 13F muestra solo acciones de EE.UU. en posición larga.</b> No aparecen
+            shorts, ni bonos, ni activos fuera de EE.UU., ni efectivo. Un gestor puede tener cubierta toda esta cartera
+            con derivados y el formulario no lo dice: lo que ves es una parte del libro, no el libro.
+          </span>
+        </div>
+        <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+          <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+            <b style={{ color: C.text }}>No es una señal de trading.</b> Es contexto de confluencia para decisiones de
+            horizonte mensual o mayor. Con un dato de más de un mes de antigüedad no se entra ni se sale de nada.
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center" style={{ gap: 6, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.border}`, paddingBottom: 12 }}>
+        {tabBtn("ranking", "Ranking")}
+        {tabBtn("cartera", "Mi cartera")}
+        {tabBtn("gestores", "Gestores")}
+      </div>
+
+      {cargando ? (
+        <div className="flex items-center justify-center" style={{ height: 280 }}>
+          <Loader2 size={24} color={C.muted} className="eco-spin" strokeWidth={1.5} />
+        </div>
+      ) : error ? (
+        <div style={{ border: `1px solid ${C.red}44`, background: "rgba(248,113,113,0.06)", borderRadius: 8, padding: "16px 18px", fontSize: 12.5, color: C.muted, lineHeight: 1.6 }}>
+          <b style={{ color: C.red }}>No se pudo leer la data de superinversores.</b>
+          <div className="eco-mono" style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>{error}</div>
+        </div>
+      ) : vacio ? (
+        <div style={{ border: `1px solid ${C.border}`, background: C.panel, borderRadius: 8, padding: "26px 22px", fontSize: 12.5, color: C.muted, lineHeight: 1.7, textAlign: "center" }}>
+          <b style={{ color: C.text }}>Todavía no hay 13F cargados.</b>
+          <div style={{ marginTop: 6 }}>
+            Las tablas las llena un worker cada mañana, bajando los formularios desde el sitio de la SEC. Si recién se
+            desplegó, esperá la próxima corrida y volvé a entrar.
+          </div>
+        </div>
+      ) : tab === "ranking" ? (
+        <>
+          <p style={{ fontSize: 11.5, color: C.muted, margin: "0 0 10px 0", maxWidth: 900, lineHeight: 1.6 }}>
+            Papeles ordenados por cuántos gestores del panel los declaran. <b style={{ color: C.text }}>Peso máx.</b> es
+            la mayor participación que el papel tiene en la cartera de algún gestor — un papel que muchos tienen con el
+            0,3% no es lo mismo que uno que alguien lleva al 20%. Clic en una fila para ver quiénes lo tienen y a qué
+            fecha. Clic en los encabezados para reordenar.
+          </p>
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, overflow: "hidden" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.borderStrong}` }}>
+                    <th style={thL}>Papel</th>
+                    {thSort("gestores", "Gestores")}
+                    {thSort("valor", "Valor agregado")}
+                    <th style={th}>Peso máx.</th>
+                    <th style={{ ...th, textAlign: "left" }}>Reporte(s)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rankingOrd.map((r) => {
+                    const open = abierto === r.ticker;
+                    return (
+                      <Fragment key={r.ticker}>
+                        <tr
+                          onClick={() => setAbierto(open ? null : r.ticker)}
+                          style={{ borderTop: `1px solid ${C.border}`, cursor: "pointer", background: open ? C.accentSoft : "transparent" }}
+                        >
+                          <td style={tdL}>
+                            <span style={{ color: C.dim, fontSize: 10, marginRight: 6 }}>{open ? "▾" : "▸"}</span>
+                            <b className="eco-mono" style={{ color: C.text, fontSize: 13 }}>{r.ticker}</b>
+                            <div style={{ fontSize: 10.5, color: C.dim, marginLeft: 18, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {r.issuer}
+                            </div>
+                          </td>
+                          <td className="eco-mono" style={{ ...td, fontWeight: 600, color: r.nGestores >= 10 ? C.green : C.text }}>
+                            {r.nGestores}
+                          </td>
+                          <td className="eco-mono" style={td}>{siFmtUsdB(r.valor)}</td>
+                          <td className="eco-mono" style={td}>
+                            {siFmtPct(r.maxPct)}
+                            <div style={{ fontSize: 10, color: C.dim, fontFamily: "inherit" }}>{r.maxPctGestor}</div>
+                          </td>
+                          <td style={{ ...td, textAlign: "left" }}>
+                            <span className="eco-mono" style={{ fontSize: 11.5, color: C.muted }}>{siLabelFechas(r.fechasOrd)}</span>{" "}
+                            <SiAtrasoBadge dias={r.atrasoMax} />
+                            {r.fechasOrd.length > 1 && (
+                              <div style={{ fontSize: 10, color: C.dim }}>mezcla {r.fechasOrd.length} trimestres</div>
+                            )}
+                          </td>
+                        </tr>
+                        {open && (
+                          <tr style={{ background: C.deep }}>
+                            <td colSpan={5} style={{ padding: "10px 14px 14px 30px" }}>
+                              <div style={{ fontSize: 10.5, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>
+                                Quiénes lo declaran · cada uno a la fecha de SU reporte
+                              </div>
+                              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                <thead>
+                                  <tr>
+                                    <th style={{ ...thL, padding: "4px 10px" }}>Gestor</th>
+                                    <th style={{ ...th, padding: "4px 10px" }}>% de su cartera</th>
+                                    <th style={{ ...th, padding: "4px 10px" }}>Valor</th>
+                                    <th style={{ ...th, padding: "4px 10px", textAlign: "left" }}>Período reportado</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {r.tenedores.map((t) => {
+                                    const dias = siDiasAtraso(t.reportDate, hoyIso);
+                                    return (
+                                      <tr key={`${r.ticker}-${t.cik}-${t.reportDate}`} style={{ borderTop: `1px solid ${C.border}` }}>
+                                        <td style={{ ...tdL, padding: "6px 10px", fontSize: 12 }}>
+                                          <span style={{ color: C.text }}>{t.gestor}</span>
+                                          <div style={{ fontSize: 10, color: C.dim }}>{t.nombre}</div>
+                                        </td>
+                                        <td className="eco-mono" style={{ ...td, padding: "6px 10px", fontSize: 12 }}>{siFmtPct(t.pct)}</td>
+                                        <td className="eco-mono" style={{ ...td, padding: "6px 10px", fontSize: 12, color: C.muted }}>{siFmtUsdB(t.valor)}</td>
+                                        <td style={{ ...td, padding: "6px 10px", textAlign: "left" }}>
+                                          <span className="eco-mono" style={{ fontSize: 11.5, color: C.muted }}>{siFmtFecha(t.reportDate)}</span>{" "}
+                                          <SiAtrasoBadge dias={dias} />
+                                          <div style={{ fontSize: 10, color: C.dim }}>presentado {siFmtFecha(t.filingDate)}</div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                  {!rankingOrd.length && (
+                    <tr>
+                      <td colSpan={5} style={{ ...tdL, color: C.muted, padding: "22px 14px", textAlign: "center" }}>
+                        Ningún holding del último filing tiene ticker mapeado a nuestro universo.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, maxWidth: 900, lineHeight: 1.6 }}>
+            <b className="eco-mono" style={{ color: C.muted }}>{siFmtCantidad(sinTicker)}</b> posiciones de gestores
+            quedan fuera del ranking porque son papeles ajenos a nuestro universo. El valor agregado suma el declarado
+            por cada gestor a la fecha de su propio reporte: si la fila mezcla dos trimestres, el total no es una foto
+            de un mismo día.
+          </p>
+        </>
+      ) : tab === "cartera" ? (
+        <>
+          {!user ? (
+            <div style={{ border: `1px solid ${C.border}`, background: C.panel, borderRadius: 8, padding: "26px 22px", fontSize: 12.5, color: C.muted, textAlign: "center" }}>
+              Necesitás sesión para cruzar tu cartera contra los 13F.
+            </div>
+          ) : pos === null || cartera === null ? (
+            <div className="flex items-center justify-center" style={{ height: 220 }}>
+              <Loader2 size={22} color={C.muted} className="eco-spin" strokeWidth={1.5} />
+            </div>
+          ) : posError ? (
+            <div style={{ border: `1px solid ${C.red}44`, background: "rgba(248,113,113,0.06)", borderRadius: 8, padding: "16px 18px", fontSize: 12.5, color: C.muted }}>
+              <b style={{ color: C.red }}>No se pudieron leer tus posiciones.</b>
+              <div className="eco-mono" style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>{posError}</div>
+            </div>
+          ) : !cartera.length ? (
+            <div style={{ border: `1px solid ${C.border}`, background: C.panel, borderRadius: 8, padding: "26px 22px", fontSize: 12.5, color: C.muted, lineHeight: 1.7, textAlign: "center" }}>
+              <b style={{ color: C.text }}>No tenés acciones ni CEDEARs abiertos.</b>
+              <div style={{ marginTop: 6 }}>
+                Cuando cargues tenencia de renta variable de EE.UU., acá vas a ver con cuánta compañía institucional
+                estás en cada papel.
+              </div>
+            </div>
+          ) : (
+            <>
+              <p style={{ fontSize: 11.5, color: C.muted, margin: "0 0 10px 0", maxWidth: 900, lineHeight: 1.6 }}>
+                Tus papeles ordenados de <b style={{ color: C.text }}>menos a más acompañados</b>: arriba quedan los que
+                no aparecen en ningún 13F del panel. Estar solo no significa estar equivocado — significa que la tesis
+                es tuya y la tenés que sostener sin ayuda.
+              </p>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, overflow: "hidden" }}>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${C.borderStrong}` }}>
+                        <th style={thL}>Papel</th>
+                        <th style={th}>Cantidad</th>
+                        <th style={th}>Gestores</th>
+                        <th style={{ ...th, textAlign: "left" }}>Veredicto</th>
+                        <th style={{ ...th, textAlign: "left" }}>Principales tenedores</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cartera.map((f) => (
+                        <tr key={f.ticker} style={{ borderTop: `1px solid ${C.border}`, verticalAlign: "top" }}>
+                          <td style={tdL}>
+                            <b className="eco-mono" style={{ color: C.text, fontSize: 13 }}>{f.ticker}</b>
+                            {f.issuer && (
+                              <div style={{ fontSize: 10.5, color: C.dim, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis" }}>{f.issuer}</div>
+                            )}
+                          </td>
+                          <td className="eco-mono" style={td}>{siFmtCantidad(f.cantidad)}</td>
+                          <td className="eco-mono" style={{ ...td, fontWeight: 600, color: f.veredicto.color }}>{f.nGestores}</td>
+                          <td style={{ ...td, textAlign: "left" }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: f.veredicto.color }}>{f.veredicto.txt}</span>
+                            <div style={{ fontSize: 10, color: C.dim }}>{f.veredicto.detalle}</div>
+                          </td>
+                          <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
+                            {f.top.length ? (
+                              <>
+                                {f.top.map((t) => (
+                                  <div key={`${f.ticker}-${t.cik}`} style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.7 }}>
+                                    <span style={{ color: C.text }}>{t.gestor}</span>{" "}
+                                    <span className="eco-mono">{siFmtPct(t.pct)}</span>{" "}
+                                    <span className="eco-mono" style={{ color: C.dim, fontSize: 10.5 }}>al {siFmtFecha(t.reportDate)}</span>{" "}
+                                    <SiAtrasoBadge dias={siDiasAtraso(t.reportDate, hoyIso)} />
+                                  </div>
+                                ))}
+                                {f.nGestores > f.top.length && (
+                                  <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>
+                                    y {f.nGestores - f.top.length} más — ver en Ranking
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span style={{ fontSize: 11.5, color: C.dim }}>ninguno de los {gestoresOrd.length} gestores del panel</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, maxWidth: 900, lineHeight: 1.6 }}>
+                El ticker del CEDEAR se cruza contra el subyacente en EE.UU.: es la misma empresa, con distinto envase y
+                ratio de conversión.
+              </p>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <p style={{ fontSize: 11.5, color: C.muted, margin: "0 0 10px 0", maxWidth: 900, lineHeight: 1.6 }}>
+            El panel completo, ordenado por tamaño de la cartera declarada. El{" "}
+            <b style={{ color: C.text }}>atraso</b> son los días que pasaron desde el cierre del trimestre que reporta:
+            verde hasta 60, ámbar entre 60 y 120, rojo arriba de 120 — con más de 120 días el gestor ya rotó una cartera
+            entera sin que nosotros lo veamos.
+          </p>
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, overflow: "hidden" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 880 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.borderStrong}` }}>
+                    <th style={thL}>Gestor</th>
+                    <th style={th}>Posiciones</th>
+                    <th style={th}>Valor cartera</th>
+                    <th style={{ ...th, textAlign: "left" }}>Período reportado</th>
+                    <th style={{ ...th, textAlign: "left" }}>Presentado</th>
+                    <th style={th}>Atraso</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gestoresOrd.map((g) => {
+                    const dias = siDiasAtraso(g.last_report_date, hoyIso);
+                    const col = siColorAtraso(dias);
+                    return (
+                      <tr key={g.cik} style={{ borderTop: `1px solid ${C.border}` }}>
+                        <td style={tdL}>
+                          <b style={{ color: C.text, fontSize: 13, fontWeight: 600 }}>{g.gestor}</b>
+                          <div style={{ fontSize: 10.5, color: C.dim }}>{g.nombre}</div>
+                        </td>
+                        <td className="eco-mono" style={td}>{siFmtCantidad(g.holdings_count)}</td>
+                        <td className="eco-mono" style={td}>{siFmtUsdB(g.total_value_usd)}</td>
+                        <td className="eco-mono" style={{ ...td, textAlign: "left", color: C.muted }}>{siFmtFecha(g.last_report_date)}</td>
+                        <td className="eco-mono" style={{ ...td, textAlign: "left", color: C.dim, fontSize: 11.5 }}>{siFmtFecha(g.last_filing_date)}</td>
+                        <td className="eco-mono" style={{ ...td, color: col, fontWeight: 600 }}>
+                          {dias == null ? "—" : `${siFmtCantidad(dias)} d`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, maxWidth: 900, lineHeight: 1.6 }}>
+            Posiciones y valor de cartera son los del propio filing (solo acciones de EE.UU. en largo), no el
+            patrimonio total del gestor.
+          </p>
+        </>
+      )}
     </div>
   );
 }
