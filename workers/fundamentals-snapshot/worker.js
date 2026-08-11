@@ -114,6 +114,16 @@ async function main() {
   const { error } = await supabase.from("fundamentals_snapshot").upsert(payload, { onConflict: "ticker" });
   if (error) throw new Error(`upsert: ${error.message}`);
 
+  // Además del snapshot vigente (que se pisa cada semana), acumular HISTORIA:
+  // una fila por ticker y fecha. Sin esto no se puede responder si un papel
+  // está caro o barato contra SU PROPIA historia — solo contra los otros de
+  // la lista, que es una vara mucho más pobre. Se empezó el 11/08/2026.
+  const hoy = now.slice(0, 10);
+  const hist = rows.map((r) => ({ ticker: r.ticker, snapshot_date: hoy, data: r }));
+  const { error: eh } = await supabase.from("fundamentals_history")
+    .upsert(hist, { onConflict: "ticker,snapshot_date" });
+  if (eh) log(`historia: ${eh.message}`); // no aborta: el snapshot vigente ya quedó guardado
+
   log(`snapshot OK: ${rows.length} tickers${errors.length ? `, ${errors.length} fallaron (${errors.join(",")})` : ""}`);
 }
 
