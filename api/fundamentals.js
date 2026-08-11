@@ -56,6 +56,23 @@ async function fetchOne(t, auth) {
   };
 }
 
+/* Tasa del bono del Tesoro a 10 años (^TNX, viene ×10 en Yahoo → el chart ya
+ * devuelve el porcentaje, ej 4.68). Es la vara ABSOLUTA de valuación: el
+ * earnings yield de una acción (la inversa del P/E) se compara contra esta
+ * tasa para saber cuánta prima te pagan por asumir riesgo de acciones. Sin
+ * esto, "barato" solo se puede definir contra otras acciones — y en 2000
+ * estaban todas caras a la vez. Mismo fetch que hace el worker del snapshot,
+ * replicado acá para que el modo en vivo (↻ Actualizar / tickers custom)
+ * traiga el dato igual que el snapshot. */
+async function fetchUs10y() {
+  try {
+    const r = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX?interval=1d&range=5d", { headers: { "User-Agent": UA } });
+    const j = await r.json();
+    const p = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    return typeof p === "number" ? Math.round(p * 100) / 100 : null;
+  } catch { return null; }
+}
+
 export default async function handler(req, res) {
   // Modo PRECIO liviano: ?price=SPY,QQQ,AEM → { prices: { SYM: number } }.
   // Usa el endpoint chart (no exige crumb) para traer regularMarketPrice. Sirve
@@ -94,6 +111,12 @@ export default async function handler(req, res) {
         if (r.__err) errors.push(r.__err); else data.push(r);
       }
     }
+    // La tasa a 10 años viaja adentro de cada fila (igual que en el snapshot):
+    // así el front la tiene sin una consulta extra y queda pegada al múltiplo
+    // del mismo momento. Si Yahoo no la da, las filas van sin el campo y la
+    // pantalla muestra "—" en la prima.
+    const us10y = await fetchUs10y();
+    if (us10y != null) { for (const r of data) r.us10y = us10y; }
     res.setHeader("Cache-Control", "public, s-maxage=21600, stale-while-revalidate=86400");
     return res.status(200).json({ data, errors });
   } catch (err) {

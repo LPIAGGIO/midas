@@ -83,6 +83,20 @@ async function fetchOne(t, auth) {
   };
 }
 
+/* Tasa del bono del Tesoro a 10 años (^TNX, viene ×10 en Yahoo). Es la vara
+ * ABSOLUTA de valuación: el earnings yield de una acción (la inversa del
+ * P/E) se compara contra esta tasa para saber cuánta prima te pagan por
+ * asumir riesgo de acciones. Sin este número, "barato" solo puede definirse
+ * contra otras acciones — y en 2000 todas estaban caras a la vez. */
+async function fetchUs10y() {
+  try {
+    const r = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX?interval=1d&range=5d", { headers: { "User-Agent": UA } });
+    const j = await r.json();
+    const p = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    return typeof p === "number" ? Math.round(p * 100) / 100 : null;
+  } catch { return null; }
+}
+
 async function main() {
   log("fundamentals-snapshot arrancando");
   const tickers = String(process.env.TICKERS || FUND_UNIVERSE)
@@ -108,6 +122,13 @@ async function main() {
   if (rows.length < tickers.length / 2) {
     throw new Error(`solo ${rows.length}/${tickers.length} tickers OK; abortando para no dejar snapshot degradado`);
   }
+
+  // La tasa a 10 años viaja adentro de cada fila: así el front la tiene sin
+  // una consulta extra y queda congelada en la historia junto al múltiplo del
+  // día (la prima de ese momento es lo que importa, no la de hoy).
+  const us10y = await fetchUs10y();
+  if (us10y != null) { for (const r of rows) r.us10y = us10y; }
+  log(`bono 10Y EE.UU.: ${us10y != null ? us10y + "%" : "no disponible"}`);
 
   const now = new Date().toISOString();
   const payload = rows.map((r) => ({ ticker: r.ticker, data: r, fetched_at: now }));

@@ -28448,6 +28448,35 @@ const FUND_THEME = {
   XOM: "Petróleo · Energía", BE: "Energía · Fuel cells", BA: "Aeroespacial", SPCX: "Aeroespacial · Espacio",
 };
 
+// ¿El negocio es CÍCLICO? "Technology" no alcanza como sector: lo que importa
+// es si las ganancias suben y bajan con un ciclo de capex/commodity. Semis
+// (por industria, porque Yahoo los mete adentro de Technology), Energía y
+// Materiales básicos son los tres casos claros del universo.
+const fundEsCiclico = (r) =>
+  /semicond/i.test(r?.industry || "") || r?.sector === "Energy" || r?.sector === "Basic Materials";
+
+// Avisos: banderas de CONTEXTO que el múltiplo solo no muestra. La importante
+// es "ganancias pico": en una cíclica el P/E bajo con crecimiento explosivo
+// marca el techo del ciclo, no una oportunidad — el denominador (la ganancia)
+// está inflado y va a revertir. Por eso Graham y Shiller normalizan ganancias.
+function fundAvisos(r) {
+  const out = [];
+  const fwd = r?.fwdPE != null && isFinite(r.fwdPE) ? r.fwdPE : null;
+  if (fundEsCiclico(r) && r?.revGrw != null && isFinite(r.revGrw) && r.revGrw > 0.8 && fwd != null && fwd > 0 && fwd < 10) {
+    out.push({ k: "pico", label: "ganancias pico", color: "#fb923c",
+      tip: "Múltiplo bajo con crecimiento extremo en un sector cíclico: son ganancias de pico de ciclo. En cíclicas el P/E bajo suele marcar el techo, no la oportunidad (por eso Graham y Shiller usan ganancias normalizadas)." });
+  }
+  if (fwd == null || fwd <= 0) {
+    out.push({ k: "sin", label: "sin ganancias", color: C.dim,
+      tip: "No hay ganancia esperada positiva para los próximos 12 meses: el P/E y el earnings yield no aplican como vara." });
+  }
+  if (r?.de != null && isFinite(r.de) && r.de > 200) {
+    out.push({ k: "deuda", label: "deuda alta", color: "#fb923c",
+      tip: "Deuda sobre patrimonio arriba de 200%: el apalancamiento amplifica tanto la ganancia como el golpe si el negocio se desacelera." });
+  }
+  return out;
+}
+
 function FundamentalsModule() {
   const [input, setInput] = useState(FUND_UNIVERSE);
   const [tickers, setTickers] = useState(FUND_UNIVERSE);
@@ -28513,8 +28542,28 @@ function FundamentalsModule() {
     const ws = rows.map((r, i) => ({ ...r, fcfY: fcfY(r), calidad: avg(q, i) * 100, valuacion: avg(v, i) * 100, total: (0.5 * avg(q, i) + 0.5 * avg(v, i)) * 100 }));
     const mr = new Map();
     [...ws].filter((r) => r.mcap != null).sort((a, b) => b.mcap - a.mcap).forEach((r, i) => mr.set(r.ticker, i + 1));
-    return ws.map((r) => ({ ...r, mcapRank: mr.get(r.ticker) ?? null }));
+    // Varas de valuación ABSOLUTA: a diferencia del Score (que es un percentil
+    // dentro de esta lista), estas dos no dependen del resto del universo.
+    // PEG mide el múltiplo contra el crecimiento propio; earnings yield lo mide
+    // contra la tasa libre de riesgo. Sirven para contestar "¿está cara en sí
+    // misma?" y no solo "¿es de las más baratas del grupo?".
+    return ws.map((r) => {
+      const fwdOk = r.fwdPE != null && isFinite(r.fwdPE) && r.fwdPE > 0;
+      const grwOk = r.earnGrw != null && isFinite(r.earnGrw) && r.earnGrw > 0;
+      const peg = fwdOk && grwOk ? r.fwdPE / (r.earnGrw * 100) : null;
+      const earnYield = fwdOk ? 100 / r.fwdPE : null;
+      const t10 = r.us10y != null && isFinite(r.us10y) ? r.us10y : null;
+      const prima = earnYield != null && t10 != null ? earnYield - t10 : null;
+      return { ...r, mcapRank: mr.get(r.ticker) ?? null, peg, earnYield, prima };
+    });
   }, [data]);
+
+  // La tasa a 10 años viene repetida en cada fila (la manda el snapshot/endpoint);
+  // tomo la primera que exista para poder nombrarla en el tooltip.
+  const us10y = useMemo(() => {
+    for (const r of scored) if (r.us10y != null && isFinite(r.us10y)) return r.us10y;
+    return null;
+  }, [scored]);
 
   const rankByTotal = useMemo(() => {
     const m = new Map();
@@ -28532,10 +28581,16 @@ function FundamentalsModule() {
   const fR = (x, d = 1) => (x == null || !isFinite(x) ? "—" : x.toFixed(d));
   const fBig = (x) => (x == null ? "—" : Math.abs(x) >= 1e12 ? `${(x / 1e12).toFixed(2)}T` : Math.abs(x) >= 1e9 ? `${(x / 1e9).toFixed(1)}B` : `${(x / 1e6).toFixed(0)}M`);
   const fDE = (x) => (x == null || !isFinite(x) ? "—" : x >= 10 ? x.toFixed(0) : x.toFixed(1));
+  // Coma decimal para las columnas nuevas (se leen como texto, no como ratio suelto)
+  const fCom = (x, d = 1) => (x == null || !isFinite(x) ? "—" : x.toFixed(d).replace(".", ","));
   const scColor = (s) => (s >= 66 ? "#34d399" : s >= 45 ? "#fbbf24" : "#f87171");
+  const pegColor = (p) => (p == null ? C.muted : p < 1 ? "#34d399" : p <= 2 ? "#fbbf24" : "#f87171");
+  const primaColor = (p) => (p == null ? C.muted : p > 5 ? "#34d399" : p >= 0 ? "#fbbf24" : "#f87171");
+  const t10Txt = us10y != null ? `${fCom(us10y, 2)}%` : "sin dato";
 
-  const Th = ({ k, label, right, asc }) => (
-    <th onClick={() => { if (sortKey === k) setSortDir((d) => -d); else { setSortKey(k); setSortDir(asc ? 1 : -1); } }}
+  const Th = ({ k, label, right, asc, tip, cls }) => (
+    <th title={tip} className={cls}
+      onClick={() => { if (sortKey === k) setSortDir((d) => -d); else { setSortKey(k); setSortDir(asc ? 1 : -1); } }}
       style={{ padding: "7px 9px", fontWeight: 600, cursor: "pointer", textAlign: right ? "right" : "left", whiteSpace: "nowrap", color: sortKey === k ? C.text : C.dim, userSelect: "none" }}>
       {label}{sortKey === k ? (sortDir < 0 ? " ↓" : " ↑") : ""}
     </th>
@@ -28578,6 +28633,16 @@ function FundamentalsModule() {
                 ["P/E fwd", "Precio ÷ ganancia esperada por acción (próximos 12 meses). Los «años de ganancias» que pagás. Menor = más barato. «neg» = se espera pérdida."],
                 ["P/S", "Precio ÷ ventas por acción. Útil cuando todavía no hay ganancias. Menor = más barato."],
                 ["EV/EBITDA", "Valor de empresa (market cap + deuda − caja) ÷ EBITDA. Valuación independiente de cómo se financia la empresa. Menor = más barato."],
+                ["PEG", "P/E fwd ÷ crecimiento de ganancias (en puntos). Cuánto pagás por cada punto de crecimiento. <1 barato para lo que crece, 1–2 razonable, >2 caro."],
+                ["Earn. yield", `Inversa del P/E fwd (100 ÷ P/E): lo que rinde la empresa por cada dólar de precio. Al lado, la prima sobre el bono del Tesoro a 10 años (${t10Txt}). Prima negativa = te pagan menos que el bono sin riesgo.`],
+                ["Aviso", "Banderas de contexto: «ganancias pico» (cíclica con crecimiento extremo y múltiplo bajo), «sin ganancias» (P/E fwd negativo o ausente), «deuda alta» (D/E >200%)."],
+              ] },
+              { h: "Cómo se analiza si una empresa está cara o barata", rows: [
+                ["1. Contra sus pares", "Es lo que hace la columna Valuación: percentil dentro de ESTA lista. Contesta «¿es de las más baratas del grupo?», no «¿está barata?»."],
+                ["2. Contra su propio historial", "El múltiplo de hoy contra su rango de los últimos años. Se empezó a acumular el 11/08/2026 en la tabla fundamentals_history; todavía no hay muestra suficiente."],
+                ["3. Contra su crecimiento", "La columna PEG. Un P/E de 40 es barato si crece al 60% y carísimo si crece al 5%: el múltiplo solo no dice nada sin el crecimiento al lado."],
+                ["4. Contra la tasa libre de riesgo", "La columna Earn. yield y su prima sobre el bono a 10 años. Si la acción rinde menos que el Tesoro, no te están pagando por asumir riesgo de acciones."],
+                ["5. La calidad del denominador", "El múltiplo solo sirve si la ganancia es sostenible. En cíclicas las ganancias de pico dan múltiplos engañosamente bajos: de ahí el aviso «ganancias pico»."],
               ] },
               { h: "Otras columnas", rows: [
                 ["#", "Puesto en el ranking por Score (1 = el mejor de la lista consultada)."],
@@ -28632,6 +28697,12 @@ function FundamentalsModule() {
               <Th k="total" label="Score" right />
               <Th k="calidad" label="Calidad" right />
               <Th k="valuacion" label="Valuación" right />
+              <Th k="peg" label="PEG" right asc cls="hidden md:table-cell"
+                tip="P/E dividido el crecimiento de ganancias: cuánto pagás por cada punto de crecimiento. Menos de 1 es barato para lo que crece." />
+              <Th k="earnYield" label="Earn. yield" right cls="hidden md:table-cell"
+                tip={`La inversa del P/E comparado con el bono del Tesoro a 10 años (${t10Txt}): cuánta prima te pagan por asumir riesgo de acciones.`} />
+              <th className="hidden md:table-cell" title="Banderas de contexto que el múltiplo solo no muestra: ganancias de pico de ciclo, empresas sin ganancias y apalancamiento alto."
+                style={{ padding: "7px 9px", fontWeight: 600, color: C.dim, whiteSpace: "nowrap" }}>Aviso</th>
               <Th k="fwdPE" label="P/E fwd" right />
               <Th k="ps" label="P/S" right />
               <Th k="evEbitda" label="EV/EBITDA" right />
@@ -28646,6 +28717,7 @@ function FundamentalsModule() {
             <tbody>
               {sorted.map((r) => {
                 const hasCedear = cedearSet ? cedearSet.has(r.ticker) : null;
+                const avisos = fundAvisos(r);
                 return (
                   <tr key={r.ticker} style={{ borderBottom: `1px solid ${C.border}` }}>
                     <td style={{ ...td, color: C.dim }}>{rankByTotal.get(r.ticker)}</td>
@@ -28655,6 +28727,25 @@ function FundamentalsModule() {
                     <td style={{ ...td, textAlign: "right", fontWeight: 700, color: scColor(r.total) }}>{r.total.toFixed(0)}</td>
                     <td style={{ ...td, textAlign: "right", color: scColor(r.calidad) }}>{r.calidad.toFixed(0)}</td>
                     <td style={{ ...td, textAlign: "right", color: scColor(r.valuacion) }}>{r.valuacion.toFixed(0)}</td>
+                    <td className="hidden md:table-cell" style={{ ...td, textAlign: "right", color: pegColor(r.peg), fontWeight: r.peg != null ? 600 : 400 }}>{fCom(r.peg, 2)}</td>
+                    <td className="hidden md:table-cell" style={{ ...td, textAlign: "right", color: C.muted }}>
+                      {r.earnYield == null || r.prima == null ? "—" : (
+                        <>
+                          {fCom(r.earnYield, 1)}%
+                          <span style={{ fontSize: 10, marginLeft: 5, color: primaColor(r.prima) }}>
+                            {r.prima >= 0 ? "+" : "−"}{fCom(Math.abs(r.prima), 1)} pts
+                          </span>
+                        </>
+                      )}
+                    </td>
+                    <td className="hidden md:table-cell" style={{ ...td, whiteSpace: "nowrap" }}>
+                      {avisos.map((a) => (
+                        <span key={a.k} title={a.tip}
+                          style={{ display: "inline-block", marginRight: 4, padding: "1px 6px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "help", color: a.color, border: `1px solid ${a.color}`, opacity: a.k === "sin" ? 0.75 : 1 }}>
+                          {a.label}
+                        </span>
+                      ))}
+                    </td>
                     <td style={{ ...td, textAlign: "right", color: r.fwdPE != null && r.fwdPE < 0 ? "#f87171" : C.muted }}>{r.fwdPE != null && r.fwdPE < 0 ? "neg" : fR(r.fwdPE)}</td>
                     <td style={{ ...td, textAlign: "right", color: C.muted }}>{fR(r.ps)}</td>
                     <td style={{ ...td, textAlign: "right", color: r.evEbitda != null && r.evEbitda < 0 ? "#f87171" : C.muted }}>{r.evEbitda != null && r.evEbitda < 0 ? "neg" : fR(r.evEbitda)}</td>
