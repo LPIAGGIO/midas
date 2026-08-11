@@ -28550,11 +28550,17 @@ function FundamentalsModule() {
     return ws.map((r) => {
       const fwdOk = r.fwdPE != null && isFinite(r.fwdPE) && r.fwdPE > 0;
       const grwOk = r.earnGrw != null && isFinite(r.earnGrw) && r.earnGrw > 0;
-      const peg = fwdOk && grwOk ? r.fwdPE / (r.earnGrw * 100) : null;
+      // PEG solo tiene sentido con crecimientos "normales" (10-40%). Con
+      // crecimientos de recuperación o de pico de ciclo el ratio colapsa a
+      // cero y grita "regalado" justo cuando más caro está el papel: MU con
+      // P/E 5,5 y 346% de crecimiento daba PEG 0,02. Arriba de 100% el
+      // número se marca como no significativo (pegNS) en vez de mentir.
+      const pegNS = fwdOk && grwOk && r.earnGrw > 1;
+      const peg = fwdOk && grwOk && !pegNS ? r.fwdPE / (r.earnGrw * 100) : null;
       const earnYield = fwdOk ? 100 / r.fwdPE : null;
       const t10 = r.us10y != null && isFinite(r.us10y) ? r.us10y : null;
       const prima = earnYield != null && t10 != null ? earnYield - t10 : null;
-      return { ...r, mcapRank: mr.get(r.ticker) ?? null, peg, earnYield, prima };
+      return { ...r, mcapRank: mr.get(r.ticker) ?? null, peg, pegNS, earnYield, prima };
     });
   }, [data]);
 
@@ -28688,8 +28694,11 @@ function FundamentalsModule() {
         <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin datos. Revisá los tickers (deben ser símbolos de acciones USA).</div>
       ) : (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left", background: "rgba(255,255,255,0.02)" }}>
+          {/* minWidth explícito: con 17 columnas, un `width:100%` a secas hace
+              que el navegador comprima las celdas hasta cortarlas en vez de
+              desbordar. Con el ancho mínimo el contenedor scrollea limpio. */}
+          <table style={{ width: "100%", minWidth: 1320, borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left", background: "rgba(255,255,255,0.02)", whiteSpace: "nowrap" }}>
               <th style={{ padding: "7px 9px", fontWeight: 600 }}>#</th>
               <Th k="ticker" label="Ticker" />
               <th style={{ padding: "7px 9px", fontWeight: 600 }}>Tema / Sector</th>
@@ -28727,7 +28736,10 @@ function FundamentalsModule() {
                     <td style={{ ...td, textAlign: "right", fontWeight: 700, color: scColor(r.total) }}>{r.total.toFixed(0)}</td>
                     <td style={{ ...td, textAlign: "right", color: scColor(r.calidad) }}>{r.calidad.toFixed(0)}</td>
                     <td style={{ ...td, textAlign: "right", color: scColor(r.valuacion) }}>{r.valuacion.toFixed(0)}</td>
-                    <td className="hidden md:table-cell" style={{ ...td, textAlign: "right", color: pegColor(r.peg), fontWeight: r.peg != null ? 600 : 400 }}>{fCom(r.peg, 2)}</td>
+                    <td className="hidden md:table-cell" style={{ ...td, textAlign: "right", color: r.pegNS ? C.muted : pegColor(r.peg), fontWeight: r.peg != null ? 600 : 400 }}
+                        title={r.pegNS ? "Crecimiento arriba del 100%: el PEG pierde sentido (daría casi cero y parecería regalado justo en el pico del ciclo)." : undefined}>
+                      {r.pegNS ? "n/s" : fCom(r.peg, 2)}
+                    </td>
                     <td className="hidden md:table-cell" style={{ ...td, textAlign: "right", color: C.muted }}>
                       {r.earnYield == null || r.prima == null ? "—" : (
                         <>
