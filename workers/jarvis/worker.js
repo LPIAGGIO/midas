@@ -28,6 +28,9 @@ import { runTurn, resolveApproval } from "./lib/agent.js";
 
 const RISK_LABEL = { read: "lectura", write: "escritura", money: "PLATA" };
 
+/** Sin API key el canal igual funciona: se puede vincular y probar. */
+const HAS_BRAIN = !!process.env.ANTHROPIC_API_KEY;
+
 /** Un turno por usuario a la vez: evita que dos mensajes peleen por la sesion. */
 const busy = new Set();
 
@@ -78,6 +81,12 @@ async function handleMessage(msg) {
       .eq("status", "pending").order("created_at", { ascending: false }).limit(10);
     if (!data?.length) return tg.sendMessage(chatId, "No hay nada esperando confirmacion.");
     return tg.sendMessage(chatId, "Pendientes:\n" + data.map((a) => `- [${RISK_LABEL[a.risk]}] ${a.summary}`).join("\n"));
+  }
+
+  if (!HAS_BRAIN) {
+    return tg.sendMessage(chatId,
+      "El canal anda (te tengo vinculado y te leo), pero todavia no tengo cerebro: " +
+      "falta cargar ANTHROPIC_API_KEY en el .env del worker. Con eso reinicio y ya te contesto en serio.");
   }
 
   if (busy.has(userId)) {
@@ -173,8 +182,13 @@ async function handleCallback(cb) {
 }
 
 async function main() {
-  for (const k of ["JARVIS_BOT_TOKEN", "ANTHROPIC_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {
+  for (const k of ["JARVIS_BOT_TOKEN", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {
     if (!process.env[k]) { console.error(`Falta ${k} en el .env`); process.exit(1); }
+  }
+  // Sin cerebro el canal igual sirve: se puede vincular y probar Telegram.
+  // Degrada explicito en vez de no arrancar.
+  if (!HAS_BRAIN) {
+    console.warn("[jarvis] SIN ANTHROPIC_API_KEY: el canal anda, el cerebro no. Cargala en el .env y reinicia.");
   }
   console.log("[jarvis] arriba. modelo:", process.env.JARVIS_MODEL || "claude-opus-5");
 

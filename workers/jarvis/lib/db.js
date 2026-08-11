@@ -7,12 +7,20 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import ws from "ws";
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !key) throw new Error("Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY en el .env");
 
-export const supabase = createClient(url, key, { auth: { persistSession: false } });
+// supabase-js construye su cliente de realtime al crearse, y bajo ESM no puede
+// resolver 'ws' solo (en CommonJS lo hace con require lazy — por eso el worker
+// telegram-notifier no necesita esto). Se lo pasamos explicito aunque no usemos
+// realtime, sino createClient tira en el import.
+export const supabase = createClient(url, key, {
+  auth: { persistSession: false },
+  realtime: { transport: ws },
+});
 
 /* ---------------------------------------------------------------- canales */
 
