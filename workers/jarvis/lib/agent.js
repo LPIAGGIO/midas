@@ -193,24 +193,36 @@ export async function runTurn(ctx, prompt, io) {
   };
 
   let text = "";
+  let resultText = "";
   let costUsd = 0;
   let turns = 0;
+  const seen = new Set();
+
+  // El SDK anida el mensaje crudo de la API en msg.message; las versiones
+  // viejas lo exponian plano en msg.content. Se aceptan las dos formas para
+  // no depender de la version exacta del paquete (esta en 0.x, la API mueve).
+  const blocksOf = (msg) => msg?.message?.content ?? msg?.content ?? [];
 
   const q = query({ prompt, options: opts });
   try {
     for await (const msg of q) {
+      seen.add(msg.type);
+      if (process.env.JARVIS_DEBUG) console.error("[sdk msg]", msg.type);
+
       if (msg.type === "assistant") {
         turns++;
-        for (const block of msg.content || []) {
-          if (block.type === "text" && block.text) {
+        for (const block of blocksOf(msg)) {
+          if (block?.type === "text" && block.text) {
             text += block.text;
             io.onText?.(block.text);
           }
         }
       } else if (msg.type === "result") {
         if (typeof msg.total_cost_usd === "number") costUsd = msg.total_cost_usd;
-        for (const block of msg.content || []) {
-          if (block.type === "text" && block.text && !text.includes(block.text)) text += block.text;
+        // El resumen final viene como string plano en msg.result.
+        if (typeof msg.result === "string") resultText = msg.result;
+        for (const block of blocksOf(msg)) {
+          if (block?.type === "text" && block.text) resultText += block.text;
         }
       }
     }
@@ -220,5 +232,18 @@ export async function runTurn(ctx, prompt, io) {
     for (const id of [...pending.keys()]) resolveApproval(id, false, "timeout");
   }
 
-  return { text: text.trim(), costUsd, turns };
+  const finalText = (text.trim() || resultText.trim());
+
+  // Un turno que gasto plata y no devolvio texto es casi siempre un cambio de
+  // forma en los mensajes del SDK, no un turno vacio de verdad. Que sea ruidoso
+  // en el log: la primera vez que paso, la respuesta se perdio en silencio.
+  if (!finalText && costUsd > 0) {
+    console.error(
+      `[jarvis] turno sin texto pero con costo USD ${costUsd.toFixed(4)}. ` +
+      `Tipos de mensaje vistos: ${[...seen].join(", ")}. ` +
+      `Revisar la forma de los mensajes del SDK en blocksOf().`,
+    );
+  }
+
+  return { text: finalText, costUsd, turns };
 }
