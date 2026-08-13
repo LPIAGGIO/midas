@@ -1,0 +1,13 @@
+{
+  "name": "earnings-calendar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Calendario de balances de los papeles en cartera, con aviso por Telegram cuando alguno reporta en los proximos 7 dias.",
+  "main": "worker.js",
+  "scripts": { "start": "node worker.js" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  }
+}
