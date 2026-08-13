@@ -246,6 +246,7 @@ const NAV = [
       { id: "ejecucion-cedear", label: "Ejecución CEDEAR/USA", icon: Repeat },
       { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
       { id: "superinversores", label: "Superinversores", icon: Users, type: "single", requiresAuth: true },
+      { id: "decision-log", label: "Decision Log", icon: ShieldCheck, type: "single", requiresAuth: true },
     ],
   },
 ];
@@ -1508,6 +1509,8 @@ function MidasApp({ allowedModules = null }) {
               <PaperCedearsModule key={active} />
             ) : active === "superinversores" ? (
               <SuperinversoresModule key={active} />
+            ) : active === "decision-log" ? (
+              <DecisionLogModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
             ) : active === "calc-montecarlo" ? (
@@ -41519,6 +41522,335 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
 }
 
 /* ─────────── Módulo ─────────── */
+
+/* ══════════════ DECISION LOG ══════════════
+ *
+ * Cada veredicto del copiloto sobre un papel queda con fecha, precio,
+ * razonamiento y confianza declarada ANTES de saber el resultado. El worker
+ * decision-log-track llena el precio a 1, 5 y 21 ruedas, y esta pantalla hace
+ * la cuenta.
+ *
+ * POR QUE EXISTE: todo lo demas en Midas se mide contra una vara — el Sharpe
+ * deflactado de las estrategias, el alpha de LP con benchmark sectorial, el
+ * nivel_track del bot. Lo unico sin medir eran las opiniones, que se
+ * evaporaban en el chat. Sin registro no hay forma de saber si suman o restan,
+ * y la memoria reescribe los aciertos.
+ *
+ * DOS DECISIONES QUE HACEN HONESTA LA PANTALLA:
+ *
+ * 1. Se mide el EXCESO sobre un benchmark elegido por decision, no el retorno
+ *    a secas. Es la leccion de la medicion de alpha: con SPY el resultado de
+ *    LP daba negativo y significativo, con benchmark sectorial daba neutro.
+ *    Acertar "compra semis" el dia que todos los semis suben no es merito.
+ *
+ * 2. Los llamados sin direccion (tamaño, estructura de una opcion) se
+ *    registran pero NO cuentan en el porcentaje de acierto. Meterlos infla el
+ *    numero con cosas que no eran apuestas direccionales.
+ */
+function DecisionLogModule() {
+  const { user } = useAuth();
+  const [filas, setFilas] = useState(null);
+  const [error, setError] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [marca, setMarca] = useState("px_1d");     // px_1d | px_5d | px_21d
+  const [horizonte, setHorizonte] = useState("todos");
+  const [abierta, setAbierta] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    if (!user) { setFilas([]); return () => { vivo = false; }; }
+    setFilas(null); setError(null);
+    (async () => {
+      const { data, error: e } = await supabase
+        .from("decision_log")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (!vivo) return;
+      if (e) { setError(e.message); setFilas([]); return; }
+      setFilas(data || []);
+    })();
+    return () => { vivo = false; };
+  }, [user, tick]);
+
+  const MARCAS = [
+    { id: "px_1d", bench: "bench_1d", label: "1 rueda" },
+    { id: "px_5d", bench: "bench_5d", label: "5 ruedas" },
+    { id: "px_21d", bench: "bench_21d", label: "21 ruedas" },
+  ];
+  const marcaAct = MARCAS.find((m) => m.id === marca) || MARCAS[0];
+
+  // Calculo por fila: retorno del papel, del benchmark, exceso, y si el
+  // llamado acerto (el exceso fue en la direccion que se predijo).
+  const calc = useMemo(() => {
+    if (!filas) return [];
+    return filas.map((r) => {
+      const px = r[marcaAct.id], bx = r[marcaAct.bench];
+      const rp = px != null && r.precio_ref ? px / Number(r.precio_ref) - 1 : null;
+      const rb = bx != null && r.bench_ref ? bx / Number(r.bench_ref) - 1 : null;
+      const exceso = rp != null && rb != null ? rp - rb : (rp != null ? rp : null);
+      const dir = Number(r.direccion) || 0;
+      const acierto = dir === 0 || exceso == null ? null : dir * exceso > 0;
+      return { ...r, rp, rb, exceso, acierto };
+    });
+  }, [filas, marcaAct]);
+
+  const visibles = useMemo(
+    () => (horizonte === "todos" ? calc : calc.filter((r) => r.horizonte === horizonte)),
+    [calc, horizonte]
+  );
+
+  // Resumen: solo direccionales medidos. El t-stat va con la advertencia de
+  // muestra chica bien visible — con n<30 no dice nada y hay que decirlo.
+  const resumen = useMemo(() => {
+    const dirs = visibles.filter((r) => r.direccion !== 0 && r.exceso != null);
+    if (!dirs.length) return { n: 0, aciertos: 0, hit: null, medio: null, t: null, pendientes: visibles.filter((r) => r.direccion !== 0 && r.exceso == null).length, neutrales: visibles.filter((r) => r.direccion === 0).length };
+    const aciertos = dirs.filter((r) => r.acierto).length;
+    // Exceso "a favor del llamado": si dijiste que baja y bajo, suma positivo.
+    const firmados = dirs.map((r) => r.direccion * r.exceso);
+    const medio = firmados.reduce((s, x) => s + x, 0) / firmados.length;
+    const sd = firmados.length > 1
+      ? Math.sqrt(firmados.reduce((s, x) => s + (x - medio) ** 2, 0) / (firmados.length - 1))
+      : null;
+    return {
+      n: dirs.length, aciertos, hit: aciertos / dirs.length, medio,
+      t: sd && sd > 0 ? medio / (sd / Math.sqrt(firmados.length)) : null,
+      pendientes: visibles.filter((r) => r.direccion !== 0 && r.exceso == null).length,
+      neutrales: visibles.filter((r) => r.direccion === 0).length,
+    };
+  }, [visibles]);
+
+  const pct = (x, d = 2) => (x == null || !isFinite(x) ? "—" : `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(d)}%`);
+  const th = { padding: "8px 10px", fontSize: 10.5, fontWeight: 500, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap", textAlign: "right" };
+  const thL = { ...th, textAlign: "left" };
+  const td = { padding: "9px 10px", fontSize: 12.5, color: C.text, whiteSpace: "nowrap", textAlign: "right" };
+  const tdL = { ...td, textAlign: "left" };
+
+  const chip = (on, onClick, label, key) => (
+    <button key={key} onClick={onClick}
+      style={{
+        padding: "5px 12px", fontSize: 12, fontWeight: on ? 700 : 500, cursor: "pointer", borderRadius: 6,
+        border: `1px solid ${on ? C.accent : C.border}`, background: on ? C.accentSoft : "transparent",
+        color: on ? C.accent : C.muted,
+      }}>{label}</button>
+  );
+
+  const VERD = {
+    comprar: { l: "comprar", c: C.green }, vender: { l: "vender", c: C.red },
+    salir: { l: "salir", c: C.red }, no_entrar: { l: "no entrar", c: C.cat.amber },
+    esperar: { l: "esperar", c: C.cat.amber }, mantener: { l: "mantener", c: C.muted },
+  };
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1180, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <span style={{ fontSize: 9, color: C.dim, letterSpacing: "0.22em", textTransform: "uppercase", fontWeight: 500 }}>
+            Reportes · Decision Log
+          </span>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: "4px 0 0 0" }}>Decision Log</h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 900, lineHeight: 1.6 }}>
+            Cada veredicto sobre un papel queda con <strong>fecha, precio, razonamiento y confianza declarada antes de
+            saber el resultado</strong>. Después se mide contra un benchmark. Es la misma vara que aplicamos a las
+            estrategias y al alpha de la cartera, aplicada a las opiniones — que hasta ahora se evaporaban en el chat.
+          </p>
+        </div>
+        <button onClick={() => setTick((t) => t + 1)}
+          style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>
+          Actualizar
+        </button>
+      </div>
+
+      <div style={{ border: `1px solid ${C.borderStrong}`, background: C.deep, borderRadius: 8, padding: "12px 14px", marginBottom: 16, display: "flex", flexDirection: "column", gap: 7 }}>
+        <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+          <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+            <b style={{ color: C.text }}>Se mide el exceso sobre el benchmark, no el retorno a secas.</b> Acertar
+            "comprá semis" el día que todos los semis suben no es mérito. Cada decisión guarda contra qué se compara
+            (SMH, EWZ, ARGT…), que es la corrección que ya nos cambió el resultado cuando medimos tu alpha.
+          </span>
+        </div>
+        <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+          <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+            <b style={{ color: C.text }}>Los llamados sin dirección no cuentan en el acierto.</b> Un consejo de tamaño
+            ("andá con 1.000 y no 2.000") o de estructura no es una apuesta direccional; se registra pero se excluye del
+            porcentaje, porque meterlo infla el número con cosas que no eran predicciones.
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center" style={{ gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
+        <div className="flex" style={{ gap: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginRight: 2 }}>Medir a</span>
+          {MARCAS.map((m) => chip(marca === m.id, () => setMarca(m.id), m.label, m.id))}
+        </div>
+        <div className="flex" style={{ gap: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginRight: 2 }}>Horizonte</span>
+          {["todos", "intradia", "dias", "semanas"].map((h) => chip(horizonte === h, () => setHorizonte(h), h, h))}
+        </div>
+      </div>
+
+      {error ? (
+        <div style={{ border: `1px solid ${C.red}44`, background: "rgba(248,113,113,0.06)", borderRadius: 8, padding: "16px 18px", fontSize: 12.5, color: C.muted }}>
+          <b style={{ color: C.red }}>No se pudo leer el Decision Log.</b>
+          <div className="eco-mono" style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>{error}</div>
+        </div>
+      ) : filas === null ? (
+        <div className="flex items-center justify-center" style={{ height: 240 }}>
+          <Loader2 size={24} color={C.muted} className="eco-spin" strokeWidth={1.5} />
+        </div>
+      ) : !visibles.length ? (
+        <div style={{ border: `1px solid ${C.border}`, background: C.panel, borderRadius: 8, padding: "26px 22px", fontSize: 12.5, color: C.muted, textAlign: "center", lineHeight: 1.7 }}>
+          <b style={{ color: C.text }}>Todavía no hay decisiones registradas con este filtro.</b>
+          <div style={{ marginTop: 6 }}>Los veredictos se cargan a medida que se toman, con el precio del momento.</div>
+        </div>
+      ) : (
+        <>
+          {/* Resumen */}
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "14px 16px", marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 14 }}>
+              {[
+                { k: "Direccionales medidos", v: String(resumen.n) },
+                { k: "Aciertos", v: resumen.hit == null ? "—" : `${resumen.aciertos}/${resumen.n}  (${Math.round(resumen.hit * 100)}%)`,
+                  c: resumen.hit == null ? C.text : resumen.hit > 0.5 ? C.green : C.red },
+                { k: "Exceso medio a favor", v: pct(resumen.medio), c: resumen.medio == null ? C.text : resumen.medio > 0 ? C.green : C.red },
+                { k: "t-stat", v: resumen.t == null ? "—" : resumen.t.toFixed(2) },
+                { k: "Pendientes de medir", v: String(resumen.pendientes) },
+                { k: "Sin dirección", v: String(resumen.neutrales) },
+              ].map((x) => (
+                <div key={x.k}>
+                  <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>{x.k}</div>
+                  <div className="eco-mono" style={{ fontSize: 16, fontWeight: 700, color: x.c || C.text }}>{x.v}</div>
+                </div>
+              ))}
+            </div>
+            <div className="flex" style={{ gap: 8, alignItems: "flex-start", marginTop: 12, borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+              <AlertTriangle size={13} color={C.cat.amber} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+              <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+                {resumen.n < 30 ? (
+                  <>
+                    <b style={{ color: C.text }}>Con {resumen.n} {resumen.n === 1 ? "decisión" : "decisiones"} esto no
+                    prueba nada.</b> Hacen falta del orden de 30 llamados direccionales medidos para que el porcentaje de
+                    acierto y el t-stat empiecen a significar algo. Hasta entonces es un registro, no una conclusión —
+                    y sirve igual, porque impide reescribir la historia.
+                  </>
+                ) : (
+                  <>
+                    <b style={{ color: C.text }}>Un t-stat arriba de 2 recién sugiere que el resultado no es azar</b>, y
+                    aun así hay que descontarlo por la cantidad de cosas que probamos (misma corrección que el Sharpe
+                    deflactado).
+                  </>
+                )}
+              </span>
+            </div>
+          </div>
+
+          {/* Tabla */}
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, overflow: "hidden" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.borderStrong}` }}>
+                    <th style={thL}>Fecha</th>
+                    <th style={thL}>Papel</th>
+                    <th style={thL}>Llamado</th>
+                    <th style={thL}>Horizonte</th>
+                    <th style={th}>Conf.</th>
+                    <th style={th}>Precio ref.</th>
+                    <th style={th}>Papel</th>
+                    <th style={th}>Benchmark</th>
+                    <th style={th}>Exceso</th>
+                    <th style={th}>Resultado</th>
+                    <th style={th} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibles.map((r) => {
+                    const v = VERD[r.veredicto] || { l: r.veredicto, c: C.muted };
+                    const open = abierta === r.id;
+                    return (
+                      <Fragment key={r.id}>
+                        <tr onClick={() => setAbierta(open ? null : r.id)}
+                          style={{ borderTop: `1px solid ${C.border}`, cursor: "pointer", background: open ? C.accentSoft : "transparent" }}>
+                          <td style={{ ...tdL, color: C.muted }} className="eco-mono">
+                            {new Date(r.created_at).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })}
+                          </td>
+                          <td style={tdL}><b className="eco-mono" style={{ color: C.text }}>{r.ticker}</b></td>
+                          <td style={{ ...tdL, color: v.c, fontWeight: 600 }}>
+                            {v.l}
+                            {r.direccion !== 0 && (
+                              <span style={{ marginLeft: 5, fontSize: 10, color: C.dim }}>{r.direccion > 0 ? "↑" : "↓"}</span>
+                            )}
+                          </td>
+                          <td style={{ ...tdL, color: C.dim, fontSize: 11.5 }}>{r.horizonte}</td>
+                          <td style={{ ...td, color: C.dim }}>{r.confianza ? `${r.confianza}/5` : "—"}</td>
+                          <td style={td} className="eco-mono">{Number(r.precio_ref).toLocaleString("es-AR")}</td>
+                          <td style={{ ...td, color: r.rp == null ? C.dim : r.rp >= 0 ? C.green : C.red }} className="eco-mono">{pct(r.rp)}</td>
+                          <td style={{ ...td, color: C.dim }} className="eco-mono">
+                            {r.benchmark ? <>{pct(r.rb)} <span style={{ fontSize: 10 }}>{r.benchmark}</span></> : "—"}
+                          </td>
+                          <td style={{ ...td, color: r.exceso == null ? C.dim : r.exceso >= 0 ? C.green : C.red, fontWeight: 600 }} className="eco-mono">{pct(r.exceso)}</td>
+                          <td style={td}>
+                            {r.direccion === 0 ? (
+                              <span style={{ fontSize: 10.5, color: C.dim }}>sin dirección</span>
+                            ) : r.acierto == null ? (
+                              <span style={{ fontSize: 10.5, color: C.dim }}>pendiente</span>
+                            ) : (
+                              <span style={{ padding: "2px 8px", borderRadius: 5, fontSize: 10, fontWeight: 700, color: r.acierto ? C.green : C.red, border: `1px solid ${r.acierto ? C.green : C.red}` }}>
+                                {r.acierto ? "acierto" : "error"}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ ...td, color: C.dim, fontSize: 10 }}>{open ? "▴" : "▾"}</td>
+                        </tr>
+                        {open && (
+                          <tr style={{ borderTop: `1px solid ${C.border}`, background: C.deep }}>
+                            <td colSpan={11} style={{ padding: "14px 16px" }}>
+                              <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>
+                                Razonamiento del momento
+                              </div>
+                              <div style={{ fontSize: 12.5, color: C.text, lineHeight: 1.65, maxWidth: 900 }}>{r.razonamiento}</div>
+                              {r.contexto && (
+                                <>
+                                  <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 600, margin: "12px 0 6px" }}>
+                                    Datos duros de ese momento
+                                  </div>
+                                  <div className="eco-mono" style={{ fontSize: 11, color: C.muted, lineHeight: 1.6, wordBreak: "break-word" }}>
+                                    {Object.entries(r.contexto).map(([k, val]) => (
+                                      <span key={k} style={{ marginRight: 14 }}>
+                                        <span style={{ color: C.dim }}>{k}</span> {typeof val === "object" ? JSON.stringify(val) : String(val)}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
+                              <div style={{ fontSize: 10.5, color: C.dim, marginTop: 12 }}>
+                                Marcas: 1 rueda {r.px_1d ?? "—"} · 5 ruedas {r.px_5d ?? "—"} · 21 ruedas {r.px_21d ?? "—"}
+                                {r.tracked_at && ` · medido ${new Date(r.tracked_at).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.55, maxWidth: 900 }}>
+            <strong style={{ color: C.muted }}>Clic en una fila</strong> para leer el razonamiento tal como se escribió,
+            antes de conocer el resultado. Los precios los llena el worker <span className="eco-mono">decision-log-track</span> todas
+            las noches a las 22:30; nunca marca la rueda en curso, para que un precio de media rueda no quede congelado
+            como si fuera un cierre.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
 
 /* ══════════════ OPCIONES · LANZAMIENTO CUBIERTO ══════════════
  *

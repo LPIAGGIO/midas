@@ -1,0 +1,15 @@
+{
+  "name": "decision-log-track",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mide a posteriori los veredictos guardados en decision_log: precio del papel y del benchmark a 1, 5 y 21 ruedas del llamado.",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  }
+}
