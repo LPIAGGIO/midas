@@ -8,6 +8,7 @@
 //   GET /api/data912?type=letras    → /live/arg_notes
 //   GET /api/data912?type=acciones  → /live/arg_stocks
 //   GET /api/data912?type=cedears   → /live/arg_cedears
+//   GET /api/data912?type=opciones  → /live/arg_options
 //
 // Devuelve el array tal cual lo devuelve data912 (sin transformar).
 // Cache de 15 segundos en CDN para reducir hits.
@@ -18,6 +19,7 @@ const SOURCES = {
   acciones: "https://data912.com/live/arg_stocks",
   cedears:  "https://data912.com/live/arg_cedears",
   usa:      "https://data912.com/live/usa_stocks",
+  opciones: "https://data912.com/live/arg_options",
 };
 
 export default async function handler(req, res) {

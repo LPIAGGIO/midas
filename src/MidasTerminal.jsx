@@ -207,6 +207,7 @@ const NAV = [
       { id: "futuros-caucion", label: "Futuros vs Caución", icon: Scale },
       { id: "sintetico-dlr", label: "Sintético DLR", icon: Layers },
       { id: "mapa-posiciones", label: "Mapa de Posiciones", icon: Layers, type: "single", requiresAuth: true },
+      { id: "opciones", label: "Opciones", icon: Sigma },
       { id: "curva-tasas", label: "Curva de Tasas", icon: Spline },
       { id: "spread-cer-fija", label: "Spread CER / Fija", icon: Diff },
       { id: "desarbitrajes", label: "Desarbitrajes MEP", icon: Repeat },
@@ -1427,6 +1428,8 @@ function MidasApp({ allowedModules = null }) {
               <SinteticoDolarModule />
             ) : active === "mapa-posiciones" ? (
               <MapaPosicionesModule />
+            ) : active === "opciones" ? (
+              <OpcionesModule key={active} />
             ) : active === "portfolio-ia" ? (
               <PortfolioIAModule onNavigate={setActive} />
             ) : active === "importaciones" ? (
@@ -41367,6 +41370,685 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
 }
 
 /* ─────────── Módulo ─────────── */
+
+/* ══════════════ OPCIONES · LANZAMIENTO CUBIERTO ══════════════
+ *
+ * El mercado de opciones argentino es, en los hechos, GGAL y poco más:
+ * en un feed típico GGAL concentra ~345k de volumen contra 43k de COME
+ * y menos de 400 en TODO el resto junto. Esta pantalla no lo esconde —
+ * ordena por volumen y marca lo que no se puede operar, porque entrar en
+ * una serie sin volumen es quedar preso hasta el vencimiento.
+ *
+ * QUÉ RESUELVE: LP ya opera como lanzador cubierto sin cobrar la prima
+ * (pone órdenes limitadas de venta arriba del mercado: "vendo SNDK en
+ * 11.740"). Lanzar cubierto es exactamente esa orden, pero cobrando por
+ * ponerla. Esta pantalla pone número a ese cobro.
+ *
+ * QUÉ *NO* ES: no es la estrategia del tweet que disparó todo esto. Ahí
+ * el tipo compra y vende la MISMA base todo el día (−1696/+1696 en la
+ * 7.000) y gana 0,68% sobre 590 M operados: eso es hacer mercado, vive
+ * del spread y no es replicable sin cotizar en firme todo el día.
+ */
+
+// Prefijo de 3 letras del código de opción → ticker del subyacente en
+// arg_stocks. BYMA arma el símbolo como PREFIJO + C|V + base + mes.
+const OPT_SUBY = {
+  GFG: "GGAL", COM: "COME", YPF: "YPFD", PAM: "PAMP", ALU: "ALUA",
+  MET: "METR", TXA: "TXAR", BHI: "BHIP", BYM: "BYMA", TGS: "TGSU2",
+  TEC: "TECO2", BBA: "BBAR", BMA: "BMA", CEC: "CECO2", CRE: "CRES",
+  EDN: "EDN", LOM: "LOMA", SUP: "SUPV", TRA: "TRAN", VAL: "VALO",
+  CVH: "CVH", AGR: "AGRO", MIR: "MIRG", CAP: "CAPX", HAR: "HARG",
+  IRS: "IRSA", PES: "PESA", AUS: "AUSO", CAR: "CARC", DGC: "DGCU2",
+};
+
+const OPT_MES = { EN: 0, FE: 1, MZ: 2, AB: 3, MY: 4, JN: 5, JU: 5, JL: 6, AG: 7, SE: 8, OC: 9, NO: 10, DI: 11 };
+const OPT_MES_NOMBRE = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+// Las opciones de acciones en BYMA vencen el TERCER VIERNES del mes.
+// Se calcula en vez de hardcodear un calendario que quedaría viejo.
+function optTercerViernes(anio, mes) {
+  const dow = new Date(Date.UTC(anio, mes, 1)).getUTCDay();  // 0=dom … 5=vie
+  const primerViernes = 1 + ((5 - dow + 7) % 7);
+  return new Date(Date.UTC(anio, mes, primerViernes + 14));
+}
+
+/* Parseo del símbolo. Devuelve null si no matchea el formato — el feed
+ * trae 419 filas y no todas son opciones de acciones. */
+function optParse(sym) {
+  const m = /^([A-Z]{3})([CV])(\d+)([A-Z]{2})$/.exec(String(sym || "").trim().toUpperCase());
+  if (!m) return null;
+  const suby = OPT_SUBY[m[1]];
+  const mes = OPT_MES[m[4]];
+  if (!suby || mes == null) return null;
+  const hoy = new Date();
+  let anio = hoy.getUTCFullYear();
+  let vto = optTercerViernes(anio, mes);
+  // Si el tercer viernes de este año ya pasó, la serie es del año que viene.
+  if (vto.getTime() < Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())) {
+    anio += 1;
+    vto = optTercerViernes(anio, mes);
+  }
+  const dias = Math.max(1, Math.round((vto - Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())) / 86400000));
+  return {
+    sym: String(sym).toUpperCase(), suby, tipo: m[2] === "C" ? "call" : "put",
+    strikeRaw: Number(m[3]), mesCod: m[4], mes, anio, vto, dias,
+    vtoLabel: `${OPT_MES_NOMBRE[mes]}-${String(anio).slice(2)}`,
+  };
+}
+
+/* La base viene sin separador decimal y la escala cambia según el papel
+ * (ALUA cotiza ~950 y sus bases van en enteros; COME cotiza ~130 y las
+ * suyas vienen ×10). En vez de mantener una tabla por papel —que se
+ * rompe cada vez que hay un split— se detecta comparando la MEDIANA de
+ * las bases contra el spot: mismo truco que usa el worker de 13F para
+ * los filers que reportan en miles. */
+function optEscala(strikes, spot) {
+  if (!strikes.length || !spot) return 1;
+  const ord = [...strikes].sort((a, b) => a - b);
+  const mediana = ord[Math.floor(ord.length / 2)];
+  if (!mediana) return 1;
+  let mejor = 1, err = Infinity;
+  for (const e of [0.01, 0.1, 1, 10, 100]) {
+    const d = Math.abs(Math.log((mediana * e) / spot));
+    if (d < err) { err = d; mejor = e; }
+  }
+  return mejor;
+}
+
+/* ── Black-Scholes, solo para despejar la volatilidad implícita ──
+ * Es el número que contesta "¿me están pagando caro o barato por
+ * vender esta opción?". Sin esto, la TNA del lanzamiento se compara
+ * contra la caución pero no contra el riesgo que estás asumiendo. */
+function optNormCdf(x) {
+  // Abramowitz & Stegun 26.2.17 — error < 7,5e-8, de sobra para esto.
+  const b = [0.319381530, -0.356563782, 1.781477937, -1.821255978, 1.330274429];
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const pdf = Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
+  let poly = 0, tp = t;
+  for (const c of b) { poly += c * tp; tp *= t; }
+  return x >= 0 ? 1 - pdf * poly : pdf * poly;
+}
+
+function optBS(tipo, S, K, T, r, sig) {
+  if (!(S > 0 && K > 0 && T > 0 && sig > 0)) return null;
+  const st = sig * Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (r + (sig * sig) / 2) * T) / st;
+  const d2 = d1 - st;
+  const disc = Math.exp(-r * T);
+  return tipo === "call"
+    ? S * optNormCdf(d1) - K * disc * optNormCdf(d2)
+    : K * disc * optNormCdf(-d2) - S * optNormCdf(-d1);
+}
+
+/* Bisección en vez de Newton: es más lenta pero no se escapa cuando la
+ * prima está pegada al valor intrínseco (que en este mercado pasa
+ * seguido en las bases muy adentro). */
+function optIV(tipo, S, K, T, r, precio) {
+  if (!(precio > 0 && S > 0 && K > 0 && T > 0)) return null;
+  const intrinseco = tipo === "call" ? Math.max(0, S - K * Math.exp(-r * T)) : Math.max(0, K * Math.exp(-r * T) - S);
+  if (precio <= intrinseco) return null;      // sin valor tiempo no hay vol que despejar
+  let lo = 0.01, hi = 8;
+  if (optBS(tipo, S, K, T, r, hi) < precio) return null;   // ni con 800% de vol llega
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo + hi) / 2;
+    if (optBS(tipo, S, K, T, r, mid) < precio) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+const OPT_LOTE = 100;   // 1 contrato = 100 acciones en BYMA
+
+function useOpcionesChain() {
+  const [raw, setRaw] = useState(null);
+  const [spots, setSpots] = useState(null);
+  const [error, setError] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [updatedAt, setUpdatedAt] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    setError(null);
+    (async () => {
+      try {
+        const [o, a] = await Promise.all([
+          fetch(`/api/data912?type=opciones&_=${Date.now()}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`opciones ${r.status}`)))),
+          fetch(`/api/data912?type=acciones&_=${Date.now()}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`acciones ${r.status}`)))),
+        ]);
+        if (!vivo) return;
+        setRaw(Array.isArray(o) ? o : []);
+        setSpots(new Map((Array.isArray(a) ? a : []).map((s) => [s.symbol, s])));
+        setUpdatedAt(new Date());
+      } catch (e) {
+        if (vivo) setError(e?.message || String(e));
+      }
+    })();
+    return () => { vivo = false; };
+  }, [tick]);
+
+  // Agrupado por subyacente → vencimiento → series, con la base ya
+  // reescalada y la volatilidad implícita despejada.
+  const porSuby = useMemo(() => {
+    if (!raw || !spots) return null;
+    const crudo = new Map();
+    for (const o of raw) {
+      const p = optParse(o.symbol);
+      if (!p) continue;
+      const spot = Number(spots.get(p.suby)?.c) || 0;
+      if (!spot) continue;
+      let e = crudo.get(p.suby);
+      if (!e) { e = { suby: p.suby, spot, pct: Number(spots.get(p.suby)?.pct_change) || 0, filas: [] }; crudo.set(p.suby, e); }
+      e.filas.push({
+        ...p, spot,
+        bid: Number(o.px_bid) || 0, ask: Number(o.px_ask) || 0, ult: Number(o.c) || 0,
+        vol: Number(o.v) || 0, qBid: Number(o.q_bid) || 0, qAsk: Number(o.q_ask) || 0,
+      });
+    }
+    return crudo;
+  }, [raw, spots]);
+
+  return { porSuby, error, updatedAt, refresh: () => setTick((t) => t + 1) };
+}
+
+function OpcionesModule() {
+  const { porSuby, error, updatedAt, refresh } = useOpcionesChain();
+  const caucion = useCaucionRate();
+  const [tab, setTab] = useState("lanzamiento");
+  const [suby, setSuby] = useState("GGAL");
+  const [vtoSel, setVtoSel] = useState(null);
+  const [papeles, setPapeles] = useState(300);
+  const [baseSel, setBaseSel] = useState(null);
+
+  // Subyacentes ordenados por volumen real de opciones. La lista sale del
+  // feed, no de una constante: si mañana YPF se despierta, aparece sola.
+  const universo = useMemo(() => {
+    if (!porSuby) return [];
+    return [...porSuby.values()]
+      .map((e) => ({ suby: e.suby, spot: e.spot, pct: e.pct, vol: e.filas.reduce((s, f) => s + f.vol, 0), n: e.filas.length }))
+      .sort((a, b) => b.vol - a.vol);
+  }, [porSuby]);
+
+  const activo = porSuby?.get(suby) || null;
+
+  // Series del subyacente elegido, con la base reescalada y las métricas
+  // del lanzamiento cubierto ya calculadas.
+  const series = useMemo(() => {
+    if (!activo) return [];
+    const esc = optEscala(activo.filas.map((f) => f.strikeRaw), activo.spot);
+    const r = Math.log(1 + (caucion / 100) * (1 / 365)) * 365;   // caución TNA → tasa continua
+    return activo.filas.map((f) => {
+      const K = f.strikeRaw * esc;
+      const T = f.dias / 365;
+      const mid = f.bid > 0 && f.ask > 0 ? (f.bid + f.ask) / 2 : (f.ult || f.bid || f.ask || 0);
+      const spread = f.bid > 0 && f.ask > 0 ? f.ask / f.bid - 1 : null;
+      // Lanzamiento cubierto: comprás el papel al spot y vendés el call al
+      // BID (nunca al ask — vos sos el que cruza). El máximo se cobra solo
+      // si te ejercen; la prima es la única parte garantizada.
+      let prima = null, maxRet = null, tna = null, proteccion = null;
+      if (f.tipo === "call" && f.bid > 0 && activo.spot > 0) {
+        prima = f.bid / activo.spot;
+        proteccion = prima;
+        maxRet = (K + f.bid) / activo.spot - 1;
+        tna = maxRet * (365 / f.dias);
+      }
+      return {
+        ...f, K, mid, spread, prima, maxRet, tna, proteccion,
+        moneyness: activo.spot > 0 ? K / activo.spot - 1 : 0,
+        iv: optIV(f.tipo, activo.spot, K, T, r, mid),
+        // "Operable" es un juicio explícito: sin volumen y sin las dos
+        // puntas, el precio de pantalla es decorativo.
+        operable: f.vol > 0 && f.bid > 0 && f.ask > 0,
+      };
+    });
+  }, [activo, caucion]);
+
+  const vencimientos = useMemo(() => {
+    const m = new Map();
+    for (const s of series) {
+      let e = m.get(s.vtoLabel);
+      if (!e) { e = { label: s.vtoLabel, dias: s.dias, vto: s.vto, vol: 0, n: 0 }; m.set(s.vtoLabel, e); }
+      e.vol += s.vol; e.n++;
+    }
+    return [...m.values()].sort((a, b) => a.dias - b.dias);
+  }, [series]);
+
+  const vtoActivo = vtoSel && vencimientos.some((v) => v.label === vtoSel)
+    ? vtoSel
+    : (vencimientos.find((v) => v.vol > 0)?.label || vencimientos[0]?.label || null);
+
+  const calls = useMemo(
+    () => series.filter((s) => s.tipo === "call" && s.vtoLabel === vtoActivo).sort((a, b) => a.K - b.K),
+    [series, vtoActivo]
+  );
+  const puts = useMemo(
+    () => series.filter((s) => s.tipo === "put" && s.vtoLabel === vtoActivo).sort((a, b) => a.K - b.K),
+    [series, vtoActivo]
+  );
+
+  // Candidatas de lanzamiento: solo calls operables. Se listan de la base
+  // más baja a la más alta para que se lea como una escalera de "cuánta
+  // suba estoy vendiendo".
+  const candidatas = useMemo(() => calls.filter((c) => c.operable && c.prima != null), [calls]);
+
+  const elegida = useMemo(() => {
+    if (!candidatas.length) return null;
+    if (baseSel != null) {
+      const m = candidatas.find((c) => Math.abs(c.K - baseSel) < 1e-6);
+      if (m) return m;
+    }
+    // Default: la primera base arriba del spot con volumen — el lanzamiento
+    // "natural" del que sigue teniendo algo de suba para ganar.
+    return candidatas.find((c) => c.moneyness > 0) || candidatas[candidatas.length - 1];
+  }, [candidatas, baseSel]);
+
+  const contratos = Math.floor((Number(papeles) || 0) / OPT_LOTE);
+  const sobrantes = (Number(papeles) || 0) - contratos * OPT_LOTE;
+
+  const sim = useMemo(() => {
+    if (!elegida || !activo || contratos < 1) return null;
+    const S = activo.spot, K = elegida.K, P = elegida.bid;
+    const acciones = contratos * OPT_LOTE;
+    const costo = acciones * S;
+    const cobro = acciones * P;
+    return {
+      acciones, costo, cobro, S, K, P,
+      // Tres escenarios, en pesos, que es como hay que mirarlos:
+      ejercido: acciones * (K - S) + cobro,       // el papel se va a K
+      quieto: cobro,                               // el papel no se mueve
+      baja5: acciones * (S * -0.05) + cobro,       // el papel cae 5%
+      breakeven: S - P,                            // debajo de acá el lanzamiento pierde
+      sinLanzar: acciones * (K - S),               // lo mismo pero sin cobrar prima
+    };
+  }, [elegida, activo, contratos]);
+
+  const th = { padding: "8px 10px", fontSize: 10.5, fontWeight: 500, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap", textAlign: "right" };
+  const thL = { ...th, textAlign: "left" };
+  const td = { padding: "8px 10px", fontSize: 12.5, color: C.text, whiteSpace: "nowrap", textAlign: "right" };
+  const tdL = { ...td, textAlign: "left" };
+  const pct = (x, d = 2) => (x == null || !isFinite(x) ? "—" : `${x >= 0 ? "" : "−"}${Math.abs(x * 100).toFixed(d)}%`);
+  const ars = (x) => (x == null || !isFinite(x) ? "—" : `${x < 0 ? "−" : ""}$${Math.abs(Math.round(x)).toLocaleString("es-AR")}`);
+  const num = (x, d = 2) => (x == null || !isFinite(x) ? "—" : Number(x).toLocaleString("es-AR", { minimumFractionDigits: d, maximumFractionDigits: d }));
+
+  const tabBtn = (id, label) => (
+    <button
+      key={id}
+      onClick={() => setTab(id)}
+      style={{
+        padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", borderRadius: 6,
+        border: `1px solid ${tab === id ? C.accent : C.border}`,
+        background: tab === id ? C.accentSoft : "transparent",
+        color: tab === id ? C.accent : C.muted,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  const colorSpread = (s) => (s == null ? C.dim : s > 0.20 ? C.red : s > 0.10 ? C.cat.amber : C.green);
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1240, margin: "0 auto" }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <span style={{ fontSize: 9, color: C.dim, letterSpacing: "0.22em", textTransform: "uppercase", fontWeight: 500 }}>
+            Analizadores · Opciones
+          </span>
+          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: "4px 0 0 0" }}>
+            Opciones · Lanzamiento cubierto
+          </h1>
+          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 900, lineHeight: 1.6 }}>
+            Lanzar cubierto es <strong>cobrar por poner la orden de venta que ibas a poner igual</strong>: tenés el papel,
+            vendés un call sobre él y te pagan hoy por comprometerte a entregarlo a la base. Esta pantalla pone número a
+            ese cobro, contra la caución y contra la volatilidad que estás vendiendo.
+          </p>
+        </div>
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          {updatedAt && (
+            <span style={{ fontSize: 10.5, color: C.dim }}>
+              Feed {updatedAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+          <button
+            onClick={refresh}
+            style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}
+          >
+            Actualizar
+          </button>
+        </div>
+      </div>
+
+      {/* Las tres advertencias que hacen honesta la pantalla. */}
+      <div style={{ border: `1px solid ${C.borderStrong}`, background: C.deep, borderRadius: 8, padding: "12px 14px", marginBottom: 16, display: "flex", flexDirection: "column", gap: 7 }}>
+        <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+          <AlertTriangle size={13} color={C.cat.amber} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+            <b style={{ color: C.text }}>El máximo no está garantizado; la prima sí.</b> El retorno máximo se cobra solo
+            si el papel llega a la base y te ejercen. Lo único seguro es la prima — que también es todo el colchón que
+            tenés para abajo. <b style={{ color: C.text }}>Lanzar cubierto vende tu suba y no te protege de la baja.</b>
+          </span>
+        </div>
+        <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+          <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+            <b style={{ color: C.text }}>Nunca cruces el spread.</b> Las primas se calculan vendiendo al{" "}
+            <b style={{ color: C.text }}>bid</b>, que es lo que realmente cobrás. Con puntas de 10–20% de diferencia,
+            entrar por el ask se come el negocio del mes entero. Las series sin volumen y sin las dos puntas aparecen
+            marcadas: ahí el precio de pantalla es decorativo.
+          </span>
+        </div>
+        <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+          <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+            <b style={{ color: C.text }}>Son americanas y el contrato es de {OPT_LOTE} acciones.</b> Te pueden ejercer
+            cualquier día, no solo al vencimiento. Tu tenencia tiene que ser múltiplo de {OPT_LOTE} o te queda una parte
+            sin cubrir. Vencimientos calculados como el tercer viernes del mes — confirmá contra tu bróker antes de operar.
+          </span>
+        </div>
+      </div>
+
+      {/* Selector de subyacente */}
+      {universo.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>
+            Subyacente · ordenado por volumen de opciones
+          </div>
+          <div className="flex" style={{ gap: 6, flexWrap: "wrap" }}>
+            {universo.map((u) => {
+              const on = u.suby === suby;
+              const muerto = u.vol < 500;
+              return (
+                <button
+                  key={u.suby}
+                  onClick={() => { setSuby(u.suby); setVtoSel(null); setBaseSel(null); }}
+                  title={muerto ? "Sin volumen real: no se puede operar" : `${u.vol.toLocaleString("es-AR")} de volumen`}
+                  style={{
+                    padding: "5px 10px", fontSize: 11.5, fontWeight: on ? 700 : 500, cursor: "pointer", borderRadius: 6,
+                    border: `1px solid ${on ? C.accent : C.border}`,
+                    background: on ? C.accentSoft : "transparent",
+                    color: on ? C.accent : muerto ? C.dim : C.muted,
+                    opacity: muerto && !on ? 0.55 : 1,
+                  }}
+                >
+                  <span className="eco-mono">{u.suby}</span>
+                  <span style={{ fontSize: 10, marginLeft: 6, color: on ? C.accent : C.dim }}>
+                    {u.vol.toLocaleString("es-AR")}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center" style={{ gap: 6, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.border}`, paddingBottom: 12 }}>
+        {tabBtn("lanzamiento", "Lanzamiento cubierto")}
+        {tabBtn("cadena", "Cadena completa")}
+        {tabBtn("simulador", "Simulador")}
+      </div>
+
+      {error ? (
+        <div style={{ border: `1px solid ${C.red}44`, background: "rgba(248,113,113,0.06)", borderRadius: 8, padding: "16px 18px", fontSize: 12.5, color: C.muted, lineHeight: 1.6 }}>
+          <b style={{ color: C.red }}>No se pudo leer la cadena de opciones.</b>
+          <div className="eco-mono" style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>{error}</div>
+        </div>
+      ) : !porSuby ? (
+        <div className="flex items-center justify-center" style={{ height: 260 }}>
+          <Loader2 size={24} color={C.muted} className="eco-spin" strokeWidth={1.5} />
+        </div>
+      ) : !activo ? (
+        <div style={{ border: `1px solid ${C.border}`, background: C.panel, borderRadius: 8, padding: "26px 22px", fontSize: 12.5, color: C.muted, textAlign: "center" }}>
+          <b style={{ color: C.text }}>No hay series listadas para {suby}.</b>
+          <div style={{ marginTop: 6 }}>Probá con otro subyacente de la lista de arriba.</div>
+        </div>
+      ) : (
+        <>
+          {/* Cabecera del subyacente + vencimientos */}
+          <div className="flex items-center justify-between" style={{ gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
+            <div className="flex items-baseline" style={{ gap: 10 }}>
+              <span className="eco-mono" style={{ fontSize: 17, fontWeight: 700, color: C.text }}>{activo.suby}</span>
+              <span className="eco-mono" style={{ fontSize: 15, color: C.text }}>${num(activo.spot, 2)}</span>
+              <span className="eco-mono" style={{ fontSize: 12, color: activo.pct >= 0 ? C.green : C.red }}>
+                {activo.pct >= 0 ? "+" : "−"}{Math.abs(activo.pct).toFixed(2)}%
+              </span>
+              <span style={{ fontSize: 11, color: C.dim }}>caución {num(caucion, 1)}% TNA</span>
+            </div>
+            <div className="flex" style={{ gap: 6, flexWrap: "wrap" }}>
+              {vencimientos.map((v) => {
+                const on = v.label === vtoActivo;
+                return (
+                  <button
+                    key={v.label}
+                    onClick={() => { setVtoSel(v.label); setBaseSel(null); }}
+                    style={{
+                      padding: "4px 10px", fontSize: 11, fontWeight: on ? 700 : 500, cursor: "pointer", borderRadius: 5,
+                      border: `1px solid ${on ? C.accent : C.border}`,
+                      background: on ? C.accentSoft : "transparent",
+                      color: on ? C.accent : v.vol > 0 ? C.muted : C.dim,
+                      opacity: v.vol > 0 || on ? 1 : 0.55,
+                    }}
+                  >
+                    {v.label} <span style={{ fontSize: 10, color: C.dim }}>({v.dias}d)</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {tab === "lanzamiento" ? (
+            <>
+              <p style={{ fontSize: 11.5, color: C.muted, margin: "0 0 10px 0", maxWidth: 960, lineHeight: 1.6 }}>
+                Cada fila es un compromiso distinto de venta. <b style={{ color: C.text }}>Cobrás hoy</b> es la prima que
+                entra en el acto (y todo tu colchón de baja). <b style={{ color: C.text }}>Máximo</b> es lo que ganás si
+                te ejercen, prima incluida. <b style={{ color: C.text }}>Vol. impl.</b> es la volatilidad anual que te
+                están pagando: cuanto más alta, mejor te pagan por vender. Clic en una fila para llevarla al simulador.
+              </p>
+              {!candidatas.length ? (
+                <div style={{ border: `1px solid ${C.border}`, background: C.panel, borderRadius: 8, padding: "24px", fontSize: 12.5, color: C.muted, textAlign: "center" }}>
+                  <b style={{ color: C.text }}>No hay calls operables en {vtoActivo}.</b>
+                  <div style={{ marginTop: 6 }}>Ninguna serie tiene volumen y las dos puntas al mismo tiempo. Probá otro vencimiento.</div>
+                </div>
+              ) : (
+                <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, overflow: "hidden" }}>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 940 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.borderStrong}` }}>
+                          <th style={thL}>Base</th>
+                          <th style={th}>vs spot</th>
+                          <th style={th}>Bid</th>
+                          <th style={th}>Ask</th>
+                          <th style={th}>Spread</th>
+                          <th style={th}>Volumen</th>
+                          <th style={th}>Cobrás hoy</th>
+                          <th style={th}>Máximo</th>
+                          <th style={th}>TNA</th>
+                          <th style={th}>Vol. impl.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {candidatas.map((c) => {
+                          const on = elegida && Math.abs(c.K - elegida.K) < 1e-6;
+                          const itm = c.moneyness < 0;
+                          return (
+                            <tr
+                              key={c.sym}
+                              onClick={() => { setBaseSel(c.K); setTab("simulador"); }}
+                              style={{ borderTop: `1px solid ${C.border}`, cursor: "pointer", background: on ? C.accentSoft : "transparent" }}
+                            >
+                              <td style={tdL}>
+                                <b className="eco-mono" style={{ color: C.text }}>{num(c.K, 0)}</b>
+                                {itm && <span style={{ fontSize: 9.5, color: C.cat.amber, marginLeft: 7 }}>ejercicio casi seguro</span>}
+                              </td>
+                              <td style={{ ...td, color: itm ? C.cat.amber : C.muted }} className="eco-mono">{pct(c.moneyness, 1)}</td>
+                              <td style={td} className="eco-mono">{num(c.bid, 2)}</td>
+                              <td style={{ ...td, color: C.dim }} className="eco-mono">{num(c.ask, 2)}</td>
+                              <td style={{ ...td, color: colorSpread(c.spread) }} className="eco-mono">{pct(c.spread, 0)}</td>
+                              <td style={{ ...td, color: C.dim }} className="eco-mono">{c.vol.toLocaleString("es-AR")}</td>
+                              <td style={{ ...td, color: C.green }} className="eco-mono">{pct(c.prima)}</td>
+                              <td style={td} className="eco-mono">{pct(c.maxRet)}</td>
+                              <td style={{ ...td, color: c.tna != null && c.tna * 100 > caucion ? C.green : C.muted }} className="eco-mono">
+                                {c.tna == null ? "—" : `${Math.round(c.tna * 100)}%`}
+                              </td>
+                              <td style={{ ...td, color: C.dim }} className="eco-mono">{c.iv == null ? "—" : `${Math.round(c.iv * 100)}%`}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              <p style={{ fontSize: 11, color: C.dim, margin: "10px 0 0 0", lineHeight: 1.6, maxWidth: 960 }}>
+                Las TNA de tres dígitos son reales pero engañan: anualizar {vencimientos.find((v) => v.label === vtoActivo)?.dias || 0} días
+                multiplica todo por {Math.round(365 / (vencimientos.find((v) => v.label === vtoActivo)?.dias || 365))}. Comparalas con la caución
+                para dimensionar, no para proyectar — nadie te garantiza que puedas repetir el lanzamiento el mes que viene a la misma prima.
+              </p>
+            </>
+          ) : tab === "cadena" ? (
+            <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, overflow: "hidden" }}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.borderStrong}` }}>
+                      <th style={{ ...th, textAlign: "center" }} colSpan={4}>CALLS</th>
+                      <th style={{ ...th, textAlign: "center", borderLeft: `1px solid ${C.borderStrong}`, borderRight: `1px solid ${C.borderStrong}` }}>Base</th>
+                      <th style={{ ...th, textAlign: "center" }} colSpan={4}>PUTS</th>
+                    </tr>
+                    <tr style={{ borderBottom: `1px solid ${C.borderStrong}` }}>
+                      <th style={th}>Vol</th><th style={th}>Bid</th><th style={th}>Ask</th><th style={th}>V.impl</th>
+                      <th style={{ ...th, textAlign: "center", borderLeft: `1px solid ${C.borderStrong}`, borderRight: `1px solid ${C.borderStrong}` }} />
+                      <th style={th}>V.impl</th><th style={th}>Bid</th><th style={th}>Ask</th><th style={th}>Vol</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...new Set([...calls, ...puts].map((s) => s.K))].sort((a, b) => a - b).map((K) => {
+                      const c = calls.find((x) => Math.abs(x.K - K) < 1e-6);
+                      const p = puts.find((x) => Math.abs(x.K - K) < 1e-6);
+                      const cerca = Math.abs(K / activo.spot - 1) < 0.03;
+                      const apagado = { ...td, color: C.dim, opacity: 0.5 };
+                      return (
+                        <tr key={K} style={{ borderTop: `1px solid ${C.border}`, background: cerca ? C.accentSoft : "transparent" }}>
+                          <td style={c?.operable ? { ...td, color: C.dim } : apagado} className="eco-mono">{c ? c.vol.toLocaleString("es-AR") : "—"}</td>
+                          <td style={c?.operable ? td : apagado} className="eco-mono">{c ? num(c.bid, 2) : "—"}</td>
+                          <td style={c?.operable ? { ...td, color: C.dim } : apagado} className="eco-mono">{c ? num(c.ask, 2) : "—"}</td>
+                          <td style={c?.operable ? { ...td, color: C.dim } : apagado} className="eco-mono">{c?.iv == null ? "—" : `${Math.round(c.iv * 100)}%`}</td>
+                          <td style={{ ...td, textAlign: "center", borderLeft: `1px solid ${C.borderStrong}`, borderRight: `1px solid ${C.borderStrong}`, fontWeight: 700 }} className="eco-mono">
+                            {num(K, 0)}
+                          </td>
+                          <td style={p?.operable ? { ...td, color: C.dim } : apagado} className="eco-mono">{p?.iv == null ? "—" : `${Math.round(p.iv * 100)}%`}</td>
+                          <td style={p?.operable ? td : apagado} className="eco-mono">{p ? num(p.bid, 2) : "—"}</td>
+                          <td style={p?.operable ? { ...td, color: C.dim } : apagado} className="eco-mono">{p ? num(p.ask, 2) : "—"}</td>
+                          <td style={p?.operable ? { ...td, color: C.dim } : apagado} className="eco-mono">{p ? p.vol.toLocaleString("es-AR") : "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ padding: "9px 12px", borderTop: `1px solid ${C.border}`, fontSize: 11, color: C.dim }}>
+                Las filas en gris no tienen volumen o les falta una punta: el precio existe pero no hay con quién operarlo.
+                La fila resaltada es la base más cercana al spot.
+              </div>
+            </div>
+          ) : (
+            /* ── SIMULADOR ── */
+            !elegida || !sim ? (
+              <div style={{ border: `1px solid ${C.border}`, background: C.panel, borderRadius: 8, padding: "24px", fontSize: 12.5, color: C.muted, textAlign: "center" }}>
+                <b style={{ color: C.text }}>Elegí una base con volumen y una cantidad de al menos {OPT_LOTE} papeles.</b>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 340px) 1fr", gap: 16, alignItems: "start" }}>
+                {/* Parámetros */}
+                <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
+                    Tu lanzamiento
+                  </div>
+                  <label style={{ fontSize: 11.5, color: C.muted, display: "block", marginBottom: 5 }}>Papeles de {activo.suby}</label>
+                  <input
+                    type="number" step={OPT_LOTE} min={0} value={papeles}
+                    onChange={(e) => setPapeles(e.target.value)}
+                    className="eco-mono"
+                    style={{ width: "100%", padding: "7px 10px", fontSize: 13, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, marginBottom: 4 }}
+                  />
+                  <div style={{ fontSize: 11, color: sobrantes ? C.cat.amber : C.dim, marginBottom: 12 }}>
+                    {contratos} contrato{contratos === 1 ? "" : "s"} · {ars(sim.costo)}
+                    {sobrantes > 0 && ` · ${sobrantes} papeles quedan sin cubrir`}
+                  </div>
+
+                  <label style={{ fontSize: 11.5, color: C.muted, display: "block", marginBottom: 5 }}>Base del call que vendés</label>
+                  <select
+                    value={elegida.K}
+                    onChange={(e) => setBaseSel(Number(e.target.value))}
+                    className="eco-mono"
+                    style={{ width: "100%", padding: "7px 10px", fontSize: 13, background: C.deep, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, marginBottom: 12 }}
+                  >
+                    {candidatas.map((c) => (
+                      <option key={c.sym} value={c.K}>
+                        {num(c.K, 0)} · prima {num(c.bid, 2)} · {c.vol.toLocaleString("es-AR")} vol
+                      </option>
+                    ))}
+                  </select>
+
+                  <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                    {[
+                      ["Serie", elegida.sym],
+                      ["Vence", `${elegida.vto.toLocaleDateString("es-AR", { day: "2-digit", month: "short", timeZone: "UTC" })} · ${elegida.dias} días`],
+                      ["Spread de la serie", pct(elegida.spread, 0)],
+                      ["Vol. implícita", elegida.iv == null ? "—" : `${Math.round(elegida.iv * 100)}%`],
+                    ].map(([k, v]) => (
+                      <div key={k} className="flex items-baseline justify-between" style={{ gap: 10 }}>
+                        <span style={{ fontSize: 11.5, color: C.muted }}>{k}</span>
+                        <span className="eco-mono" style={{ fontSize: 11.5, color: C.text }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Escenarios */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>
+                      Qué pasa al vencimiento · {sim.acciones.toLocaleString("es-AR")} papeles, {contratos} contrato{contratos === 1 ? "" : "s"}
+                    </div>
+                    {[
+                      { t: `${activo.suby} llega a ${num(sim.K, 0)} o más — te ejercen`, v: sim.ejercido, c: C.green,
+                        d: `Entregás los papeles a ${num(sim.K, 0)} y te quedás con la prima. Es el techo: arriba de acá no ganás más.` },
+                      { t: `${activo.suby} queda donde está (${num(sim.S, 0)})`, v: sim.quieto, c: C.green,
+                        d: "No te ejercen, seguís con los papeles y cobraste la prima. El escenario que hace atractivo lanzar." },
+                      { t: `${activo.suby} cae 5%`, v: sim.baja5, c: sim.baja5 >= 0 ? C.green : C.red,
+                        d: `La prima amortigua pero no alcanza. Empatás recién con el papel en ${num(sim.breakeven, 0)}.` },
+                    ].map((e) => (
+                      <div key={e.t} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, marginTop: 10 }}>
+                        <div className="flex items-baseline justify-between" style={{ gap: 12 }}>
+                          <span style={{ fontSize: 12.5, color: C.text, fontWeight: 600 }}>{e.t}</span>
+                          <span className="eco-mono" style={{ fontSize: 15, fontWeight: 700, color: e.c }}>{ars(e.v)}</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{e.d}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ border: `1px solid ${C.borderStrong}`, borderRadius: 8, background: C.deep, padding: "13px 15px" }}>
+                    <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+                      <AlertTriangle size={13} color={C.cat.amber} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+                      <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.6 }}>
+                        <b style={{ color: C.text }}>Lo que estás vendiendo.</b> Cobrás {ars(sim.cobro)} por renunciar a
+                        todo lo que {activo.suby} suba arriba de {num(sim.K, 0)}. Si se va a{" "}
+                        {num(sim.K * 1.15, 0)} (+15% sobre la base), sin lanzar habrías ganado{" "}
+                        {ars(sim.acciones * (sim.K * 1.15 - sim.S))} y con el lanzamiento te llevás {ars(sim.ejercido)} —
+                        una diferencia de <b style={{ color: C.cat.amber }}>{ars(sim.acciones * sim.K * 0.15)}</b> que
+                        regalaste. Esa es la contra, y es la misma que te pasó esta semana con MU.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 function MapaPosicionesModule() {
   const [tab, setTab] = useState("futuros");
