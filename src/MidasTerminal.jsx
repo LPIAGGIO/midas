@@ -3955,6 +3955,27 @@ const _tickerFromInstrumento = (instr) => {
   const m = (instr || "").match(/\(([^)]+)\)\s*$/);
   return m ? m[1].trim().replace(/\//g, "").toUpperCase() : null;
 };
+/* Prefijo de 3 letras del código de opción → ticker del subyacente. BYMA arma
+ * el símbolo como PREFIJO + C|V + base + mes (GFGC7400AG = Galicia, Call,
+ * base 7400, agosto). Vive acá arriba —y no junto al módulo de Opciones— para
+ * que el importador de CSV pueda clasificar antes de que exista el módulo. */
+const OPT_SUBY = {
+  GFG: "GGAL", COM: "COME", YPF: "YPFD", PAM: "PAMP", ALU: "ALUA",
+  MET: "METR", TXA: "TXAR", BHI: "BHIP", BYM: "BYMA", TGS: "TGSU2",
+  TEC: "TECO2", BBA: "BBAR", BMA: "BMA", CEC: "CECO2", CRE: "CRES",
+  EDN: "EDN", LOM: "LOMA", SUP: "SUPV", TRA: "TRAN", VAL: "VALO",
+  CVH: "CVH", AGR: "AGRO", MIR: "MIRG", CAP: "CAPX", HAR: "HARG",
+  IRS: "IRSA", PES: "PESA", AUS: "AUSO", CAR: "CARC", DGC: "DGCU2",
+};
+
+/** ¿El símbolo es una opción de BYMA? Se exige que el prefijo sea uno conocido
+ *  para no confundir un ticker cualquiera que empiece con letras y siga con
+ *  números (por ejemplo un bono). */
+function esTickerOpcion(t) {
+  const m = /^([A-Z]{3})([CV])(\d+)([A-Z]{2})$/.exec(String(t || "").trim().toUpperCase());
+  return Boolean(m && OPT_SUBY[m[1]]);
+}
+
 const _categoriaMov = (tipo, instr) => {
   const t = (tipo || "").toLowerCase();
   if (/caucion/.test(t)) return "caucion";
@@ -4547,7 +4568,13 @@ function deriveFromLedger(movs) {
     }
     if (!["trade_cedear", "trade_bono", "trade_otro", "futuro"].includes(cat) || !m.ticker) continue;
     let type, cur = "ARS", ticker = m.ticker;
-    if (cat === "trade_cedear") type = "cedear";
+    // El SÍMBOLO manda sobre la descripción. `_categoriaMov` clasifica leyendo
+    // el texto del instrumento, y con las opciones se equivoca: el lanzamiento
+    // GFGC7400AG del 13/08/2026 entró como `bond_ars` y el Portfolio intentaba
+    // valuarlo con lógica de renta fija. El patrón del símbolo (3 letras +
+    // C|V + base + mes) no es ambiguo, así que se chequea primero.
+    if (esTickerOpcion(m.ticker)) type = "option";
+    else if (cat === "trade_cedear") type = "cedear";
     else if (cat === "trade_otro") type = "stock";
     else if (cat === "futuro") type = "future";
     else type = "bond_ars";
@@ -5844,11 +5871,17 @@ const INSTRUMENT_TYPES = {
   },
   option: {
     label: "Opción",
-    description: "Calls / Puts sobre acciones, índices, futuros",
+    description: "Calls / Puts sobre acciones (GFGC7400AG = Galicia, call, base 7400, agosto)",
     icon: Spline,
     color: "rose",
-    quantityLabel: "Cantidad",
-    priceLabel: "Precio",
+    // Las etiquetas dicen la unidad porque es la trampa mas cara de este
+    // instrumento: el 13/08/2026 un ticket cargado con 300 en vez de 3 iba a
+    // lanzar sobre 30.000 acciones teniendo 400. La cantidad va en CONTRATOS
+    // y el precio es la prima POR ACCION; la valuacion multiplica por 100.
+    quantityLabel: "Contratos",
+    quantityHint: "1 contrato = 100 acciones. Ej. 3",
+    priceLabel: "Prima por acción",
+    priceHint: "Ej. 148,10 → 3 contratos = $44.430",
     defaultCurrency: "ARS",
     integerQuantity: true,
     extraFields: ["strike", "expiry", "option_type"],
@@ -8492,15 +8525,23 @@ function useStockPrices() {
         // CEDEARs al TEÓRICO = USD × CCL ÷ ratio (source "teorico"). En rueda,
         // manda el operado local como siempre.
         const bymaOpen = isTradingDayAndMarketOpened();
-        const [stocksRes, cedearsRes, usaRes, dolRes] = await Promise.all([
+        // Las OPCIONES viajan en este mismo hook a propósito. Podrían tener el
+        // suyo, pero `useStockPrices` ya está llamado en diez lugares y
+        // `resolvePositionPrice` recibe su mapa: sumar las series acá hace que
+        // las opciones se valúen en toda la app sin enhebrar un parámetro
+        // nuevo por cada call site. Los símbolos no colisionan (GFGC7400AG no
+        // se parece a ningún ticker de acción).
+        const [stocksRes, cedearsRes, opcionesRes, usaRes, dolRes] = await Promise.all([
           fetch(`/api/data912?type=acciones&_=${Date.now()}`),
           fetch(`/api/data912?type=cedears&_=${Date.now()}`),
+          fetch(`/api/data912?type=opciones&_=${Date.now()}`).catch(() => null),
           bymaOpen ? Promise.resolve(null) : fetch(`/api/data912?type=usa&_=${Date.now()}`).catch(() => null),
           bymaOpen ? Promise.resolve(null) : fetch(`/api/dolares`).catch(() => null),
         ]);
 
         const stocksArr = stocksRes.ok ? await stocksRes.json() : [];
         const cedearsArr = cedearsRes.ok ? await cedearsRes.json() : [];
+        const opcionesArr = opcionesRes?.ok ? await opcionesRes.json().catch(() => []) : [];
         let usdMap = null, ccl = null;
         if (!bymaOpen && usaRes?.ok && dolRes?.ok) {
           try {
@@ -8562,6 +8603,7 @@ function useStockPrices() {
 
         for (const item of stocksArr) parseItem(item);
         for (const item of cedearsArr) parseItem(item);
+        for (const item of opcionesArr) parseItem(item);
 
         // Override teórico fuera de rueda (solo CEDEARs con ratio conocido y
         // subyacente en el feed USA). Guard ±12% vs el último local: si el
@@ -8594,7 +8636,7 @@ function useStockPrices() {
 
         console.info(
           `[useStockPrices] ${Object.keys(map).length} tickers cargados ` +
-          `(stocks: ${stocksArr.length}, cedears: ${cedearsArr.length})`
+          `(stocks: ${stocksArr.length}, cedears: ${cedearsArr.length}, opciones: ${opcionesArr.length})`
         );
       } catch (e) {
         if (!mounted) return;
@@ -12234,11 +12276,18 @@ function resolvePositionPrice(p, bondPrices, futurePrices, stockPrices, fciPrice
   if (
     stockPrices &&
     ticker &&
-    (p.instrument_type === "stock" || p.instrument_type === "cedear")
+    (p.instrument_type === "stock" || p.instrument_type === "cedear" ||
+     // Las opciones viven en el MISMO mapa (useStockPrices las carga junto a
+     // acciones y CEDEARs). El multiplicador de contrato ×100 no va acá: lo
+     // aplica positionNotional, que es donde corresponde — este resolver
+     // devuelve la PRIMA por acción, igual que el feed.
+     p.instrument_type === "option")
   ) {
     let m = stockPrices[ticker];
-    if (!m?.price) {
-      // Intentar base sin sufijo D/C (variante MEP/CCL → ARS base)
+    if (!m?.price && p.instrument_type !== "option") {
+      // Intentar base sin sufijo D/C (variante MEP/CCL → ARS base). No aplica
+      // a opciones: ahí la última letra es el mes de vencimiento, y recortarla
+      // devolvería otra serie.
       const last = ticker.slice(-1);
       if ((last === "D" || last === "C") && ticker.length > 2) {
         const base = ticker.slice(0, -1);
@@ -41871,18 +41920,10 @@ function DecisionLogModule() {
  * del spread y no es replicable sin cotizar en firme todo el día.
  */
 
-// Prefijo de 3 letras del código de opción → ticker del subyacente en
-// arg_stocks. BYMA arma el símbolo como PREFIJO + C|V + base + mes.
-const OPT_SUBY = {
-  GFG: "GGAL", COM: "COME", YPF: "YPFD", PAM: "PAMP", ALU: "ALUA",
-  MET: "METR", TXA: "TXAR", BHI: "BHIP", BYM: "BYMA", TGS: "TGSU2",
-  TEC: "TECO2", BBA: "BBAR", BMA: "BMA", CEC: "CECO2", CRE: "CRES",
-  EDN: "EDN", LOM: "LOMA", SUP: "SUPV", TRA: "TRAN", VAL: "VALO",
-  CVH: "CVH", AGR: "AGRO", MIR: "MIRG", CAP: "CAPX", HAR: "HARG",
-  IRS: "IRSA", PES: "PESA", AUS: "AUSO", CAR: "CARC", DGC: "DGCU2",
-};
+// OPT_SUBY (prefijo → subyacente) se define arriba de todo, junto a
+// esTickerOpcion: el importador de CSV lo necesita mucho antes que este módulo.
 
-const OPT_MES = { EN: 0, FE: 1, MZ: 2, AB: 3, MY: 4, JN: 5, JU: 5, JL: 6, AG: 7, SE: 8, OC: 9, NO: 10, DI: 11 };
+const OPT_MES ={ EN: 0, FE: 1, MZ: 2, AB: 3, MY: 4, JN: 5, JU: 5, JL: 6, AG: 7, SE: 8, OC: 9, NO: 10, DI: 11 };
 const OPT_MES_NOMBRE = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
 // Las opciones de acciones en BYMA vencen el TERCER VIERNES del mes.
