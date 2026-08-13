@@ -28792,12 +28792,12 @@ function FundamentalsModule() {
               FCF yield, PEG, earnings yield— se despliega al hacer clic en la
               fila. El detalle desplegado además explica los avisos con texto
               entero, que en tooltip no se leen nunca en pantalla táctil. */}
-          <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", fontSize: 12 }}>
+          <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", fontSize: 12 }}>
             <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left", background: "rgba(255,255,255,0.02)", whiteSpace: "nowrap" }}>
               <th style={{ padding: "7px 9px", fontWeight: 600 }}>#</th>
               <Th k="ticker" label="Ticker" />
               <th style={{ padding: "7px 9px", fontWeight: 600 }}>Tema / Sector</th>
-              <th title="Cotiza como CEDEAR en BYMA: lo podés operar en pesos" style={{ padding: "7px 9px", fontWeight: 600 }}>CE</th>
+              <th title="Cotiza como CEDEAR en BYMA: lo podés operar en pesos" style={{ padding: "7px 9px", fontWeight: 600 }}>CEDEAR</th>
               <Th k="total" label="Score" right tip="Índice compuesto 50/50 entre Calidad y Valuación. Percentil DENTRO de esta lista, no una nota absoluta." />
               <Th k="calidad" label="Cal" right tip="Calidad: percentil de márgenes, ROE, crecimiento y generación de caja dentro de esta lista." />
               <Th k="valuacion" label="Val" right tip="Valuación: percentil de P/E, P/S y EV/EBITDA dentro de esta lista. Más alto = más barato respecto del grupo." />
@@ -28808,6 +28808,12 @@ function FundamentalsModule() {
               <Th k="mcap" label="Cap" right tip="Capitalización de mercado en dólares." />
               <th title="Banderas de contexto que el múltiplo solo no muestra. Abrí la fila para el detalle."
                 style={{ padding: "7px 9px", fontWeight: 600, color: C.dim, whiteSpace: "nowrap" }}>Aviso</th>
+              {/* Columna sin título a propósito: la pastilla "detalle ▾" de cada
+                  fila ES el cartel. La primera versión solo tenía un chevron
+                  gris chiquito al lado del número y Pablo no se dio cuenta de
+                  que las filas se abrían — un ícono tenue no alcanza como
+                  invitación, hace falta la palabra. */}
+              <th style={{ padding: "7px 9px" }} />
             </tr></thead>
             <tbody>
               {sorted.map((r) => {
@@ -28843,7 +28849,7 @@ function FundamentalsModule() {
                       style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer", background: open ? C.accentSoft : "transparent" }}
                     >
                       <td style={{ ...td, color: C.dim, whiteSpace: "nowrap" }}>
-                        <span style={{ fontSize: 9, marginRight: 4 }}>{open ? "▾" : "▸"}</span>
+                        <span style={{ fontSize: 10, marginRight: 5, color: open ? C.accent : C.muted }}>{open ? "▾" : "▸"}</span>
                         {rankByTotal.get(r.ticker)}
                       </td>
                       <td style={{ ...td, color: C.text, fontWeight: 600 }}>{r.ticker}</td>
@@ -28865,10 +28871,22 @@ function FundamentalsModule() {
                           </span>
                         ))}
                       </td>
+                      <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                        <span
+                          style={{
+                            display: "inline-block", padding: "2px 8px", borderRadius: 5, fontSize: 10, fontWeight: 600,
+                            color: open ? C.accent : C.muted,
+                            border: `1px solid ${open ? C.accent : C.border}`,
+                            background: open ? C.accentSoft : "transparent",
+                          }}
+                        >
+                          {open ? "cerrar ▴" : "detalle ▾"}
+                        </span>
+                      </td>
                     </tr>
                     {open && (
                       <tr style={{ borderBottom: `1px solid ${C.border}`, background: C.deep }}>
-                        <td colSpan={13} style={{ padding: "14px 16px" }}>
+                        <td colSpan={14} style={{ padding: "14px 16px" }}>
                           {avisos.length > 0 && (
                             <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", gap: 7 }}>
                               {avisos.map((a) => (
@@ -28911,7 +28929,7 @@ function FundamentalsModule() {
       )}
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.55, maxWidth: 900 }}>
-        <strong style={{ color: C.muted }}>Clic en una fila</strong> para ver EV/EBITDA, PEG, earnings yield, ROE, FCF yield, D/E y la explicación de los avisos. Clic en un encabezado para reordenar (pasá el mouse por encima para el nombre completo de cada columna). El Score rankea <strong>relativo a esta lista</strong>: un 90 no significa "barato en absoluto", significa "de los mejores de este grupo en calidad+precio". P/E y EV/EBITDA negativos (empresa en pérdida) se castigan en el índice. Datos del subyacente en USD; los CEDEARs replican esto con un ratio de conversión. No es recomendación de inversión.
+        <strong style={{ color: C.muted }}>Clic en una fila (o en su botón «detalle ▾»)</strong> para ver EV/EBITDA, PEG, earnings yield, ROE, FCF yield, D/E y la explicación de los avisos. Clic en un encabezado para reordenar (pasá el mouse por encima para el nombre completo de cada columna). El Score rankea <strong>relativo a esta lista</strong>: un 90 no significa "barato en absoluto", significa "de los mejores de este grupo en calidad+precio". P/E y EV/EBITDA negativos (empresa en pérdida) se castigan en el índice. Datos del subyacente en USD; los CEDEARs replican esto con un ratio de conversión. No es recomendación de inversión.
       </p>
     </div>
   );
