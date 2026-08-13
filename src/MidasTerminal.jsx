@@ -28513,6 +28513,7 @@ function FundamentalsModule() {
   const [showGlossary, setShowGlossary] = useState(false);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [source, setSource] = useState(null); // "snapshot" | "live"
+  const [fila, setFila] = useState(null);     // ticker con el detalle desplegado
 
   useEffect(() => {
     let alive = true; setData(null);
@@ -28784,81 +28785,124 @@ function FundamentalsModule() {
         <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin datos. Revisá los tickers (deben ser símbolos de acciones USA).</div>
       ) : (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflowX: "auto" }}>
-          {/* minWidth explícito: con 17 columnas, un `width:100%` a secas hace
-              que el navegador comprima las celdas hasta cortarlas en vez de
-              desbordar. Con el ancho mínimo el contenedor scrollea limpio. */}
-          <table style={{ width: "100%", minWidth: 1320, borderCollapse: "collapse", fontSize: 12 }}>
+          {/* Antes eran 17 columnas y con minWidth 1320 la tabla se cortaba en
+              cualquier pantalla que no fuera un monitor ancho. Ahora quedan las
+              12 que se miran de un vistazo, con encabezados abreviados (el
+              nombre completo va en el title), y el resto —EV/EBITDA, ROE, D/E,
+              FCF yield, PEG, earnings yield— se despliega al hacer clic en la
+              fila. El detalle desplegado además explica los avisos con texto
+              entero, que en tooltip no se leen nunca en pantalla táctil. */}
+          <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", fontSize: 12 }}>
             <thead><tr style={{ borderBottom: `1px solid ${C.border}`, color: C.dim, textAlign: "left", background: "rgba(255,255,255,0.02)", whiteSpace: "nowrap" }}>
               <th style={{ padding: "7px 9px", fontWeight: 600 }}>#</th>
               <Th k="ticker" label="Ticker" />
               <th style={{ padding: "7px 9px", fontWeight: 600 }}>Tema / Sector</th>
-              <th style={{ padding: "7px 9px", fontWeight: 600 }}>CEDEAR</th>
-              <Th k="total" label="Score" right />
-              <Th k="calidad" label="Calidad" right />
-              <Th k="valuacion" label="Valuación" right />
-              <Th k="peg" label="PEG" right asc cls="hidden md:table-cell"
-                tip="P/E dividido el crecimiento de ganancias: cuánto pagás por cada punto de crecimiento. Menos de 1 es barato para lo que crece." />
-              <Th k="earnYield" label="Earn. yield" right cls="hidden md:table-cell"
-                tip={`La inversa del P/E comparado con el bono del Tesoro a 10 años (${t10Txt}): cuánta prima te pagan por asumir riesgo de acciones.`} />
-              <th className="hidden md:table-cell" title="Banderas de contexto que el múltiplo solo no muestra: ganancias de pico de ciclo, empresas sin ganancias y apalancamiento alto."
+              <th title="Cotiza como CEDEAR en BYMA: lo podés operar en pesos" style={{ padding: "7px 9px", fontWeight: 600 }}>CE</th>
+              <Th k="total" label="Score" right tip="Índice compuesto 50/50 entre Calidad y Valuación. Percentil DENTRO de esta lista, no una nota absoluta." />
+              <Th k="calidad" label="Cal" right tip="Calidad: percentil de márgenes, ROE, crecimiento y generación de caja dentro de esta lista." />
+              <Th k="valuacion" label="Val" right tip="Valuación: percentil de P/E, P/S y EV/EBITDA dentro de esta lista. Más alto = más barato respecto del grupo." />
+              <Th k="fwdPE" label="P/E" right tip="P/E forward: precio dividido la ganancia esperada de los próximos 12 meses." />
+              <Th k="ps" label="P/S" right tip="Precio dividido ventas. Útil cuando todavía no hay ganancias — un P/S de tres dígitos avisa que casi no hay facturación." />
+              <Th k="netMrg" label="Mrg" right tip="Margen neto: qué porcentaje de cada dólar vendido queda como ganancia." />
+              <Th k="revGrw" label="Crec" right tip="Crecimiento de ingresos interanual." />
+              <Th k="mcap" label="Cap" right tip="Capitalización de mercado en dólares." />
+              <th title="Banderas de contexto que el múltiplo solo no muestra. Abrí la fila para el detalle."
                 style={{ padding: "7px 9px", fontWeight: 600, color: C.dim, whiteSpace: "nowrap" }}>Aviso</th>
-              <Th k="fwdPE" label="P/E fwd" right />
-              <Th k="ps" label="P/S" right />
-              <Th k="evEbitda" label="EV/EBITDA" right />
-              <Th k="netMrg" label="Mrg neto" right />
-              <Th k="revGrw" label="Crec." right />
-              <Th k="roe" label="ROE" right />
-              <Th k="de" label="D/E" right />
-              <Th k="fcfY" label="FCF yield" right />
-              <Th k="mcap" label="Cap." right />
-              <Th k="mcapRank" label="Rank Cap." right asc />
             </tr></thead>
             <tbody>
               {sorted.map((r) => {
                 const hasCedear = cedearSet ? cedearSet.has(r.ticker) : null;
                 const avisos = fundAvisos(r);
+                const open = fila === r.ticker;
+                const detalle = [
+                  { g: "Valuación", k: "EV/EBITDA", v: r.evEbitda != null && r.evEbitda < 0 ? "neg" : fR(r.evEbitda),
+                    c: r.evEbitda != null && r.evEbitda < 0 ? "#f87171" : C.text,
+                    d: "Valor de empresa (capitalización + deuda − caja) sobre EBITDA. Valúa el negocio sin importar cómo se financia." },
+                  { g: "Valuación", k: "PEG", v: r.pegNS ? "n/s" : fCom(r.peg, 2), c: r.pegNS ? C.muted : pegColor(r.peg),
+                    d: r.pegNS
+                      ? "Crecimiento arriba del 100%: el PEG pierde sentido — daría casi cero y parecería regalado justo en el pico del ciclo."
+                      : "P/E sobre crecimiento de ganancias: cuánto pagás por cada punto de crecimiento. Menos de 1 es barato para lo que crece." },
+                  { g: "Valuación", k: "Earnings yield", c: C.text,
+                    v: r.earnYield == null || r.prima == null ? "—" : `${fCom(r.earnYield, 1)}%  ${r.prima >= 0 ? "+" : "−"}${fCom(Math.abs(r.prima), 1)} pts`,
+                    d: `La inversa del P/E, y al lado la prima sobre el bono del Tesoro a 10 años (${t10Txt}). Prima negativa = te pagan menos que el bono sin riesgo.` },
+                  { g: "Calidad", k: "ROE", v: fP(r.roe), c: r.roe != null && r.roe < 0 ? "#f87171" : C.text,
+                    d: "Retorno sobre el patrimonio: cuánto gana la empresa por cada peso de capital propio." },
+                  { g: "Calidad", k: "FCF yield", v: fP(r.fcfY, 1), c: r.fcfY != null && r.fcfY < 0 ? "#f87171" : C.text,
+                    d: "Flujo de caja libre sobre capitalización. Negativo = la empresa quema plata y depende de financiarse afuera." },
+                  { g: "Balance", k: "D/E", v: fDE(r.de), c: r.de != null && r.de >= 200 ? "#f87171" : C.text,
+                    d: "Deuda sobre patrimonio, en porcentaje. Arriba de 200% el apalancamiento amplifica tanto la ganancia como el golpe." },
+                  { g: "Balance", k: "Rank por tamaño", v: r.mcapRank ? `#${r.mcapRank}` : "—", c: C.text,
+                    d: "Puesto por capitalización dentro de esta lista." },
+                  { g: "Balance", k: "Sector Yahoo", v: r.sector || "—", c: C.text,
+                    d: r.industry ? `Industria: ${r.industry}` : "Sector que reporta Yahoo, sin curar." },
+                ];
                 return (
-                  <tr key={r.ticker} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <td style={{ ...td, color: C.dim }}>{rankByTotal.get(r.ticker)}</td>
-                    <td style={{ ...td, color: C.text, fontWeight: 600 }}>{r.ticker}</td>
-                    <td style={{ ...td, color: C.muted, whiteSpace: "nowrap" }}>{FUND_THEME[r.ticker] || r.sector || "—"}</td>
-                    <td style={td}>{hasCedear == null ? "" : hasCedear ? <span style={{ color: "#34d399", fontWeight: 700 }}>✓</span> : <span style={{ color: C.dim }}>—</span>}</td>
-                    <td style={{ ...td, textAlign: "right", fontWeight: 700, color: scColor(r.total) }}>{r.total.toFixed(0)}</td>
-                    <td style={{ ...td, textAlign: "right", color: scColor(r.calidad) }}>{r.calidad.toFixed(0)}</td>
-                    <td style={{ ...td, textAlign: "right", color: scColor(r.valuacion) }}>{r.valuacion.toFixed(0)}</td>
-                    <td className="hidden md:table-cell" style={{ ...td, textAlign: "right", color: r.pegNS ? C.muted : pegColor(r.peg), fontWeight: r.peg != null ? 600 : 400 }}
-                        title={r.pegNS ? "Crecimiento arriba del 100%: el PEG pierde sentido (daría casi cero y parecería regalado justo en el pico del ciclo)." : undefined}>
-                      {r.pegNS ? "n/s" : fCom(r.peg, 2)}
-                    </td>
-                    <td className="hidden md:table-cell" style={{ ...td, textAlign: "right", color: C.muted }}>
-                      {r.earnYield == null || r.prima == null ? "—" : (
-                        <>
-                          {fCom(r.earnYield, 1)}%
-                          <span style={{ fontSize: 10, marginLeft: 5, color: primaColor(r.prima) }}>
-                            {r.prima >= 0 ? "+" : "−"}{fCom(Math.abs(r.prima), 1)} pts
+                  <Fragment key={r.ticker}>
+                    <tr
+                      onClick={() => setFila(open ? null : r.ticker)}
+                      style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer", background: open ? C.accentSoft : "transparent" }}
+                    >
+                      <td style={{ ...td, color: C.dim, whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 9, marginRight: 4 }}>{open ? "▾" : "▸"}</span>
+                        {rankByTotal.get(r.ticker)}
+                      </td>
+                      <td style={{ ...td, color: C.text, fontWeight: 600 }}>{r.ticker}</td>
+                      <td style={{ ...td, color: C.muted, whiteSpace: "nowrap" }}>{FUND_THEME[r.ticker] || r.sector || "—"}</td>
+                      <td style={td}>{hasCedear == null ? "" : hasCedear ? <span style={{ color: "#34d399", fontWeight: 700 }}>✓</span> : <span style={{ color: C.dim }}>—</span>}</td>
+                      <td style={{ ...td, textAlign: "right", fontWeight: 700, color: scColor(r.total) }}>{r.total.toFixed(0)}</td>
+                      <td style={{ ...td, textAlign: "right", color: scColor(r.calidad) }}>{r.calidad.toFixed(0)}</td>
+                      <td style={{ ...td, textAlign: "right", color: scColor(r.valuacion) }}>{r.valuacion.toFixed(0)}</td>
+                      <td style={{ ...td, textAlign: "right", color: r.fwdPE != null && r.fwdPE < 0 ? "#f87171" : C.muted }}>{r.fwdPE != null && r.fwdPE < 0 ? "neg" : fR(r.fwdPE)}</td>
+                      <td style={{ ...td, textAlign: "right", color: C.muted }}>{fR(r.ps)}</td>
+                      <td style={{ ...td, textAlign: "right", color: r.netMrg != null && r.netMrg < 0 ? "#f87171" : C.muted }}>{fP(r.netMrg)}</td>
+                      <td style={{ ...td, textAlign: "right", color: r.revGrw != null && r.revGrw < 0 ? "#f87171" : "#34d399" }}>{fP(r.revGrw)}</td>
+                      <td style={{ ...td, textAlign: "right", color: C.muted }}>{fBig(r.mcap)}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>
+                        {avisos.map((a) => (
+                          <span key={a.k}
+                            style={{ display: "inline-block", marginRight: 4, padding: "1px 5px", borderRadius: 4, fontSize: 9.5, fontWeight: 600, color: a.color, border: `1px solid ${a.color}`, opacity: a.k === "sin" ? 0.7 : 1 }}>
+                            {a.k === "pico" ? "pico" : a.k === "sin" ? "s/gan" : "deuda"}
                           </span>
-                        </>
-                      )}
-                    </td>
-                    <td className="hidden md:table-cell" style={{ ...td, whiteSpace: "nowrap" }}>
-                      {avisos.map((a) => (
-                        <span key={a.k} title={a.tip}
-                          style={{ display: "inline-block", marginRight: 4, padding: "1px 6px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "help", color: a.color, border: `1px solid ${a.color}`, opacity: a.k === "sin" ? 0.75 : 1 }}>
-                          {a.label}
-                        </span>
-                      ))}
-                    </td>
-                    <td style={{ ...td, textAlign: "right", color: r.fwdPE != null && r.fwdPE < 0 ? "#f87171" : C.muted }}>{r.fwdPE != null && r.fwdPE < 0 ? "neg" : fR(r.fwdPE)}</td>
-                    <td style={{ ...td, textAlign: "right", color: C.muted }}>{fR(r.ps)}</td>
-                    <td style={{ ...td, textAlign: "right", color: r.evEbitda != null && r.evEbitda < 0 ? "#f87171" : C.muted }}>{r.evEbitda != null && r.evEbitda < 0 ? "neg" : fR(r.evEbitda)}</td>
-                    <td style={{ ...td, textAlign: "right", color: r.netMrg != null && r.netMrg < 0 ? "#f87171" : C.muted }}>{fP(r.netMrg)}</td>
-                    <td style={{ ...td, textAlign: "right", color: r.revGrw != null && r.revGrw < 0 ? "#f87171" : "#34d399" }}>{fP(r.revGrw)}</td>
-                    <td style={{ ...td, textAlign: "right", color: r.roe != null && r.roe < 0 ? "#f87171" : C.muted }}>{fP(r.roe)}</td>
-                    <td style={{ ...td, textAlign: "right", color: r.de != null && r.de >= 200 ? "#f87171" : C.muted }}>{fDE(r.de)}</td>
-                    <td style={{ ...td, textAlign: "right", color: r.fcfY != null && r.fcfY < 0 ? "#f87171" : C.muted }}>{fP(r.fcfY, 1)}</td>
-                    <td style={{ ...td, textAlign: "right", color: C.muted }}>{fBig(r.mcap)}</td>
-                    <td style={{ ...td, textAlign: "right", color: C.dim }}>{r.mcapRank ? `#${r.mcapRank}` : "—"}</td>
-                  </tr>
+                        ))}
+                      </td>
+                    </tr>
+                    {open && (
+                      <tr style={{ borderBottom: `1px solid ${C.border}`, background: C.deep }}>
+                        <td colSpan={13} style={{ padding: "14px 16px" }}>
+                          {avisos.length > 0 && (
+                            <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", gap: 7 }}>
+                              {avisos.map((a) => (
+                                <div key={a.k} className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+                                  <AlertTriangle size={12} color={a.color} strokeWidth={1.8} style={{ marginTop: 2, flexShrink: 0 }} />
+                                  <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+                                    <b style={{ color: a.color }}>{a.label}</b> — {a.tip}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12 }}>
+                            {["Valuación", "Calidad", "Balance"].map((grupo) => (
+                              <div key={grupo}>
+                                <div style={{ fontSize: 9.5, color: C.dim, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 600, marginBottom: 7 }}>
+                                  {grupo}
+                                </div>
+                                {detalle.filter((x) => x.g === grupo).map((x) => (
+                                  <div key={x.k} style={{ marginBottom: 9 }}>
+                                    <div className="flex items-baseline justify-between" style={{ gap: 10 }}>
+                                      <span style={{ fontSize: 11.5, color: C.muted }}>{x.k}</span>
+                                      <span className="eco-mono" style={{ fontSize: 12.5, fontWeight: 600, color: x.c }}>{x.v}</span>
+                                    </div>
+                                    <div style={{ fontSize: 10.5, color: C.dim, lineHeight: 1.45, marginTop: 2 }}>{x.d}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -28867,7 +28911,7 @@ function FundamentalsModule() {
       )}
 
       <p style={{ fontSize: 11, color: C.dim, margin: "12px 2px 0", lineHeight: 1.55, maxWidth: 900 }}>
-        Clic en cualquier columna para reordenar. El Score rankea <strong>relativo a esta lista</strong>: un 90 no significa "barato en absoluto", significa "de los mejores de este grupo en calidad+precio". P/E y EV/EBITDA negativos (empresa en pérdida) se castigan en el índice. Datos del subyacente en USD; los CEDEARs replican esto con un ratio de conversión. No es recomendación de inversión.
+        <strong style={{ color: C.muted }}>Clic en una fila</strong> para ver EV/EBITDA, PEG, earnings yield, ROE, FCF yield, D/E y la explicación de los avisos. Clic en un encabezado para reordenar (pasá el mouse por encima para el nombre completo de cada columna). El Score rankea <strong>relativo a esta lista</strong>: un 90 no significa "barato en absoluto", significa "de los mejores de este grupo en calidad+precio". P/E y EV/EBITDA negativos (empresa en pérdida) se castigan en el índice. Datos del subyacente en USD; los CEDEARs replican esto con un ratio de conversión. No es recomendación de inversión.
       </p>
     </div>
   );
