@@ -37,6 +37,14 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 const FUND_UNIVERSE =
   "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,AMD,NFLX,AVGO,KO,MELI,JPM,V,MA,WMT,JNJ,PG,XOM,DIS,COIN,PLTR,MSTR,QCOM,MU,INTC,ORCL,CRM,NKE,BA,CRWV,IREN,SNDK,SPCX";
 
+// Espejo de FUND_SEGUIMIENTOS: small caps en observación (sin plata puesta).
+// Corren en la misma pasada para que acumulen historia en fundamentals_history
+// desde el dia 1 — sin eso, dentro de tres meses no se puede contestar si una
+// se abarató contra SI MISMA, que es la unica vara que sirve para papeles asi.
+// El front las separa en su propia lista; acá van juntas porque el upsert es
+// por ticker y no se pisan.
+const FUND_SEGUIMIENTOS = "AMPG,SHAZ,OUST,CCXI,WYFI,WULF,POET,ONDS,OPTX";
+
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const MODULES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile,calendarEvents";
 const log = (...a) => console.log(`[${new Date().toISOString()}]`, ...a);
@@ -99,8 +107,10 @@ async function fetchUs10y() {
 
 async function main() {
   log("fundamentals-snapshot arrancando");
-  const tickers = String(process.env.TICKERS || FUND_UNIVERSE)
-    .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+  const tickers = [...new Set(
+    String(process.env.TICKERS || `${FUND_UNIVERSE},${FUND_SEGUIMIENTOS}`)
+      .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
+  )];
 
   const auth = await getAuth();
   const rows = [], errors = [];

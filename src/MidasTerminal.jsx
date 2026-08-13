@@ -28436,6 +28436,23 @@ function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {
 // ═══════════════════════════════════════════════════════════════════════
 const FUND_UNIVERSE = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,AMD,NFLX,AVGO,KO,MELI,JPM,V,MA,WMT,JNJ,PG,XOM,DIS,COIN,PLTR,MSTR,QCOM,MU,INTC,ORCL,CRM,NKE,BA,CRWV,IREN,SNDK,SPCX";
 
+/* Segunda lista: small caps en observación, sin plata puesta. Entraron el
+ * 13/08/2026 desde la cartera que publicó Matias Scalbi. Van APARTE del
+ * universo principal a propósito — mezclarlas ahí ensuciaría el ranking,
+ * porque son papeles de otra naturaleza: ocho de las nueve pierden plata y
+ * cotizan a múltiplos de ventas que no se pueden comparar con AAPL o KO.
+ *
+ * Se siguen para VER, no para comprar. El aviso de la pantalla explica por
+ * qué: las nueve son la misma apuesta (capex de IA) con distinto disfraz, y
+ * el riesgo real de la lista es de concentración, no de selección — que es
+ * justo el error que la medición de alpha de LP dejó documentado. */
+const FUND_SEGUIMIENTOS = "AMPG,SHAZ,OUST,CCXI,WYFI,WULF,POET,ONDS,OPTX";
+
+const FUND_LISTAS = [
+  { id: "universo", label: "Universo", tickers: FUND_UNIVERSE },
+  { id: "seguimientos", label: "Seguimientos", tickers: FUND_SEGUIMIENTOS },
+];
+
 // Tema/exposición editorial (qué mueve a cada nombre). Cae al sector de Yahoo
 // para tickers fuera de esta lista.
 const FUND_THEME = {
@@ -28449,6 +28466,11 @@ const FUND_THEME = {
   KO: "Consumo", PG: "Consumo", WMT: "Retail", NKE: "Consumo",
   JNJ: "Salud", JPM: "Bancos", V: "Pagos", MA: "Pagos",
   XOM: "Petróleo · Energía", BE: "Energía · Fuel cells", BA: "Aeroespacial", SPCX: "Aeroespacial · Espacio",
+  // Seguimientos. El tema está escrito para que se vea el solapamiento: seis
+  // de los nueve dicen "IA · Datacenters" o su cadena de suministro.
+  SHAZ: "IA · Cloud GPU", WYFI: "IA · Datacenters", WULF: "IA · Datacenters",
+  POET: "IA · Óptica", OPTX: "IA · Óptica", AMPG: "RF · Defensa",
+  OUST: "Lidar · Robótica", ONDS: "Drones · Defensa", CCXI: "SPAC · Robótica",
 };
 
 // ¿El negocio es CÍCLICO? "Technology" no alcanza como sector: lo que importa
@@ -28494,20 +28516,30 @@ function FundamentalsModule() {
 
   useEffect(() => {
     let alive = true; setData(null);
-    const isDefault = tickers === FUND_UNIVERSE;
+    // El snapshot guarda TODOS los tickers que corre el worker en una sola
+    // tabla, así que hay que filtrar por la lista activa: sin esto,
+    // "Seguimientos" mostraría también las 34 del universo principal.
+    const listaActiva = FUND_LISTAS.find((l) => l.tickers === tickers);
     const forceLive = refreshTick > 0; // el botón ↻ Actualizar fuerza Yahoo en vivo
     const goLive = () =>
       fetch(`/api/fundamentals?tickers=${encodeURIComponent(tickers)}${refreshTick ? `&_=${refreshTick}` : ""}`)
         .then((r) => r.json()).then((j) => { if (alive) { setData(j.data || []); setFetchedAt(new Date()); setSource("live"); } })
         .catch(() => { if (alive) setData([]); });
-    // Universo por defecto: leo el snapshot semanal (worker fundamentals-snapshot),
+    // Listas conocidas: leo el snapshot diario (worker fundamentals-snapshot),
     // rápido y sin depender de que Yahoo responda. Tickers custom o ↻ → en vivo.
-    if (isDefault && !forceLive) {
-      supabase.from("fundamentals_snapshot").select("data,fetched_at").order("fetched_at", { ascending: false })
+    if (listaActiva && !forceLive) {
+      const quiero = new Set(listaActiva.tickers.split(",").map((s) => s.trim().toUpperCase()));
+      supabase.from("fundamentals_snapshot").select("ticker,data,fetched_at").order("fetched_at", { ascending: false })
         .then(({ data: snap }) => {
           if (!alive) return;
-          if (snap && snap.length) { setData(snap.map((s) => s.data)); setFetchedAt(new Date(snap[0].fetched_at)); setSource("snapshot"); }
-          else goLive();
+          const filas = (snap || []).filter((s) => quiero.has(String(s.ticker || "").toUpperCase()));
+          // Si el worker todavía no corrió con la lista nueva, el snapshot
+          // viene incompleto: mejor pedir en vivo que mostrar media tabla.
+          if (filas.length >= quiero.size) {
+            setData(filas.map((s) => s.data));
+            setFetchedAt(new Date(filas[0].fetched_at));
+            setSource("snapshot");
+          } else goLive();
         });
     } else {
       goLive();
@@ -28674,6 +28706,61 @@ function FundamentalsModule() {
           </div>
         )}
       </div>
+
+      {/* Selector de listas. Van separadas y no en un solo universo porque el
+          Score es un percentil DENTRO de la lista: mezclar small caps que
+          pierden plata con AAPL rompe la vara para las dos. */}
+      <div className="flex items-center" style={{ gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+        {FUND_LISTAS.map((l) => {
+          const on = tickers === l.tickers;
+          return (
+            <button
+              key={l.id}
+              onClick={() => { setInput(l.tickers); setTickers(l.tickers); }}
+              style={{
+                padding: "5px 12px", fontSize: 12, fontWeight: on ? 700 : 500, cursor: "pointer", borderRadius: 6,
+                border: `1px solid ${on ? C.accent : C.border}`,
+                background: on ? C.accentSoft : "transparent",
+                color: on ? C.accent : C.muted,
+              }}
+            >
+              {l.label}
+              <span style={{ fontSize: 10, marginLeft: 6, color: C.dim }}>{l.tickers.split(",").length}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {tickers === FUND_SEGUIMIENTOS && (
+        <div style={{ border: `1px solid ${C.borderStrong}`, background: C.deep, borderRadius: 8, padding: "12px 14px", marginBottom: 12, display: "flex", flexDirection: "column", gap: 7 }}>
+          <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+            <AlertTriangle size={13} color={C.cat.amber} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+            <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+              <b style={{ color: C.text }}>Son nueve nombres y una sola apuesta.</b> Mirá la columna Tema: seis de los
+              nueve son capex de inteligencia artificial o su cadena de suministro. Suben y bajan con lo mismo, así que
+              comprar la lista entera <b style={{ color: C.text }}>concentra, no diversifica</b> — que es exactamente el
+              error que dejó documentado la medición de alpha: la selección salió neutra, el daño vino de la concentración.
+            </span>
+          </div>
+          <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+            <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+            <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+              <b style={{ color: C.text }}>Ocho de las nueve pierden plata</b> y el valor depende de que el backlog
+              contratado se convierta en caja recién a partir de 2027. El P/S de tres dígitos no es un múltiplo caro: es
+              el aviso de que <b style={{ color: C.text }}>casi no hay facturación todavía</b>. El Score y la Valuación de
+              esta tabla son percentiles dentro de ESTA lista — no las compares contra el Universo.
+            </span>
+          </div>
+          <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
+            <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
+            <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+              <b style={{ color: C.text }}>Lista de observación, sin plata puesta.</b> Origen: cartera publicada por
+              Matias Scalbi el 12/08/2026. De las nueve, sólo <b className="eco-mono" style={{ color: C.text }}>ONDS</b>{" "}
+              tiene CEDEAR; el resto se compra en EE.UU.
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center" style={{ gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <input value={input} onChange={(e) => setInput(e.target.value)}
