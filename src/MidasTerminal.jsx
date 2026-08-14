@@ -3985,6 +3985,22 @@ const _categoriaMov = (tipo, instr) => {
   if (/renta y amort/.test(t)) return "renta";
   if (/cambio/.test(t)) return "futuro_liq";
   if (/indice/.test(t)) return "futuro";
+  /* "Venta Prima" / "Compra Prima" son OPCIONES, y hay que atajarlas ANTES del
+   * chequeo de compra/venta (ambas contienen la palabra) o caen como acción.
+   *
+   * No se puede reconstruir la posición desde este CSV: el archivo etiqueta la
+   * operación con el ticker del SUBYACENTE —"GRUPO FINANCIERO GALICIA "B"1V
+   * (GGAL)"— y no con la serie (GFGC7400AG), así que entraría como una venta de
+   * 3 acciones de GGAL y netearía contra la tenencia real. Es exactamente lo
+   * que pasó el 14/08: la tenencia mostraba 397 en vez de 400.
+   *
+   * Tampoco alcanza mirar la descripción: la acción dice "ESCRIT. B 1 V" y la
+   * opción dice ""B"1V" — casi el mismo texto.
+   *
+   * Devolviendo "opcion" la prima entra igual a la caja (viene neta en `total`)
+   * pero la fila NO genera posición. La posición se carga desde el
+   * ReporteOperaciones, que sí trae el símbolo de la serie. */
+  if (/prima/i.test(t)) return "opcion";
   if (/compra|venta/.test(t)) {
     if (/CEDEAR/i.test(instr)) return "trade_cedear";
     if (/BONO|LETRA|LT |ON /i.test(instr)) return "trade_bono";
@@ -3996,7 +4012,11 @@ const _categoriaMov = (tipo, instr) => {
 const CAT_LABEL = {
   trade_cedear: "CEDEAR", trade_bono: "Bono", trade_otro: "Acción", futuro: "Futuro",
   futuro_liq: "Fut. cambio", fci: "FCI", caucion: "Caución", arancel: "Arancel",
-  impuesto: "Impuesto", renta: "Renta", cash: "Caja", otro: "Otro",
+  impuesto: "Impuesto", renta: "Renta", cash: "Caja",
+  // La prima entra a la caja pero NO genera posición: este CSV no trae la serie
+  // de la opción. La posición viene del ReporteOperaciones.
+  opcion: "Opción (solo caja)",
+  otro: "Otro",
 };
 
 /** Parsea el CSV movimientos_cuenta (semicolon, formato AR). Marca dup por comprobante. */
