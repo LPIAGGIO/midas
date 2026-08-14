@@ -15373,6 +15373,20 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
       // cualquier bono; consolidatePositions los unifica por bono base y matchea
       // las ventas contra la tenencia (vender AL30D teniendo AL30 = canje, no
       // short fantasma). El sufijo ya fijó instrumentType/entryCurrency arriba.
+
+      // OPCIONES: comparten el símbolo BYMA ("MERV - XMEV - GFGC7400AG - CI")
+      // y por eso caían acá como bono, con un error de escala de 10.000×: el
+      // bono divide por 100 (cotiza por 100 VN) y la opción multiplica por 100
+      // (contrato = 100 acciones). El lanzamiento del 13/08 —3 contratos a
+      // 148,101, o sea $44.430— quedaba valuado en $4,44.
+      // Va al final del bloque a propósito: pisa cualquier clasificación
+      // anterior, porque el patrón del símbolo es más confiable que el sufijo.
+      if (esTickerOpcion(ticker)) {
+        instrumentType = "option";
+        entryCurrency = "ARS";
+        kind = "Opción";
+        price = rawPrice;   // prima POR ACCIÓN, sin dividir
+      }
     }
 
     // Cauciones: el símbolo BYMA es "MERV - XMEV - PESOS - 1D" (o DOLARES) →
