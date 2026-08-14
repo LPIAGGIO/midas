@@ -38,7 +38,52 @@ const WTI_FUTURES = [
   { securityId: "rx_DUAL_WTI_JUL26", symbol: "WTI/JUL26", segment: "rx_DUAL" },
 ];
 
-const ALL_SYMBOLS = [...DLR_FUTURES, ...CAUCIONES_ARS, ...WTI_FUTURES];
+/* Futuros de ACCIONES individuales (segmento rx_DUAL, multiplicador 100 —
+ * o sea 1 contrato = 100 acciones, igual que las opciones de BYMA).
+ *
+ * POR QUE: el futuro cotiza con PREMIO sobre el contado, y ese premio es una
+ * TASA IMPLICITA — la misma cuenta que ya hacemos entre el dolar futuro y la
+ * caucion. Con la accion en cartera, vender el futuro contra ella arma un
+ * carry: te quedas la tasa sin riesgo de precio. Ademas permite comparar dos
+ * formas de monetizar el mismo papel (lanzamiento cubierto vs venta de
+ * futuro), que hasta ahora no se podia medir por falta de dato.
+ *
+ * Se eligieron los cuatro que LP opera. Existen ademas futuros de BONOS
+ * (AL30, AL30D, AL35, GD30, GD35 — multiplicador 1000) en el mismo segmento;
+ * se dejan afuera hasta que haya un uso concreto, para no inflar la
+ * suscripcion sin necesidad. */
+const ACCIONES_FUTURES = [
+  { securityId: "rx_DUAL_GGAL_AGO26", symbol: "GGAL/AGO26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_GGAL_OCT26", symbol: "GGAL/OCT26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_YPFD_AGO26", symbol: "YPFD/AGO26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_YPFD_OCT26", symbol: "YPFD/OCT26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_PAMP_AGO26", symbol: "PAMP/AGO26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_PAMP_OCT26", symbol: "PAMP/OCT26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_TXAR_AGO26", symbol: "TXAR/AGO26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_TXAR_OCT26", symbol: "TXAR/OCT26", segment: "rx_DUAL" },
+];
+
+/* Futuros de TASA. Son la vara natural contra la cual medir el premio de los
+ * futuros de accion: en vez de comparar contra la caucion spot (que es a 1
+ * dia), se compara contra el mismo plazo.
+ *   CAUC = caucion en pesos   TMR = TAMAR (plazos fijos mayoristas)
+ * El "precio" de estos contratos ES una tasa, igual que las cauciones del MAE:
+ * el tickParser ya trata ese caso, no hace falta tocarlo. */
+const TASA_FUTURES = [
+  { securityId: "rx_DUAL_CAUC_AGO26", symbol: "CAUC/AGO26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_CAUC_SEP26", symbol: "CAUC/SEP26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_CAUC_OCT26", symbol: "CAUC/OCT26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_CAUC_NOV26", symbol: "CAUC/NOV26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_TMR_AGO26", symbol: "TMR/AGO26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_TMR_SEP26", symbol: "TMR/SEP26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_TMR_OCT26", symbol: "TMR/OCT26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_TMR_NOV26", symbol: "TMR/NOV26", segment: "rx_DUAL" },
+];
+
+const ALL_SYMBOLS = [
+  ...DLR_FUTURES, ...CAUCIONES_ARS, ...WTI_FUTURES,
+  ...ACCIONES_FUTURES, ...TASA_FUTURES,
+];
 
 /**
  * Devuelve la lista de securityIds para suscribir al WS de Primary.
@@ -67,6 +112,8 @@ function buildTopics(securityIds) {
 module.exports = {
   DLR_FUTURES,
   CAUCIONES_ARS,
+  ACCIONES_FUTURES,
+  TASA_FUTURES,
   ALL_SYMBOLS,
   getSymbolsToSubscribe,
   getSymbolMeta,
