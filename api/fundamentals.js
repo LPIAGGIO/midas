@@ -73,7 +73,73 @@ async function fetchUs10y() {
   } catch { return null; }
 }
 
+/* ── Modo CONTEXTO DE MERCADO ──────────────────────────────────────────────
+ *
+ * Una foto de las variables que fijan la "temperatura" antes de operar:
+ * curva de tasas de EE.UU., estructura temporal del VIX, liderazgo entre
+ * índices y commodities. Idea tomada del checklist de @RudolphTrading
+ * (16/08/2026), adaptada.
+ *
+ * Vive colgado de /api/fundamentals y no en su propio endpoint porque el plan
+ * Hobby de Vercel topea en 12 funciones serverless y ya estamos en 12.
+ *
+ * Usa el endpoint `chart` (no exige el baile de cookie+crumb) y toma el cierre
+ * previo de las BARRAS, nunca de `meta.chartPreviousClose`: ese campo devuelve
+ * el cierre anterior al RANGO pedido, no el de ayer, y ya nos hizo leer mal una
+ * variación diaria el 13/08.
+ */
+const MERCADO_SERIES = {
+  tasas:    { m3: "^IRX", y5: "^FVX", y10: "^TNX", y30: "^TYX" },
+  vix:      { d9: "^VIX9D", d30: "^VIX", m3: "^VIX3M", m6: "^VIX6M" },
+  indices:  { sp500: "^GSPC", nasdaq: "^IXIC", russell: "^RUT" },
+  commodities: { wti: "CL=F", oro: "GC=F", cobre: "HG=F" },
+};
+
+async function serieCorta(sym) {
+  try {
+    const r = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=10d`,
+      { headers: { "User-Agent": UA } }
+    );
+    const j = await r.json();
+    const res = j?.chart?.result?.[0];
+    if (!res) return null;
+    const cierres = (res.indicators?.quote?.[0]?.close || []).filter((x) => x != null);
+    if (!cierres.length) return null;
+    const last = res.meta?.regularMarketPrice ?? cierres[cierres.length - 1];
+    // El cierre "de ayer" es la penúltima barra si la última es la de hoy.
+    const prev = cierres.length > 1 ? cierres[cierres.length - 2] : null;
+    return {
+      v: Math.round(last * 10000) / 10000,
+      prev: prev != null ? Math.round(prev * 10000) / 10000 : null,
+      chg: prev ? Math.round((last / prev - 1) * 100 * 100) / 100 : null,
+    };
+  } catch { return null; }
+}
+
+async function contextoMercado() {
+  const out = {};
+  for (const [grupo, mapa] of Object.entries(MERCADO_SERIES)) {
+    const claves = Object.keys(mapa);
+    const vals = await Promise.all(claves.map((k) => serieCorta(mapa[k])));
+    out[grupo] = {};
+    claves.forEach((k, i) => { out[grupo][k] = vals[i]; });
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
+  if (String(req.query?.mode || "") === "market") {
+    try {
+      const data = await contextoMercado();
+      // 5 min: es contexto, no precio de ejecución. No hace falta más fresco.
+      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=900");
+      return res.status(200).json({ data, fetchedAt: new Date().toISOString() });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   // Modo PRECIO liviano: ?price=SPY,QQQ,AEM → { prices: { SYM: number } }.
   // Usa el endpoint chart (no exige crumb) para traer regularMarketPrice. Sirve
   // de fallback del subyacente USD cuando data912 USA no lo tiene (ETFs, ADRs).

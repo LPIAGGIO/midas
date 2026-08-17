@@ -24285,6 +24285,191 @@ function AlertAdd({ onAdd }) {
 // catalizadores, rumbo y acción, con titulares y fuentes. Universo: papeles
 // con alertas + posiciones en cartera (lo arma la tarea, acá solo se lee).
 // ═══════════════════════════════════════════════════════════════════════
+/* ══════════════ CONTEXTO DE MERCADO ══════════════
+ *
+ * La franja de "temperatura" antes de operar: curva de tasas de EE.UU.,
+ * estructura temporal del VIX, liderazgo entre índices y commodities.
+ *
+ * ADVERTENCIA QUE VA EN LA PANTALLA, no solo acá: esta es la ÚNICA parte del
+ * proceso que no se puede medir. Todo lo demás en Midas se somete a una vara
+ * (Sharpe deflactado, alpha contra benchmark sectorial, Decision Log). Esto no
+ * genera señales falsables, así que no se puede saber si aporta. Se muestra
+ * como contexto y se lo trata como tal.
+ *
+ * LO QUE IMPORTA DE CADA BLOQUE:
+ *  - Tasas: más que el nivel, la PENDIENTE (10a − 3m) y si se empina o aplana.
+ *  - VIX: la FORMA, no el número. Contango (corto < largo) = calma; el front
+ *    subiendo más rápido que el resto es la señal temprana de estrés.
+ *  - Índices: quién lidera. Nasdaq +1% con Russell −0,2% no es lo mismo que
+ *    todos arriba juntos: dice cómo está repartido el apetito por riesgo.
+ *  - Commodities: solo si se mueven fuerte. El ruido diario no informa.
+ */
+function useContextoMercado() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let vivo = true;
+    fetch(`/api/fundamentals?mode=market&_=${Date.now()}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((j) => { if (vivo) setData(j.data); })
+      .catch((e) => { if (vivo) setError(e.message); });
+    return () => { vivo = false; };
+  }, [tick]);
+  return { data, error, refresh: () => setTick((t) => t + 1) };
+}
+
+function ContextoMercadoStrip() {
+  const { data, error, refresh } = useContextoMercado();
+  const [abierto, setAbierto] = useState(false);
+
+  const lectura = useMemo(() => {
+    if (!data) return null;
+    const t = data.tasas || {}, v = data.vix || {}, i = data.indices || {};
+    const out = {};
+
+    // Pendiente 10a − 3m. Invertida = el mercado descuenta recortes/recesión.
+    if (t.y10?.v != null && t.m3?.v != null) {
+      out.pendiente = t.y10.v - t.m3.v;
+      const prev = (t.y10.prev != null && t.m3.prev != null) ? t.y10.prev - t.m3.prev : null;
+      out.pendienteDelta = prev != null ? out.pendiente - prev : null;
+    }
+
+    // Forma del VIX. El front (9d) arriba del 30d es backwardation: estrés.
+    if (v.d9?.v != null && v.d30?.v != null && v.m3?.v != null) {
+      out.backwardation = v.d9.v > v.d30.v;
+      out.vixSpread = v.m3.v - v.d30.v;               // contango normal = positivo
+      out.frontAcelera = v.d9.chg != null && v.d30.chg != null && v.d9.chg > v.d30.chg + 5;
+    }
+
+    // Liderazgo: quién manda hoy entre los tres índices.
+    const idx = [["S&P 500", i.sp500], ["Nasdaq", i.nasdaq], ["Russell", i.russell]]
+      .filter(([, x]) => x?.chg != null).sort((a, b) => b[1].chg - a[1].chg);
+    if (idx.length >= 2) {
+      out.lider = idx[0]; out.rezagado = idx[idx.length - 1];
+      out.dispersion = idx[0][1].chg - idx[idx.length - 1][1].chg;
+    }
+    return out;
+  }, [data]);
+
+  const pct = (x, d = 2) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(d)}%`);
+  const col = (x) => (x == null ? C.dim : x >= 0 ? C.green : C.red);
+
+  const Celda = ({ label, valor, sub, color }) => (
+    <div style={{ minWidth: 76 }}>
+      <div style={{ fontSize: 9, color: C.dim, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</div>
+      <div className="eco-mono" style={{ fontSize: 13.5, fontWeight: 700, color: color || C.text, marginTop: 2 }}>{valor}</div>
+      {sub != null && <div className="eco-mono" style={{ fontSize: 9.5, color: C.dim }}>{sub}</div>}
+    </div>
+  );
+
+  if (error) return null;   // el contexto nunca debe romper la pantalla que lo aloja
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "12px 14px", marginBottom: 16 }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 10, color: C.dim, letterSpacing: "0.14em", textTransform: "uppercase", fontWeight: 600 }}>
+          Contexto de mercado
+        </span>
+        <div className="flex items-center" style={{ gap: 10 }}>
+          <button onClick={() => setAbierto((a) => !a)}
+            style={{ padding: "2px 9px", fontSize: 10, fontWeight: 600, cursor: "pointer", borderRadius: 5, border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>
+            {abierto ? "cerrar ▴" : "cómo se lee ▾"}
+          </button>
+          <button onClick={refresh}
+            style={{ padding: "2px 9px", fontSize: 10, cursor: "pointer", borderRadius: 5, border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>
+            ↻
+          </button>
+        </div>
+      </div>
+
+      {!data ? (
+        <div style={{ fontSize: 11.5, color: C.dim, padding: "6px 0" }}>Cargando contexto…</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "flex-start" }}>
+            {/* Tasas */}
+            <div className="flex" style={{ gap: 14 }}>
+              {[["3m", data.tasas?.m3], ["5a", data.tasas?.y5], ["10a", data.tasas?.y10], ["30a", data.tasas?.y30]].map(([k, x]) => (
+                <Celda key={k} label={k} valor={x?.v != null ? `${x.v.toFixed(2)}%` : "—"}
+                  sub={x?.chg != null ? pct(x.chg, 1) : null} color={C.text} />
+              ))}
+              {lectura?.pendiente != null && (
+                <Celda label="10a−3m" valor={`${lectura.pendiente >= 0 ? "+" : "−"}${Math.abs(lectura.pendiente).toFixed(2)}`}
+                  sub={lectura.pendiente < 0 ? "invertida" : lectura.pendienteDelta > 0.02 ? "empinando" : lectura.pendienteDelta < -0.02 ? "aplanando" : "estable"}
+                  color={lectura.pendiente < 0 ? C.red : C.text} />
+              )}
+            </div>
+
+            <div style={{ width: 1, alignSelf: "stretch", background: C.border }} />
+
+            {/* VIX */}
+            <div className="flex" style={{ gap: 14 }}>
+              {[["VIX 9d", data.vix?.d9], ["30d", data.vix?.d30], ["3m", data.vix?.m3], ["6m", data.vix?.m6]].map(([k, x]) => (
+                <Celda key={k} label={k} valor={x?.v != null ? x.v.toFixed(2) : "—"}
+                  sub={x?.chg != null ? pct(x.chg, 1) : null} color={C.text} />
+              ))}
+              {lectura?.backwardation != null && (
+                <Celda label="forma" valor={lectura.backwardation ? "invertida" : "normal"}
+                  sub={lectura.frontAcelera ? "front acelera" : lectura.backwardation ? "estrés" : "calma"}
+                  color={lectura.backwardation || lectura.frontAcelera ? C.red : C.green} />
+              )}
+            </div>
+
+            <div style={{ width: 1, alignSelf: "stretch", background: C.border }} />
+
+            {/* Índices */}
+            <div className="flex" style={{ gap: 14 }}>
+              {[["S&P", data.indices?.sp500], ["Nasdaq", data.indices?.nasdaq], ["Russell", data.indices?.russell]].map(([k, x]) => (
+                <Celda key={k} label={k} valor={x?.chg != null ? pct(x.chg, 2) : "—"} color={col(x?.chg)} />
+              ))}
+              {lectura?.dispersion != null && (
+                <Celda label="dispersión" valor={`${lectura.dispersion.toFixed(2)} pts`}
+                  sub={lectura.lider ? `lidera ${lectura.lider[0]}` : null}
+                  color={lectura.dispersion > 1 ? C.cat.amber : C.muted} />
+              )}
+            </div>
+
+            <div style={{ width: 1, alignSelf: "stretch", background: C.border }} />
+
+            {/* Commodities */}
+            <div className="flex" style={{ gap: 14 }}>
+              {[["WTI", data.commodities?.wti], ["Oro", data.commodities?.oro], ["Cobre", data.commodities?.cobre]].map(([k, x]) => (
+                <Celda key={k} label={k} valor={x?.v != null ? x.v.toLocaleString("es-AR", { maximumFractionDigits: 2 }) : "—"}
+                  sub={x?.chg != null ? pct(x.chg, 1) : null}
+                  color={x?.chg != null && Math.abs(x.chg) > 2 ? C.cat.amber : C.text} />
+              ))}
+            </div>
+          </div>
+
+          {abierto && (
+            <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 12, paddingTop: 10, display: "flex", flexDirection: "column", gap: 7 }}>
+              {[
+                ["Tasas", "Importa la PENDIENTE (10a − 3m) más que el nivel. Invertida es el mercado descontando recortes; que se empine o aplane cambia el costo de capital de todo lo que tenés."],
+                ["VIX", "Importa la FORMA, no el número. Normal (corto abajo del largo) es calma. Cuando el tramo de 9 días sube más rápido que el de 30, el mercado se está empezando a cubrir — eso llega antes que la caída."],
+                ["Índices", "Quién lidera dice cómo está repartido el apetito por riesgo. Nasdaq arriba con Russell abajo es un mercado angosto; todos juntos es otra cosa."],
+                ["Commodities", "Solo miralos si se movieron fuerte (más de 2%). El ruido diario del crudo o el cobre no informa nada."],
+              ].map(([k, d]) => (
+                <div key={k} style={{ fontSize: 11, color: C.muted, lineHeight: 1.55 }}>
+                  <b style={{ color: C.text }}>{k}</b> — {d}
+                </div>
+              ))}
+              <div className="flex" style={{ gap: 8, alignItems: "flex-start", marginTop: 4 }}>
+                <AlertTriangle size={12} color={C.cat.amber} strokeWidth={1.8} style={{ marginTop: 2, flexShrink: 0 }} />
+                <span style={{ fontSize: 11, color: C.muted, lineHeight: 1.55 }}>
+                  <b style={{ color: C.text }}>Esto es lo único de Midas que no se puede medir.</b> No genera señales
+                  falsables, así que no hay forma de saber si aporta o si es sensación de estar informado. Tratalo como
+                  contexto para dimensionar, nunca como motivo para entrar o salir.
+                </span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ResearchDelDiaModule() {
   const { user } = useAuth();
   const { prices: livePx } = useStockPrices(); // precio local ARS (acciones/CEDEARs)
@@ -24359,6 +24544,9 @@ function ResearchDelDiaModule() {
         Análisis pre-apertura de tus papeles (alertas + cartera): noticias, catalizadores y rumbo, cruzados con los niveles del bot.
         Se regenera solo los días hábiles a la mañana; si agregás un papel al tablero, entra en el research del día siguiente.
       </p>
+      {/* La temperatura general va ARRIBA del research por papel: primero el
+          contexto, después los nombres. Al revés se lee cada papel en el vacío. */}
+      <ContextoMercadoStrip />
       {regime && (() => {
         // Régimen Kaminski-Lo: canasta de tenencias acumulando <−4% en 12m →
         // DEFENSA (reducir equity, refugio en caución/FCI) hasta un mes de
