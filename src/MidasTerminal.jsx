@@ -28720,7 +28720,7 @@ const FUND_UNIVERSE = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,AMD,NFLX,AVGO,KO,MELI
  * qué: las nueve son la misma apuesta (capex de IA) con distinto disfraz, y
  * el riesgo real de la lista es de concentración, no de selección — que es
  * justo el error que la medición de alpha de LP dejó documentado. */
-const FUND_SEGUIMIENTOS = "AMPG,SHAZ,OUST,CCXI,WYFI,WULF,POET,ONDS,OPTX";
+const FUND_SEGUIMIENTOS = "AMPG,SHAZ,OUST,CCXI,WYFI,WULF,POET,ONDS,OPTX,ALAB,RMBS,MRVL,PENG,CORZ,NBIS";
 
 const FUND_LISTAS = [
   { id: "universo", label: "Universo", tickers: FUND_UNIVERSE },
@@ -28743,6 +28743,9 @@ const FUND_THEME = {
   // Seguimientos. El tema está escrito para que se vea el solapamiento: seis
   // de los nueve dicen "IA · Datacenters" o su cadena de suministro.
   SHAZ: "IA · Cloud GPU", WYFI: "IA · Datacenters", WULF: "IA · Datacenters",
+  // Capa CXL (memoria externa para agentes) y neoclouds (galpon con energia).
+  ALAB: "IA · Conectividad", RMBS: "IA · IP memoria", MRVL: "IA · Conectividad",
+  PENG: "IA · Modulos CXL", CORZ: "IA · Datacenters", NBIS: "IA · Cloud GPU",
   POET: "IA · Óptica", OPTX: "IA · Óptica", AMPG: "RF · Defensa",
   OUST: "Lidar · Robótica", ONDS: "Drones · Defensa", CCXI: "SPAC · Robótica",
 };
@@ -29011,8 +29014,8 @@ function FundamentalsModule() {
           <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
             <AlertTriangle size={13} color={C.cat.amber} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
             <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
-              <b style={{ color: C.text }}>Son nueve nombres y una sola apuesta.</b> Mirá la columna Tema: seis de los
-              nueve son capex de inteligencia artificial o su cadena de suministro. Suben y bajan con lo mismo, así que
+              <b style={{ color: C.text }}>Son quince nombres y una sola apuesta.</b> Mirá la columna Tema:
+              <b style={{ color: C.text }}> todos</b> son capex de inteligencia artificial o su cadena de suministro. Suben y bajan con lo mismo, así que
               comprar la lista entera <b style={{ color: C.text }}>concentra, no diversifica</b> — que es exactamente el
               error que dejó documentado la medición de alpha: la selección salió neutra, el daño vino de la concentración.
             </span>
@@ -29020,7 +29023,7 @@ function FundamentalsModule() {
           <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
             <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
             <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
-              <b style={{ color: C.text }}>Ocho de las nueve pierden plata</b> y el valor depende de que el backlog
+              <b style={{ color: C.text }}>Casi todas pierden plata o queman caja</b> y el valor depende de que el backlog
               contratado se convierta en caja recién a partir de 2027. El P/S de tres dígitos no es un múltiplo caro: es
               el aviso de que <b style={{ color: C.text }}>casi no hay facturación todavía</b>. El Score y la Valuación de
               esta tabla son percentiles dentro de ESTA lista — no las compares contra el Universo.
@@ -29029,9 +29032,10 @@ function FundamentalsModule() {
           <div className="flex" style={{ gap: 8, alignItems: "flex-start" }}>
             <Info size={13} color={C.dim} strokeWidth={1.7} style={{ marginTop: 2, flexShrink: 0 }} />
             <span style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
-              <b style={{ color: C.text }}>Lista de observación, sin plata puesta.</b> Origen: cartera publicada por
-              Matias Scalbi el 12/08/2026. De las nueve, sólo <b className="eco-mono" style={{ color: C.text }}>ONDS</b>{" "}
-              tiene CEDEAR; el resto se compra en EE.UU.
+              <b style={{ color: C.text }}>Lista de observación, sin plata puesta.</b> Origen: la cartera de small caps que publicó
+              Matias Scalbi el 12/08, más la capa CXL (memoria externa para agentes) y los neoclouds
+              (data centers con energía aprobada), agregados el 17/08. Con CEDEAR:{" "}
+              <b className="eco-mono" style={{ color: C.text }}>ONDS, ALAB, MRVL</b>; el resto se compra en EE.UU.
             </span>
           </div>
         </div>

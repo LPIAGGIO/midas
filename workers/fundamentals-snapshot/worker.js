@@ -43,7 +43,7 @@ const FUND_UNIVERSE =
 // se abarató contra SI MISMA, que es la unica vara que sirve para papeles asi.
 // El front las separa en su propia lista; acá van juntas porque el upsert es
 // por ticker y no se pisan.
-const FUND_SEGUIMIENTOS = "AMPG,SHAZ,OUST,CCXI,WYFI,WULF,POET,ONDS,OPTX";
+const FUND_SEGUIMIENTOS = "AMPG,SHAZ,OUST,CCXI,WYFI,WULF,POET,ONDS,OPTX,ALAB,RMBS,MRVL,PENG,CORZ,NBIS";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const MODULES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile,calendarEvents";
