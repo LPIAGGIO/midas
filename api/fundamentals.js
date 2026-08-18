@@ -89,10 +89,18 @@ async function fetchUs10y() {
  * variación diaria el 13/08.
  */
 const MERCADO_SERIES = {
-  tasas:    { m3: "^IRX", y5: "^FVX", y10: "^TNX", y30: "^TYX" },
+  // El 2 años va con 2YY=F (futuro del rendimiento): Yahoo no publica un índice
+  // ^TWO. Sin él sólo se podía calcular 10a−3m, y el spread que mira el mercado
+  // es el 10s2s.
+  tasas:    { y2: "2YY=F", m3: "^IRX", y5: "^FVX", y10: "^TNX", y30: "^TYX" },
   vix:      { d9: "^VIX9D", d30: "^VIX", m3: "^VIX3M", m6: "^VIX6M" },
   indices:  { sp500: "^GSPC", nasdaq: "^IXIC", russell: "^RUT" },
   commodities: { wti: "CL=F", oro: "GC=F", cobre: "HG=F" },
+  // HYG = bonos basura, LQD = grado de inversión. El cociente es un termómetro
+  // de apetito por riesgo en el mercado de crédito. Ver el comentario del front
+  // sobre cómo se lee: NO es lo que parece.
+  credito:  { hyg: "HYG", lqd: "LQD" },
+  divisas:  { dxy: "DX-Y.NYB" },
 };
 
 async function serieCorta(sym) {
@@ -124,6 +132,18 @@ async function contextoMercado() {
     const vals = await Promise.all(claves.map((k) => serieCorta(mapa[k])));
     out[grupo] = {};
     claves.forEach((k, i) => { out[grupo][k] = vals[i]; });
+  }
+  // El ratio de crédito se calcula acá y no en el front: así el front recibe un
+  // número listo y no tiene que saber que HYG y LQD se dividen entre sí.
+  const h = out.credito?.hyg, l = out.credito?.lqd;
+  if (h?.v && l?.v) {
+    const ratio = h.v / l.v;
+    const prev = (h.prev && l.prev) ? h.prev / l.prev : null;
+    out.credito.ratio = {
+      v: Math.round(ratio * 10000) / 10000,
+      prev: prev != null ? Math.round(prev * 10000) / 10000 : null,
+      chg: prev ? Math.round((ratio / prev - 1) * 100 * 100) / 100 : null,
+    };
   }
   return out;
 }

@@ -24326,13 +24326,37 @@ function ContextoMercadoStrip() {
   const lectura = useMemo(() => {
     if (!data) return null;
     const t = data.tasas || {}, v = data.vix || {}, i = data.indices || {};
+    const c = data.credito || {}, dv = data.divisas || {};
+    void dv;
     const out = {};
 
-    // Pendiente 10a − 3m. Invertida = el mercado descuenta recortes/recesión.
-    if (t.y10?.v != null && t.m3?.v != null) {
-      out.pendiente = t.y10.v - t.m3.v;
-      const prev = (t.y10.prev != null && t.m3.prev != null) ? t.y10.prev - t.m3.prev : null;
+    // 10s2s: el spread canónico. Invertido = el mercado descuenta recortes.
+    if (t.y10?.v != null && t.y2?.v != null) {
+      out.pendiente = t.y10.v - t.y2.v;
+      const prev = (t.y10.prev != null && t.y2.prev != null) ? t.y10.prev - t.y2.prev : null;
       out.pendienteDelta = prev != null ? out.pendiente - prev : null;
+    }
+
+    /* CRÉDITO — y acá va la parte contraintuitiva.
+     *
+     * El ratio HYG/LQD cayendo se lee en todos lados como "estrés de crédito
+     * ampliando", bandera roja. Lo medimos sobre 10 años (2016-2026, 555
+     * disparos) y el dato dice LO CONTRARIO: cuando el ratio cae más de 0,5%
+     * en 5 ruedas, los 21 días siguientes rindieron MEJOR que el promedio —
+     * SPY +0,50 pts (t=6,81), QQQ +0,75 (t=9,08), SMH +0,54 (t=8,85). En la
+     * versión extrema (caída >1,5%) la diferencia sube a +2,30 pts en QQQ.
+     *
+     * O sea que históricamente fue señal de compra, no de alarma. Por eso acá
+     * se muestra la lectura MEDIDA y no la intuitiva: reproducir la etiqueta
+     * de "peligro" seria mostrar lo contrario de lo que comprobamos.
+     *
+     * EL CAVEAT, que va en pantalla: la muestra son diez años mayormente
+     * alcistas. Es el clásico indicador que acierta en el promedio y se
+     * equivoca fuerte en la cola. Sirve para no vender por pánico, no para
+     * apalancarse. */
+    if (c.ratio?.chg != null) {
+      out.creditoCae = c.ratio.chg < 0;
+      out.creditoSenal = c.ratio.chg <= -0.5;   // el umbral que testeamos
     }
 
     // Forma del VIX. El front (9d) arriba del 30d es backwardation: estrés.
@@ -24390,12 +24414,12 @@ function ContextoMercadoStrip() {
           <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "flex-start" }}>
             {/* Tasas */}
             <div className="flex" style={{ gap: 14 }}>
-              {[["3m", data.tasas?.m3], ["5a", data.tasas?.y5], ["10a", data.tasas?.y10], ["30a", data.tasas?.y30]].map(([k, x]) => (
+              {[["2a", data.tasas?.y2], ["5a", data.tasas?.y5], ["10a", data.tasas?.y10], ["30a", data.tasas?.y30]].map(([k, x]) => (
                 <Celda key={k} label={k} valor={x?.v != null ? `${x.v.toFixed(2)}%` : "—"}
                   sub={x?.chg != null ? pct(x.chg, 1) : null} color={C.text} />
               ))}
               {lectura?.pendiente != null && (
-                <Celda label="10a−3m" valor={`${lectura.pendiente >= 0 ? "+" : "−"}${Math.abs(lectura.pendiente).toFixed(2)}`}
+                <Celda label="10a−2a" valor={`${lectura.pendiente >= 0 ? "+" : "−"}${Math.abs(lectura.pendiente).toFixed(2)}`}
                   sub={lectura.pendiente < 0 ? "invertida" : lectura.pendienteDelta > 0.02 ? "empinando" : lectura.pendienteDelta < -0.02 ? "aplanando" : "estable"}
                   color={lectura.pendiente < 0 ? C.red : C.text} />
               )}
@@ -24440,12 +24464,31 @@ function ContextoMercadoStrip() {
                   color={x?.chg != null && Math.abs(x.chg) > 2 ? C.cat.amber : C.text} />
               ))}
             </div>
+
+            <div style={{ width: 1, alignSelf: "stretch", background: C.border }} />
+
+            {/* Crédito y dólar global */}
+            <div className="flex" style={{ gap: 14 }}>
+              <Celda label="HYG/LQD" valor={data.credito?.ratio?.v != null ? data.credito.ratio.v.toFixed(4) : "—"}
+                sub={data.credito?.ratio?.chg != null ? pct(data.credito.ratio.chg, 2) : null}
+                color={C.text} />
+              {lectura?.creditoSenal != null && (
+                <Celda label="crédito" valor={lectura.creditoSenal ? "cayendo" : lectura.creditoCae ? "flojo" : "firme"}
+                  sub={lectura.creditoSenal ? "histórico: compra" : null}
+                  color={lectura.creditoSenal ? C.green : C.muted} />
+              )}
+              <Celda label="DXY" valor={data.divisas?.dxy?.v != null ? data.divisas.dxy.v.toFixed(2) : "—"}
+                sub={data.divisas?.dxy?.chg != null ? pct(data.divisas.dxy.chg, 2) : null}
+                color={C.text} />
+            </div>
           </div>
 
           {abierto && (
             <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 12, paddingTop: 10, display: "flex", flexDirection: "column", gap: 7 }}>
               {[
-                ["Tasas", "Importa la PENDIENTE (10a − 3m) más que el nivel. Invertida es el mercado descontando recortes; que se empine o aplane cambia el costo de capital de todo lo que tenés."],
+                ["Tasas", "Importa la PENDIENTE (10a − 2a, el spread que mira todo el mundo) más que el nivel. Invertida es el mercado descontando recortes; que se empine o aplane cambia el costo de capital de todo lo que tenés."],
+                ["Crédito (HYG/LQD)", "Bonos basura contra grado de inversión. Todo el mundo lee que el ratio cayendo es peligro — lo medimos sobre 10 años y da lo contrario: tras una caída de más de 0,5% en 5 ruedas, los 21 días siguientes rindieron MEJOR que el promedio (QQQ +0,75 pts, t=9,08). Sirve para no vender por pánico. El caveat: la muestra es mayormente alcista, así que acierta en el promedio y se equivoca en la cola."],
+                ["DXY", "Dólar contra euro, yen y compañía. NO tiene nada que ver con el peso: que el DXY caiga no mejora tus futuros de DLR. Sirve como contexto para commodities y emergentes."],
                 ["VIX", "Importa la FORMA, no el número. Normal (corto abajo del largo) es calma. Cuando el tramo de 9 días sube más rápido que el de 30, el mercado se está empezando a cubrir — eso llega antes que la caída."],
                 ["Índices", "Quién lidera dice cómo está repartido el apetito por riesgo. Nasdaq arriba con Russell abajo es un mercado angosto; todos juntos es otra cosa."],
                 ["Commodities", "Solo miralos si se movieron fuerte (más de 2%). El ruido diario del crudo o el cobre no informa nada."],
