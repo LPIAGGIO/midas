@@ -41868,6 +41868,10 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
  * argentina. Las filas viejas se muestran aparte y marcadas: promediarlas con
  * las nuevas daría un número que no significa nada.
  */
+// Espejo de BOT_TICKERS en workers/niveles-auto/worker.js. Solo para el cartel:
+// lo que el bot opera de verdad lo decide el worker, no esta linea.
+const BOT_IOL_TICKERS = ["MU", "SNDK", "GGAL"];
+
 function BotIolModule() {
   const { user } = useAuth();
   const [filas, setFilas] = useState(null);
@@ -41908,18 +41912,23 @@ function BotIolModule() {
     return () => { vivo = false; };
   }, [filas]);
 
-  const pesos = (n) => (n == null || !isFinite(n) ? "—" : `${Math.round(n).toLocaleString("es-AR")}`);
-  const firmado = (n) => (n == null || !isFinite(n) ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n)).toLocaleString("es-AR")}`);
-  const usd = (n) => (n == null || !isFinite(n) ? "—" : `US${Number(n).toFixed(2)}`);
+  const pesos = (n) => (n == null || !isFinite(n) ? "—" : `$${Math.round(n).toLocaleString("es-AR")}`);
+  const firmado = (n) => (n == null || !isFinite(n) ? "—" : `${n >= 0 ? "+" : "−"}$${Math.abs(Math.round(n)).toLocaleString("es-AR")}`);
+  const usd = (n) => (n == null || !isFinite(n) ? "—" : `US$${Number(n).toFixed(2)}`);
   const fecha = (t) => (t ? new Date(t).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
 
   // El modo y el perfil salen de los datos, no de una constante del front: si
   // el worker cambia y la pantalla no, prefiero que se note.
+  //
+  // Los PAPELES, en cambio, no se pueden deducir del historial: sacarlos de las
+  // filas hacia que el cartel dijera "MU · AVGO · MSTR · GOOGL · XOM · LAR",
+  // que son los que el bot opero alguna vez, no los que vigila hoy. Van como
+  // constante, espejo de BOT_TICKERS en workers/niveles-auto/worker.js — mismo
+  // acuerdo que FUND_UNIVERSE: si se agrega un papel alla, se agrega aca.
   const cfg = useMemo(() => {
     const f = (filas || [])[0];
     const reales = (filas || []).filter((r) => r.modo === "real").length;
-    const papeles = [...new Set((filas || []).map((r) => r.ticker))];
-    return { modo: reales > 0 ? "real" : (f?.modo || "paper"), perfil: f?.perfil || "gold", reales, papeles };
+    return { modo: reales > 0 ? "real" : (f?.modo || "paper"), perfil: f?.perfil || "gold", reales, papeles: BOT_IOL_TICKERS };
   }, [filas]);
 
   // Sólo el modelo nuevo entra en el marcador. Las filas sin px_ars_entrada son
@@ -41942,10 +41951,13 @@ function BotIolModule() {
     // ejecutan. Medido contra los mínimos reales, ese método reportaba 22%
     // donde hubo 44%. Promediar las dos épocas daría un número que no es
     // ninguna de las dos.
+    // Tampoco cuentan las que se retiraron por decision propia: si el bot
+    // cancelo una orden porque encontro un setup mejor, eso no es "el precio
+    // no llego". Solo cuenta la orden que vivio sus 48hs esperando.
     const resueltas = (filas || []).filter((r) =>
       ["closed", "cancelled"].includes(r.status) &&
       r.ratio != null &&
-      r.exit_reason !== "cancelada al migrar a CEDEARs");
+      !/reemplazada|migrar/i.test(r.exit_reason || ""));
     const ejecutadas = resueltas.filter((r) => r.entry_ts != null).length;
     return {
       n: cerradas.length, aciertos, pnl, fees,
@@ -42142,7 +42154,7 @@ function BotIolModule() {
                             <td style={td}>{legacy ? usd(r.exit_price) : pesos(r.px_ars_salida)}</td>
                             <td style={{ ...td, color: C.muted }}>{legacy ? (r.fees_usd != null ? usd(r.fees_usd) : "—") : pesos(r.fees_ars)}</td>
                             <td style={{ ...td, fontWeight: 700, color: pnl > 0 ? C.green : pnl < 0 ? C.red : C.dim }}>
-                              {r.status === "cancelled" ? "—" : legacy ? (r.pnl_usd != null ? `${r.pnl_usd >= 0 ? "+" : "−"}US${Math.abs(r.pnl_usd).toFixed(2)}` : "—") : firmado(pnl)}
+                              {r.status === "cancelled" ? "—" : legacy ? (r.pnl_usd != null ? `${r.pnl_usd >= 0 ? "+" : "−"}US$${Math.abs(r.pnl_usd).toFixed(2)}` : "—") : firmado(pnl)}
                             </td>
                             <td style={{ ...tdL, color: vd?.c || C.dim, fontSize: 12 }}>{vd?.l || "—"}</td>
                           </tr>
@@ -42154,7 +42166,7 @@ function BotIolModule() {
                               </div>
                               <div style={{ fontSize: 11.5, color: C.dim, marginTop: 6 }}>
                                 nivel {usd(r.entry_limit)} · stop inicial {usd(r.stop_inicial)} · target {usd(r.target)} · score {r.score}/10 · R:R {r.rr}
-                                {r.ratio ? ` · ratio ${Number(r.ratio).toFixed(2)} por US$1` : ""}
+                                {r.ratio ? ` · ratio $${Number(r.ratio).toFixed(2)} por US$1` : ""}
                                 {r.broker_order_id ? ` · orden IOL ${r.broker_order_id}` : ""}
                               </div>
                             </td></tr>
