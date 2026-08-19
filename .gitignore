@@ -6,3 +6,6 @@ dist
 .vercel
 *.log
 built-check.js
+# Config local del preview (no aporta al repo)
+.claude/
+*.bak

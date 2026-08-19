@@ -506,7 +506,20 @@ async function main() {
         // tendencia, papel operable en USA — queda registrada como orden
         // límite SIMULADA en paper_iol_trades. paperPass() la llena y la
         // maneja sola (stop, trailing, target). Cero plata real.
-        if (modo !== "local_ars" && sc.score >= 7 && rr != null && rr >= 2 && !contraTendencia && stopLvl && stopLvl > 0 && stopLvl < buyZone.hi && sellZone) {
+        // Para los papeles del bot dejamos asentado también lo que NO califica:
+        // sin eso, un papel puede pasar semanas sin generar una sola orden y no
+        // hay forma de saber si es que nunca hubo setup o si el filtro está
+        // demasiado exigente. El nivel en sí ya queda medido en nivel_track.
+        if (BOT_UNIVERSO.has(tk.toUpperCase()) && modo !== "local_ars") {
+          const faltas = [];
+          if (sc.score < 7) faltas.push(`score ${sc.score}/10, hace falta 7`);
+          if (rr == null || rr < 2) faltas.push(`R:R ${rr ?? "sin calcular"}, hace falta 2`);
+          if (contraTendencia) faltas.push("va contra la tendencia");
+          if (!(stopLvl > 0 && stopLvl < buyZone.hi)) faltas.push("sin stop válido");
+          if (!sellZone) faltas.push("sin zona de salida");
+          if (faltas.length) botDescarte(tk, buyZone.hi, faltas);
+        }
+        if (BOT_UNIVERSO.has(tk.toUpperCase()) && modo !== "local_ars" && sc.score >= 7 && rr != null && rr >= 2 && !contraTendencia && stopLvl && stopLvl > 0 && stopLvl < buyZone.hi && sellZone) {
           await paperSignal(symUsa, tk, buyZone.hi, stopLvl, sellZone.lo, sc.score, rr, `score ${sc.score}/10 · R:R ${fmt1(rr)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}`).catch((e) => log(`[paper ${tk}] ${e.message}`));
         }
         // 2b. Entrada swing (zona diaria más abajo) — para trade, no scalp.
@@ -995,97 +1008,434 @@ async function volumeProfilePass() {
   log(`perfil de volumen: ${ok}/${tks.size} papeles`);
 }
 
-/* ───────── Paper trading IOL Auto (Fase 0, 03/08) ─────────
- * Simula los trades que el sistema habría ejecutado en el segmento USA de
- * IOL con las reglas de la Fase 1: solo señales del bot score >=7 y R:R >=2
- * a favor de tendencia; sizing por riesgo (1,5% del capital de test);
- * fill de límite pesimista (llena al precio límite, nunca mejor que el
- * mercado); stop que solo sube por múltiplos de R (mismo espíritu que el
- * ratchet); salida por stop, trailing o target; fees IOL USA 0,35%+IVA por
- * pata con mínimo US$2+IVA. Al final del día se lee la tabla y se rinde
- * cuentas. Cuando los números den, recién ahí se fondea. */
-const PAPER_CAP = 6500;      // USD simulados (≈ $10M al MEP)
-const PAPER_RISK = 0.015;    // riesgo por trade: 1,5% del capital
-const PAPER_FEE = 0.004235;  // 0,35% + IVA por pata
-const PAPER_FEE_MIN = 2.42;  // US$2 + IVA mínimo por pata
+/* ───────── Bot IOL sobre CEDEARs, en pesos (v2, 19/08/2026) ─────────
+ *
+ * QUÉ CAMBIÓ Y POR QUÉ. La v1 simulaba comprar la acción en el segmento USA de
+ * IOL, en dólares. Pero LP opera CEDEARs: la plata está en la cuenta en pesos,
+ * el instrumento cotiza en BYMA y la tarifa es otra. Todo eso estaba mal
+ * modelado y hacía que los resultados del paper salieran optimistas.
+ *
+ * QUÉ OPERA. Tres papeles, y NO son todos la misma clase de instrumento:
+ * MU y SNDK son CEDEARs (certificados sobre acciones de EE.UU.), mientras que
+ * GGAL es una acción argentina — el papel local es la acción, y su ADR en NYSE
+ * sólo aporta la serie en dólares. Los dos casos se compran en pesos en BYMA y
+ * pagan la misma tarifa, pero el puente al dólar se calcula distinto (ver
+ * ratioArs) y confundirlos rompe el dimensionamiento.
+ *
+ * EL MODELO, EN DOS MONEDAS. Los NIVELES se siguen calculando sobre el
+ * subyacente en dólares: ahí está la serie limpia, el volumen real y la tesis
+ * (uno compra "MU en 906", no "MU en 295.400 pesos", que se mueve solo porque
+ * se movió el dólar). La EJECUCIÓN es en pesos sobre el CEDEAR. El puente es
+ * el ratio implícito medido en vivo — precio del CEDEAR ÷ precio del
+ * subyacente — que ya lleva adentro tanto el ratio de conversión como el CCL,
+ * y se recalcula en cada pasada. Así, si el dólar salta 3% de un día para el
+ * otro, el límite en pesos sube con él y la orden NO se dispara sola: sigue
+ * esperando a que el papel llegue al precio de la tesis.
+ *
+ * TARIFA REAL (tarifario IOL, verificado 19/08/2026):
+ *   comisión por perfil (gold 0,5% / platinum 0,3% / black 0,1%) + IVA 21%
+ *   + derechos de mercado 0,05% + IVA. SIN mínimo por operación — el mínimo
+ *   de US$2 era del segmento USA y acá no aplica.
+ *   BONIFICACIÓN INTRADIARIA: si compra y venta caen en la misma rueda, IOL no
+ *   cobra SU comisión en la segunda pata (quedan sólo los derechos). En gold
+ *   eso baja la vuelta completa de 1,331% a 0,726%.
+ *
+ * LAS DOS LLAVES. Modo paper es el default y no se sale de él por accidente:
+ * hacen falta `linked_brokers.bot_enabled = true` en la base Y `IOL_BOT_REAL=1`
+ * en el VPS. Si aparece una sola de las dos, el worker no adivina: o se queda
+ * en paper avisando, o se mata. Es la regla que escribió LP en su pre-mortem.
+ */
+const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL")
+  .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+const BOT_UNIVERSO = new Set(BOT_TICKERS);
+const BOT_USER = process.env.IOL_BOT_USER || "cafc5a8c-1cee-4d57-a765-6aacf1acc661";
+const CAP_ARS = Number(process.env.IOL_BOT_CAP_ARS || 3000000);
+const BOT_RISK = 0.015;      // riesgo por trade: 1,5% del capital
+const BOT_VENTANA_H = 48;    // la orden límite vive 48hs y se cae sola
+const IVA = 1.21;
+const DERECHOS = 0.0005 * IVA;                                  // 0,0605%
+const COMISION = { gold: 0.005, platinum: 0.003, black: 0.001 };
+const PERFIL = String(process.env.IOL_PERFIL || "gold").toLowerCase();
+
+// bonificada = segunda pata de una operatoria intradiaria: IOL no cobra su
+// comisión, quedan sólo los derechos de mercado.
+const feePunta = (notionalArs, bonificada) =>
+  notionalArs * (bonificada ? DERECHOS : (COMISION[PERFIL] ?? COMISION.gold) * IVA + DERECHOS);
+
+const diaAr = (d) => new Date(d).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+const pesos = (n) => "$" + Math.round(n).toLocaleString("es-AR");
+
+let MODO_REAL = false;
+let avisoModo = "";
+
+/* Resuelve el modo en cada pasada. No cachea: si LP apaga la bandera en la
+ * base, la próxima pasada ya lo respeta sin reiniciar nada. */
+async function resolverModo() {
+  const quiereReal = process.env.IOL_BOT_REAL === "1";
+  const { data } = await supabase.from("linked_brokers")
+    .select("bot_enabled,status,broker_account_id")
+    .eq("user_id", BOT_USER).eq("broker", "iol").maybeSingle();
+  const flagDb = Boolean(data?.bot_enabled) && data?.status === "active";
+
+  if (quiereReal && !flagDb) {
+    log("[bot] ABORTO: IOL_BOT_REAL=1 en el VPS pero bot_enabled=false en la base.");
+    log("[bot] Las dos llaves tienen que estar puestas a propósito. No opero a ciegas.");
+    process.exit(1);
+  }
+  if (flagDb && !quiereReal && avisoModo !== "db-sin-env") {
+    avisoModo = "db-sin-env";
+    log("[bot] bot_enabled=true en la base pero falta IOL_BOT_REAL=1 en el VPS: sigo en PAPER.");
+  }
+  MODO_REAL = quiereReal && flagDb;
+  if (MODO_REAL && avisoModo !== "real") {
+    avisoModo = "real";
+    log(`[bot] *** MODO REAL ACTIVO *** cuenta ${data.broker_account_id} · papeles ${BOT_TICKERS.join(", ")} · capital ${pesos(CAP_ARS)} · perfil ${PERFIL}`);
+  }
+}
+
+/* Encola los papeles del bot para análisis aunque LP no tenga alerta armada
+ * sobre ellos. Sin esto el bot dependería de que él mantenga vivo el tablero,
+ * y un papel se le podría caer del radar sin que nadie se entere. */
+async function botEnqueue() {
+  if (!inUsMarketWindow()) return;
+  const { data: pend } = await supabase.from("tv_analysis_queue")
+    .select("ticker").eq("user_id", BOT_USER).eq("status", "pending");
+  const yaEsta = new Set((pend || []).map((p) => String(p.ticker).toUpperCase()));
+  const faltan = BOT_TICKERS.filter((t) => !yaEsta.has(t));
+  if (!faltan.length) return;
+  await supabase.from("tv_analysis_queue").insert(
+    faltan.map((t) => ({ user_id: BOT_USER, ticker: t, source: "bot-iol", status: "pending" }))
+  );
+  log(`[bot] encolados para análisis: ${faltan.join(", ")}`);
+}
+
+/* Feeds de precio: ARS del instrumento que se opera de verdad — CEDEAR para los
+ * papeles extranjeros, la acción misma para los argentinos — y USD del subyacente sobre el que se calculó la tesis.
+ *
+ * OJO CON LOS ADR (medido el 19/08/2026): data912 /live/usa_stocks trae 3.159
+ * instrumentos pero NO incluye los ADR argentinos — GGAL e YPF no están. Sin
+ * el precio en dólares el bot no puede evaluar el fill, así que GGAL quedaría
+ * fuera en silencio, que es la peor forma de fallar. Para esos casos se cae a
+ * Yahoo, con caché de 2 minutos: son uno o dos símbolos, no vale la pena
+ * pegarle en cada pasada de 60 segundos. */
+const yCache = new Map();
+async function yahooSpot(sym) {
+  const hit = yCache.get(sym);
+  if (hit && Date.now() - hit.t < 120000) return hit.v;
+  try {
+    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`, { headers: UA });
+    const j = await r.json();
+    const v = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    const num = Number.isFinite(v) ? Number(v) : null;
+    yCache.set(sym, { v: num, t: Date.now() });
+    return num;
+  } catch { return null; }
+}
+
+/* Mínimo de la rueda, para no subestimar las ejecuciones.
+ *
+ * EL SESGO QUE ARREGLA. El paper miraba el último precio cada 60 segundos y
+ * daba por ejecutada la orden sólo si en ese instante estaba por debajo del
+ * límite. Pero una orden límite de verdad queda DESCANSANDO en el book de IOL:
+ * si el papel la perfora un segundo y rebota, la orden se ejecuta igual. El
+ * paper se perdía todas esas mechas, así que reportaba menos ejecuciones de las
+ * que habría habido con plata puesta — justo el número con el que se decide si
+ * la estrategia sirve. Comparar el límite contra el MÍNIMO de la rueda replica
+ * lo que hace el book.
+ *
+ * Sigue siendo conservador a propósito: se ejecuta al precio límite, nunca
+ * mejor, aunque el mínimo haya estado más abajo. */
+const minCache = new Map();
+async function minRueda(sym) {
+  const hit = minCache.get(sym);
+  if (hit && Date.now() - hit.t < 120000) return hit.v;
+  try {
+    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=5m&range=1d`, { headers: UA });
+    const j = await r.json();
+    const res = j?.chart?.result?.[0];
+    const lows = (res?.indicators?.quote?.[0]?.low || []).filter((x) => Number.isFinite(x));
+    const v = lows.length ? Math.min(...lows) : null;
+    minCache.set(sym, { v, t: Date.now() });
+    return v;
+  } catch { return null; }
+}
+
+async function botFeeds() {
+  const [dol, ced, loc, usa] = await Promise.all([
+    fetch("https://dolarapi.com/v1/dolares/contadoconliqui", { headers: UA }).then((r) => r.json()).catch(() => null),
+    fetch("https://data912.com/live/arg_cedears", { headers: UA }).then((r) => r.json()).catch(() => []),
+    fetch("https://data912.com/live/arg_stocks", { headers: UA }).then((r) => r.json()).catch(() => []),
+    fetch("https://data912.com/live/usa_stocks", { headers: UA }).then((r) => r.json()).catch(() => []),
+  ]);
+  const ccl = Number(dol?.venta) || Number(dol?.compra) || null;
+  const ars = {}, arsAsk = {}, arsBid = {}, usd = {};
+  for (const it of [...(ced || []), ...(loc || [])]) {
+    const s = String(it?.symbol || "").toUpperCase();
+    if (!s || !(Number(it.c) > 0)) continue;
+    ars[s] = Number(it.c);
+    if (Number(it.px_ask) > 0) arsAsk[s] = Number(it.px_ask);
+    if (Number(it.px_bid) > 0) arsBid[s] = Number(it.px_bid);
+  }
+  for (const it of usa || []) {
+    const s = String(it?.symbol || "").toUpperCase();
+    if (s && Number(it.c) > 0) usd[s] = Number(it.c);
+  }
+  // Relleno por Yahoo sólo lo que falta de los papeles del bot.
+  for (const tk of BOT_TICKERS) {
+    const sym = (ARG_ADR[tk] ? ARG_ADR[tk].adr : tk).toUpperCase();
+    if (usd[sym] > 0) continue;
+    const v = await yahooSpot(sym);
+    if (v > 0) usd[sym] = v;
+  }
+  return { ars, arsAsk, arsBid, usd, ccl };
+}
+
+/* Pesos por cada dólar de precio del subyacente: el puente entre la tesis (que
+ * se piensa en dólares) y la ejecución (que se paga en pesos).
+ *
+ * SON DOS INSTRUMENTOS DISTINTOS, aunque los dos se compren en pesos en BYMA:
+ *
+ *  - CEDEAR (MU, SNDK): certificado sobre una acción extranjera. El puente se
+ *    MIDE en vivo dividiendo el precio del CEDEAR por el del subyacente, y así
+ *    quedan adentro tanto el ratio de conversión como el CCL del momento, sin
+ *    depender de ninguna tabla.
+ *
+ *  - ACCIÓN ARGENTINA con ADR (GGAL, YPFD): acá el papel local ES la acción, no
+ *    un certificado de nada. Lo que se opera es GGAL en BYMA; el ADR de NYSE es
+ *    sólo de dónde sacamos la serie limpia en dólares. El puente es CCL ÷ r,
+ *    donde r = cuántas acciones locales entran en un ADR.
+ *
+ * EL PELIGRO DE r. Ese número vive en la tabla ARG_ADR y NO se mide: si la
+ * empresa parte el papel, queda viejo y la conversión se va por el factor del
+ * split, en silencio. Ya pasó: YPFD tenía r=1 hasta el split 10:1 del 04/08 y
+ * hubo que corregirlo a mano. Por eso, cuando hay precio local observado, se
+ * contrasta contra el reconstruido: si difieren más de 3% no se opera el papel.
+ * Un ratio podrido no produce una señal fea que se note — produce un tamaño de
+ * posición diez veces mayor al que corresponde, que es de lo que no se vuelve.
+ *
+ * Si falta cualquier pata devuelve null y el bot saltea ese papel: prefiero
+ * perder una señal antes que dimensionar con un tipo de cambio inventado. */
+function ratioArs(tk, sym, f) {
+  const adr = ARG_ADR[tk];
+  if (adr) {
+    if (!(f.ccl > 0)) return null;
+    const r = f.ccl / adr.r;
+    // Control cruzado contra el mercado local, cuando lo hay.
+    const obs = f.ars[tk], usd = f.usd[sym];
+    if (obs > 0 && usd > 0) {
+      const desvio = Math.abs((usd * r) / obs - 1);
+      if (desvio > 0.03) {
+        log(`[bot ${tk}] NO OPERO: el ratio de la tabla (${adr.r} acciones por ADR) reconstruye ${pesos(usd * r)} pero el papel cotiza ${pesos(obs)} — ${(desvio * 100).toFixed(1)}% de desvío. Puede ser un split sin registrar. Revisar ARG_ADR.`);
+        return null;
+      }
+    }
+    return r;
+  }
+  const a = f.ars[tk], u = f.usd[sym];
+  if (!(a > 0) || !(u > 0)) return null;
+  return a / u;
+}
+
+/* ── Ejecución real en IOL (sólo con las dos llaves puestas) ──
+ * El worker corre 24/7 en el VPS y no puede usar el MCP de IOL: el MCP es el
+ * canal de la sesión interactiva. Usa la API REST con el mismo token que ya
+ * mantienen iol-cash-sync e iol-positions-sync.
+ * OJO: esta parte todavía NO se probó contra la API en vivo porque la cuenta
+ * no está fondeada. Antes de flipear las llaves hay que mandar una orden de
+ * prueba chica y verificar la forma de la respuesta. */
+async function iolToken() {
+  const { data } = await supabase.from("linked_brokers")
+    .select("access_token,access_expires_at").eq("user_id", BOT_USER).eq("broker", "iol").maybeSingle();
+  if (!data?.access_token) throw new Error("sin access_token de IOL");
+  if (data.access_expires_at && new Date(data.access_expires_at) <= new Date())
+    throw new Error("access_token de IOL vencido (lo revive el keep-alive)");
+  return data.access_token;
+}
+
+async function iolOrden(lado, simbolo, cantidad, precio) {
+  const token = await iolToken();
+  const url = `https://api.invertironline.com/api/v2/operar/${lado === "compra" ? "Comprar" : "Vender"}`;
+  const body = {
+    mercado: "bCBA", simbolo, cantidad,
+    precio: Math.round(precio * 100) / 100,
+    plazo: "t1", validez: new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 19),
+    tipoOrden: "precioLimite",
+  };
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j?.ok === false) throw new Error(`IOL ${lado} ${simbolo}: ${r.status} ${JSON.stringify(j).slice(0, 300)}`);
+  return String(j?.numeroOperacion ?? j?.numero ?? j?.id ?? "");
+}
+
+const descartes = new Map();
+function botDescarte(tk, nivel, faltas) {
+  const clave = `${tk}|${Math.round(nivel * 100)}|${faltas.join("+")}`;
+  const antes = descartes.get(clave);
+  if (antes && Date.now() - antes < 6 * 3600 * 1000) return;  // el mismo motivo, una vez cada 6hs
+  descartes.set(clave, Date.now());
+  log(`[bot ${tk}] setup en US$${nivel.toFixed(2)} NO califica: ${faltas.join(" · ")}`);
+}
 
 async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
+  if (!BOT_UNIVERSO.has(String(tk).toUpperCase())) return;   // opera 3 papeles, no todo el tablero
   const { data: ex } = await supabase.from("paper_iol_trades").select("id,status,entry_limit").eq("sym", sym).in("status", ["pending", "open"]);
-  if ((ex || []).some((t) => t.status === "open")) return;          // ya hay posición simulada en el papel
+  if ((ex || []).some((t) => t.status === "open")) return;          // ya hay posición en el papel
   const pend = (ex || []).filter((t) => t.status === "pending");
   if (pend.some((t) => Math.abs(Number(t.entry_limit) - entry) / entry < 0.005)) return; // misma señal (rearme)
-  if (pend.length) await supabase.from("paper_iol_trades").update({ status: "cancelled", exit_reason: "reemplazada por señal nueva" }).in("id", pend.map((t) => t.id));
-  const rpp = entry - stop;
-  let qty = Math.floor((PAPER_CAP * PAPER_RISK) / rpp);
-  // Sin palanca: el capital comprometido en TODAS las órdenes vivas (abiertas
-  // + pendientes de otros papeles) limita la nueva — contado puro, como IOL.
-  const { data: vivas } = await supabase.from("paper_iol_trades").select("sym,qty,entry_limit,entry_price").in("status", ["pending", "open"]).neq("sym", sym);
-  const comprometido = (vivas || []).reduce((s, t) => s + t.qty * Number(t.entry_price ?? t.entry_limit), 0);
-  const disponible = PAPER_CAP - comprometido;
-  qty = Math.min(qty, Math.floor(disponible / entry));
-  if (qty < 1) { log(`[paper ${tk}] señal descartada: capital disponible US$${disponible.toFixed(0)} no alcanza (riesgo US$${rpp.toFixed(2)}/papel)`); return; }
-  const { error } = await supabase.from("paper_iol_trades").insert({ ticker: tk, sym, senal, score, rr, status: "pending", qty, entry_limit: entry, stop, stop_inicial: stop, target, r_value: rpp });
+  if (pend.length) {
+    await supabase.from("paper_iol_trades").update({
+      status: "cancelled", exit_reason: "reemplazada por señal nueva", veredicto: "sin_fill",
+      nota_sim: "reemplazada por una señal más fresca antes de llegar a ejecutarse",
+    }).in("id", pend.map((t) => t.id));
+  }
+
+  const f = await botFeeds();
+  const rArs = ratioArs(String(tk).toUpperCase(), String(sym).toUpperCase(), f);
+  if (!rArs) { log(`[bot ${tk}] sin precio local o sin precio del subyacente: no dimensiono a ciegas`); return; }
+
+  // Sizing por riesgo, EN PESOS sobre el instrumento que se compra de verdad.
+  const riesgoUnidad = (entry - stop) * rArs;
+  if (!(riesgoUnidad > 0)) return;
+  let qty = Math.floor((CAP_ARS * BOT_RISK) / riesgoUnidad);
+  // Sin palanca: lo comprometido en órdenes vivas de OTROS papeles limita ésta.
+  const { data: vivas } = await supabase.from("paper_iol_trades")
+    .select("qty,px_ars_entrada,entry_limit,ratio").in("status", ["pending", "open"]).neq("sym", sym);
+  const comprometido = (vivas || []).reduce(
+    (s, t) => s + t.qty * Number(t.px_ars_entrada ?? Number(t.entry_limit) * Number(t.ratio ?? 0)), 0);
+  const disponible = CAP_ARS - comprometido;
+  const precioUnidad = entry * rArs;
+  qty = Math.min(qty, Math.floor(disponible / precioUnidad));
+  if (qty < 1) {
+    log(`[bot ${tk}] señal descartada: quedan ${pesos(disponible)} y cada unidad cuesta ${pesos(precioUnidad)}`);
+    return;
+  }
+
+  const fila = {
+    ticker: tk, sym, senal, score, rr, status: "pending", qty,
+    entry_limit: entry, stop, stop_inicial: stop, target, r_value: entry - stop,
+    modo: MODO_REAL ? "real" : "paper", perfil: PERFIL, ratio: Math.round(rArs * 100) / 100,
+    nota_sim: `Nivel de compra US$${entry.toFixed(2)} ≈ ${pesos(precioUnidad)} por unidad. Esperando que el papel baje a buscarlo. Si llega: compra ${qty}, vende en US$${target.toFixed(2)} ≈ ${pesos(target * rArs)}, corta en US$${stop.toFixed(2)} ≈ ${pesos(stop * rArs)}.`,
+  };
+  if (MODO_REAL) {
+    try { fila.broker_order_id = await iolOrden("compra", tk, qty, precioUnidad); }
+    catch (e) { log(`[bot ${tk}] NO se mandó la orden real: ${e.message}`); return; }
+  }
+  const { error } = await supabase.from("paper_iol_trades").insert(fila);
   if (error) throw new Error(error.message);
-  log(`[paper ${tk}] orden límite simulada: ${qty} × US$${entry.toFixed(2)} · stop ${stop.toFixed(2)} · target ${target.toFixed(2)}`);
+  log(`[bot ${tk}] ${MODO_REAL ? "ORDEN REAL" : "orden simulada"}: ${qty} × ${pesos(precioUnidad)} (US${entry.toFixed(2)}) · stop ${stop.toFixed(2)} · target ${target.toFixed(2)} · compromete ${pesos(qty * precioUnidad)}`);
 }
 
 async function paperPass() {
+  await resolverModo();
   const { data: trades } = await supabase.from("paper_iol_trades").select("*").in("status", ["pending", "open"]);
   if (!trades?.length) return;
   const now = Date.now();
-  for (const t of trades.filter((x) => x.status === "pending" && now - new Date(x.created_at).getTime() > 48 * 3600 * 1000)) {
-    await supabase.from("paper_iol_trades").update({ status: "cancelled", exit_reason: "expirada 48h sin fill" }).eq("id", t.id);
+  for (const t of trades.filter((x) => x.status === "pending" && now - new Date(x.created_at).getTime() > BOT_VENTANA_H * 3600 * 1000)) {
+    await supabase.from("paper_iol_trades").update({
+      status: "cancelled", exit_reason: `expirada ${BOT_VENTANA_H}h sin fill`, veredicto: "sin_fill",
+      nota_sim: `El papel nunca bajó a US$${Number(t.entry_limit).toFixed(2)} en ${BOT_VENTANA_H}hs: la orden se cayó sola, sin costo. No hubo decisión que juzgar.`,
+    }).eq("id", t.id);
+    log(`[bot ${t.ticker}] orden expirada sin ejecutarse (el precio no llegó al nivel)`);
   }
   if (!inUsMarketWindow()) return;
-  const usaRes = await fetch("https://data912.com/live/usa_stocks", { headers: UA }).then((r) => r.json()).catch(() => []);
-  const px = {};
-  for (const it of usaRes || []) if (it?.symbol && Number(it.c) > 0) px[it.symbol.toUpperCase()] = Number(it.c);
-  const legFee = (notional) => Math.max(notional * PAPER_FEE, PAPER_FEE_MIN);
+
+  const f = await botFeeds();
   for (const t of trades) {
-    const p = px[t.sym.toUpperCase()];
-    if (!p) continue;
+    if (t.status === "cancelled") continue;
+    const tkU = String(t.ticker).toUpperCase(), symU = String(t.sym).toUpperCase();
+    const p = f.usd[symU];
+    const rArs = ratioArs(tkU, symU, f);
+    if (!p || !rArs) continue;
+
     if (t.status === "pending") {
-      if (p <= Number(t.entry_limit)) {
-        await supabase.from("paper_iol_trades").update({ status: "open", entry_price: Math.min(Number(t.entry_limit), p), entry_ts: new Date().toISOString() }).eq("id", t.id);
-        log(`[paper ${t.ticker}] FILL simulado ${t.qty} × US$${Math.min(Number(t.entry_limit), p).toFixed(2)}`);
-      }
+      // Una orden límite descansa en el book: alcanza con que el papel haya
+      // TOCADO el nivel en algún momento de la rueda, no que esté ahí ahora.
+      const lim = Number(t.entry_limit);
+      const bajo = p <= lim ? p : await minRueda(symU);
+      if (!(bajo <= lim)) continue;
+      // Fill: la CONDICIÓN se evalúa en dólares (la tesis es sobre el papel),
+      // el PRECIO se toma en pesos del papel local pagando la punta vendedora,
+      // que es lo que cuesta de verdad cruzarse contra el book.
+      const pxUsd = Math.min(lim, p > 0 ? Math.max(p, bajo) : lim);
+      // El precio en pesos sale del NIVEL, no del ask del momento.
+      // Estaba usando el ask y era un error grueso: el ask refleja dónde está
+      // el papel AHORA, no dónde se ejecutó la orden. Con MU llegó a inventar
+      // $4.644 de sobreprecio por unidad — 1,6%, más que una vuelta completa
+      // de comisiones. Una orden límite descansando en el book es el lado
+      // PASIVO: la cruza un vendedor y se ejecuta al límite, sin pagar spread.
+      const pxArs = Math.round(pxUsd * rArs);
+      await supabase.from("paper_iol_trades").update({
+        status: "open", entry_price: pxUsd, entry_ts: new Date().toISOString(),
+        px_ars_entrada: pxArs, ratio: Math.round(rArs * 100) / 100,
+        nota_sim: `LLEGÓ al nivel. Entró ${t.qty} × ${pesos(pxArs)} (US$${pxUsd.toFixed(2)}), total ${pesos(pxArs * t.qty)}. Vende en el target US$${Number(t.target).toFixed(2)} ≈ ${pesos(Number(t.target) * rArs)}; corta en el stop US$${Number(t.stop).toFixed(2)} ≈ ${pesos(Number(t.stop) * rArs)}.`,
+      }).eq("id", t.id);
+      log(`[bot ${t.ticker}] LLEGÓ AL NIVEL → ${MODO_REAL ? "compra ejecutada" : "fill simulado"} ${t.qty} × ${pesos(pxArs)} · vendería en ${pesos(Number(t.target) * rArs)} / corta en ${pesos(Number(t.stop) * rArs)}`);
       continue;
     }
+
     const entry = Number(t.entry_price), R = Number(t.r_value);
     let stop = Number(t.stop);
-    // trailing por R (el poll de 60s hace de máximo desde la entrada):
-    // +1R → breakeven, +2R → protege 1R, ... y NUNCA baja.
+    // Trailing por múltiplos de R: +1R → breakeven, +2R → protege 1R. Nunca baja.
     const k = Math.floor((p - entry) / R);
     if (k >= 1 && entry + (k - 1) * R > stop) {
       stop = entry + (k - 1) * R;
       await supabase.from("paper_iol_trades").update({ stop }).eq("id", t.id);
-      log(`[paper ${t.ticker}] trailing: stop sube a US$${stop.toFixed(2)} (+${k}R)`);
+      log(`[bot ${t.ticker}] trailing: stop sube a US$${stop.toFixed(2)} (+${k}R)`);
     }
-    let exit = null, reason = null;
-    if (p <= stop) { exit = Math.min(stop, p); reason = stop > Number(t.stop_inicial) ? "trailing" : "stop"; }
-    else if (p >= Number(t.target)) { exit = Math.max(Number(t.target), p); reason = "target"; }
-    if (exit != null) {
-      const fees = legFee(entry * t.qty) + legFee(exit * t.qty);
-      const pnl = (exit - entry) * t.qty - fees;
-      await supabase.from("paper_iol_trades").update({
-        status: "closed", exit_price: exit, exit_ts: new Date().toISOString(), exit_reason: reason,
-        fees_usd: Math.round(fees * 100) / 100, pnl_usd: Math.round(pnl * 100) / 100,
-        pnl_pct: Math.round((pnl / (entry * t.qty)) * 10000) / 100,
-      }).eq("id", t.id);
-      log(`[paper ${t.ticker}] CIERRE ${reason}: US$${exit.toFixed(2)} · P&L US$${pnl.toFixed(2)}`);
+    let exitUsd = null, reason = null;
+    if (p <= stop) { exitUsd = Math.min(stop, p); reason = stop > Number(t.stop_inicial) ? "trailing" : "stop"; }
+    else if (p >= Number(t.target)) { exitUsd = Math.max(Number(t.target), p); reason = "target"; }
+    if (exitUsd == null) continue;
+
+    // Salida en pesos contra la punta compradora (se vende al bid).
+    // La salida por target es una orden límite descansando arriba: se ejecuta
+    // al nivel, pasiva. La salida por stop es a mercado — ahí sí se cruza
+    // contra la punta compradora y se paga el spread. Si el bid está peor que
+    // el nivel, mando el peor de los dos: en un stop nunca te sale mejor.
+    const teorico = Math.round(exitUsd * rArs);
+    const bid = f.arsBid[tkU];
+    const pxArsSal = reason === "target" ? teorico : (bid > 0 ? Math.min(teorico, bid) : teorico);
+    const pxArsEnt = Number(t.px_ars_entrada);
+    const intradia = t.entry_ts ? diaAr(t.entry_ts) === diaAr(new Date()) : false;
+    const fees = feePunta(pxArsEnt * t.qty, false) + feePunta(pxArsSal * t.qty, intradia);
+    const pnlArs = (pxArsSal - pxArsEnt) * t.qty - fees;
+    const veredicto = pnlArs > 0 ? "acierto" : "error";
+
+    let ordenSalida = null;
+    if (MODO_REAL) {
+      try { ordenSalida = await iolOrden("venta", t.ticker, t.qty, pxArsSal); }
+      catch (e) { log(`[bot ${t.ticker}] NO se pudo mandar la venta real: ${e.message} — la posición sigue abierta`); continue; }
     }
+
+    await supabase.from("paper_iol_trades").update({
+      status: "closed", exit_price: exitUsd, exit_ts: new Date().toISOString(), exit_reason: reason,
+      px_ars_salida: pxArsSal, fees_ars: Math.round(fees), pnl_ars: Math.round(pnlArs),
+      intradia, veredicto,
+      pnl_pct: Math.round((pnlArs / (pxArsEnt * t.qty)) * 10000) / 100,
+      broker_order_id: ordenSalida || t.broker_order_id,
+      nota_sim: `Cerró por ${reason}${intradia ? " el mismo día (IOL bonifica la comisión de la segunda pata)" : ""}. Vendió ${t.qty} × ${pesos(pxArsSal)} contra ${pesos(pxArsEnt)} de entrada. Comisiones ${pesos(fees)}. Resultado ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} → la decisión fue ${veredicto === "acierto" ? "CORRECTA" : "EQUIVOCADA"}.`,
+    }).eq("id", t.id);
+    log(`[bot ${t.ticker}] CIERRE ${reason}${intradia ? " (intradía)" : ""}: ${pesos(pxArsSal)} · comisiones ${pesos(fees)} · P&L ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} · ${veredicto.toUpperCase()}`);
   }
 }
+
 
 /* ───────── Loop persistente ───────── */
 async function loop() {
   log("niveles-auto v7 arrancando (cola 60s; paper IOL 60s; rearme 15 min; ratchet 30 min; confirmaciones 10 min; tracks 60 min)");
+  await resolverModo().catch((e) => log("[bot]", e.message));
+  log(`[bot] modo ${MODO_REAL ? "REAL" : "PAPER (simulacion)"} · papeles ${BOT_TICKERS.join(", ")} · capital ${pesos(CAP_ARS)} · perfil ${PERFIL} · comision ida y vuelta ${(((COMISION[PERFIL] ?? COMISION.gold) * IVA + DERECHOS) * 200).toFixed(3)}%`);
   let lastTracks = 0, lastConfirm = 0, lastRearm = 0, lastRatchet = 0, lastRegime = 0, lastProfile = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       if (Date.now() - lastRearm > 15 * 60 * 1000) {
         await autoRearm().catch((e) => log("[rearm]", e.message));
+        await botEnqueue().catch((e) => log("[bot enqueue]", e.message));
         lastRearm = Date.now();
       }
       if (Date.now() - lastRatchet > 30 * 60 * 1000) {

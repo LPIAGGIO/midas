@@ -80,6 +80,7 @@ import {
   EyeOff,
   Send,
   Newspaper,
+  Bot,
 } from "lucide-react";
 import {
   ScatterChart,
@@ -247,6 +248,7 @@ const NAV = [
       { id: "paper-cedears", label: "Paper CEDEARs", icon: LineChart, badge: "BETA" },
       { id: "superinversores", label: "Superinversores", icon: Users, type: "single", requiresAuth: true },
       { id: "decision-log", label: "Decision Log", icon: ShieldCheck, type: "single", requiresAuth: true },
+      { id: "bot-iol", label: "Bot IOL", icon: Bot, type: "single", requiresAuth: true, badge: "SIM" },
     ],
   },
 ];
@@ -1511,6 +1513,8 @@ function MidasApp({ allowedModules = null }) {
               <SuperinversoresModule key={active} />
             ) : active === "decision-log" ? (
               <DecisionLogModule key={active} />
+            ) : active === "bot-iol" ? (
+              <BotIolModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
             ) : active === "calc-montecarlo" ? (
@@ -41840,6 +41844,346 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
 }
 
 /* ─────────── Módulo ─────────── */
+
+/* ══════════════ BOT IOL ══════════════
+ *
+ * El registro de todo lo que hace el bot que opera solo en IOL: qué orden puso,
+ * si el papel llegó al nivel, a qué precio entró, dónde piensa vender, cómo
+ * cerró y si la decisión fue correcta. Lo escribe el worker niveles-auto.
+ *
+ * POR QUÉ EXISTE: el bot venía registrando desde el 03/08/2026 y no había forma
+ * de verlo — ni pantalla ni aviso. Un test en simulación que nadie mira no
+ * detecta ningún error, que es exactamente para lo que sirve simular antes de
+ * poner plata.
+ *
+ * LA DECISIÓN DE DISEÑO QUE MANDA SOBRE TODAS: el cartel de modo. Mientras diga
+ * SIMULACIÓN no se movió un peso; si algún día dice PLATA REAL tiene que pegar
+ * en la cara sin que haya que buscarlo. Confundir los dos estados es el único
+ * error de esta pantalla que costaría dinero, así que el cartel es lo primero,
+ * ocupa ancho completo y cambia de color.
+ *
+ * DOS ARITMÉTICAS QUE NO SE MEZCLAN: hasta el 19/08/2026 el bot simulaba
+ * comprar la acción en el segmento USA, en dólares y con la tarifa de IOL USA.
+ * Desde esa fecha opera CEDEARs y acciones locales, en pesos y con la tarifa
+ * argentina. Las filas viejas se muestran aparte y marcadas: promediarlas con
+ * las nuevas daría un número que no significa nada.
+ */
+function BotIolModule() {
+  const { user } = useAuth();
+  const [filas, setFilas] = useState(null);
+  const [error, setError] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [spot, setSpot] = useState({});
+  const [abierta, setAbierta] = useState(null);
+  const [verTodo, setVerTodo] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    if (!user) { setFilas([]); return () => { vivo = false; }; }
+    setFilas(null); setError(null);
+    (async () => {
+      const { data, error: e } = await supabase
+        .from("paper_iol_trades")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (!vivo) return;
+      if (e) { setError(e.message); setFilas([]); return; }
+      setFilas(data || []);
+    })();
+    return () => { vivo = false; };
+  }, [user, tick]);
+
+  // Precio del subyacente para las posiciones abiertas: sin esto no se sabe si
+  // una posición viva está cerca del target o del stop, que es lo primero que
+  // uno quiere mirar.
+  useEffect(() => {
+    let vivo = true;
+    const syms = [...new Set((filas || []).filter((f) => f.status === "open").map((f) => f.sym))];
+    if (!syms.length) return () => { vivo = false; };
+    fetch(`/api/fundamentals?price=${syms.join(",")}&_=${Date.now()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (vivo && j?.prices) setSpot(j.prices); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [filas]);
+
+  const pesos = (n) => (n == null || !isFinite(n) ? "—" : `${Math.round(n).toLocaleString("es-AR")}`);
+  const firmado = (n) => (n == null || !isFinite(n) ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n)).toLocaleString("es-AR")}`);
+  const usd = (n) => (n == null || !isFinite(n) ? "—" : `US${Number(n).toFixed(2)}`);
+  const fecha = (t) => (t ? new Date(t).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
+
+  // El modo y el perfil salen de los datos, no de una constante del front: si
+  // el worker cambia y la pantalla no, prefiero que se note.
+  const cfg = useMemo(() => {
+    const f = (filas || [])[0];
+    const reales = (filas || []).filter((r) => r.modo === "real").length;
+    const papeles = [...new Set((filas || []).map((r) => r.ticker))];
+    return { modo: reales > 0 ? "real" : (f?.modo || "paper"), perfil: f?.perfil || "gold", reales, papeles };
+  }, [filas]);
+
+  // Sólo el modelo nuevo entra en el marcador. Las filas sin px_ars_entrada son
+  // del modelo viejo en dólares y se cuentan aparte.
+  const nuevas = useMemo(() => (filas || []).filter((r) => r.px_ars_entrada != null || r.status === "pending" || (r.status === "cancelled" && r.ratio != null)), [filas]);
+  const viejas = useMemo(() => (filas || []).filter((r) => r.status === "closed" && r.px_ars_entrada == null), [filas]);
+
+  const marcador = useMemo(() => {
+    const cerradas = (filas || []).filter((r) => r.status === "closed" && r.pnl_ars != null);
+    const aciertos = cerradas.filter((r) => r.veredicto === "acierto").length;
+    const pnl = cerradas.reduce((s, r) => s + Number(r.pnl_ars || 0), 0);
+    const fees = cerradas.reduce((s, r) => s + Number(r.fees_ars || 0), 0);
+    // Tasa de ejecución: de las órdenes resueltas, cuántas llegaron a comprarse.
+    // Es el número que dice si la estrategia opera o mira.
+    //
+    // SOLO CUENTAN LAS DEL MODELO NUEVO (las que tienen ratio). Hasta el
+    // 19/08/2026 el fill se detectaba mirando el último precio cada 60 segundos,
+    // y así se perdía toda orden que el papel perforaba y rebotaba entre dos
+    // consultas — una orden límite de verdad descansa en el book y ésas se
+    // ejecutan. Medido contra los mínimos reales, ese método reportaba 22%
+    // donde hubo 44%. Promediar las dos épocas daría un número que no es
+    // ninguna de las dos.
+    const resueltas = (filas || []).filter((r) =>
+      ["closed", "cancelled"].includes(r.status) &&
+      r.ratio != null &&
+      r.exit_reason !== "cancelada al migrar a CEDEARs");
+    const ejecutadas = resueltas.filter((r) => r.entry_ts != null).length;
+    return {
+      n: cerradas.length, aciertos, pnl, fees,
+      hit: cerradas.length ? aciertos / cerradas.length : null,
+      fill: resueltas.length ? ejecutadas / resueltas.length : null,
+      resueltas: resueltas.length,
+    };
+  }, [filas]);
+
+  const abiertas = (filas || []).filter((r) => r.status === "open");
+  const pendientes = (filas || []).filter((r) => r.status === "pending");
+  const historial = (filas || []).filter((r) => ["closed", "cancelled"].includes(r.status));
+  const historialVis = verTodo ? historial : historial.slice(0, 12);
+
+  const th = { padding: "8px 10px", fontSize: 10.5, fontWeight: 500, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap", textAlign: "right" };
+  const thL = { ...th, textAlign: "left" };
+  const td = { padding: "9px 10px", fontSize: 12.5, color: C.text, whiteSpace: "nowrap", textAlign: "right" };
+  const tdL = { ...td, textAlign: "left" };
+  const card = { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16 };
+
+  const ESTADO = {
+    pending: { l: "esperando", c: C.muted },
+    open: { l: "comprado", c: C.accent },
+    closed: { l: "cerrada", c: C.dim },
+    cancelled: { l: "se cayó", c: C.dim },
+  };
+  const VERED = {
+    acierto: { l: "correcta", c: C.green },
+    error: { l: "equivocada", c: C.red },
+    sin_fill: { l: "no operó", c: C.dim },
+  };
+
+  if (!user) {
+    return <div style={{ ...card, color: C.muted, fontSize: 13 }}>Entrá a tu cuenta para ver el registro del bot.</div>;
+  }
+
+  const esReal = cfg.modo === "real";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* ── Cartel de modo: lo primero y lo más grande ── */}
+      <div style={{
+        borderRadius: 10, padding: "14px 18px",
+        background: esReal ? "rgba(248,113,113,0.12)" : C.accentSoft,
+        border: `1px solid ${esReal ? C.red : C.accentBorder}`,
+        display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
+      }}>
+        <span style={{ fontSize: 20 }}>{esReal ? "🔴" : "🧪"}</span>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: esReal ? C.red : C.accent, letterSpacing: "0.04em" }}>
+            {esReal ? "OPERANDO CON PLATA REAL" : "SIMULACIÓN · no se movió un peso"}
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>
+            {cfg.papeles.length ? cfg.papeles.join(" · ") : "sin papeles"} · perfil {cfg.perfil}
+            {" · "}comisión ida y vuelta {cfg.perfil === "gold" ? "1,331%" : cfg.perfil === "platinum" ? "0,847%" : "0,363%"}
+          </div>
+        </div>
+        <button onClick={() => setTick((t) => t + 1)}
+          style={{ padding: "6px 14px", fontSize: 12, cursor: "pointer", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>
+          ↻ Actualizar
+        </button>
+      </div>
+
+      {error && <div style={{ ...card, borderColor: C.red, color: C.red, fontSize: 13 }}>{error}</div>}
+      {filas === null && <div style={{ ...card, color: C.muted, fontSize: 13 }}>Cargando…</div>}
+
+      {filas !== null && (
+        <>
+          {/* ── Marcador ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+            {[
+              { k: "Operaciones cerradas", v: marcador.n === 0 ? "—" : String(marcador.n), s: marcador.n ? `${marcador.aciertos} correctas` : "todavía ninguna" },
+              { k: "Decisiones correctas", v: marcador.hit == null ? "—" : `${Math.round(marcador.hit * 100)}%`, s: marcador.n && marcador.n < 30 ? `n=${marcador.n}: no alcanza para concluir` : "" },
+              { k: "Resultado neto", v: marcador.n ? firmado(marcador.pnl) : "—", s: marcador.n ? `${pesos(marcador.fees)} de comisiones` : "", c: marcador.pnl > 0 ? C.green : marcador.pnl < 0 ? C.red : C.text },
+              { k: "Órdenes que se ejecutaron", v: marcador.fill == null ? "—" : `${Math.round(marcador.fill * 100)}%`, s: marcador.resueltas ? `de ${marcador.resueltas} resueltas` : "todavía ninguna resuelta" },
+            ].map((m) => (
+              <div key={m.k} style={card}>
+                <div style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase" }}>{m.k}</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: m.c || C.text, marginTop: 6 }}>{m.v}</div>
+                {m.s && <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>{m.s}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* ── Posiciones abiertas ── */}
+          <div style={card}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>
+              Comprado ahora {abiertas.length > 0 && <span style={{ color: C.accent }}>({abiertas.length})</span>}
+            </div>
+            {!abiertas.length ? (
+              <div style={{ fontSize: 12.5, color: C.muted }}>Sin posiciones abiertas.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+                  <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <th style={thL}>Papel</th><th style={th}>Cant.</th><th style={th}>Entrada</th>
+                    <th style={th}>Invertido</th><th style={th}>Vende en</th><th style={th}>Corta en</th>
+                    <th style={th}>Ahora</th><th style={th}>Camino al target</th>
+                  </tr></thead>
+                  <tbody>
+                    {abiertas.map((r) => {
+                      const p = spot[r.sym];
+                      const ent = Number(r.entry_price), tgt = Number(r.target), stp = Number(r.stop);
+                      // Cuánto del trayecto entrada→target ya recorrió.
+                      const avance = p && tgt > ent ? Math.max(0, Math.min(1, (p - ent) / (tgt - ent))) : null;
+                      const rArs = Number(r.ratio) || 0;
+                      return (
+                        <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <td style={{ ...tdL, fontWeight: 700 }}>{r.ticker}</td>
+                          <td style={td}>{r.qty}</td>
+                          <td style={td}>{pesos(r.px_ars_entrada)}<div style={{ fontSize: 10.5, color: C.dim }}>{usd(ent)}</div></td>
+                          <td style={td}>{pesos(Number(r.px_ars_entrada) * r.qty)}</td>
+                          <td style={{ ...td, color: C.green }}>{pesos(tgt * rArs)}<div style={{ fontSize: 10.5, color: C.dim }}>{usd(tgt)}</div></td>
+                          <td style={{ ...td, color: C.red }}>{pesos(stp * rArs)}<div style={{ fontSize: 10.5, color: C.dim }}>{usd(stp)}{stp > Number(r.stop_inicial) ? " ↑" : ""}</div></td>
+                          <td style={td}>{p ? usd(p) : "—"}</td>
+                          <td style={td}>
+                            {avance == null ? "—" : (
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                                <div style={{ width: 70, height: 5, background: C.faint, borderRadius: 3, overflow: "hidden" }}>
+                                  <div style={{ width: `${avance * 100}%`, height: "100%", background: C.green }} />
+                                </div>
+                                <span style={{ fontSize: 11.5, color: C.muted }}>{Math.round(avance * 100)}%</span>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {abiertas.some((r) => Number(r.stop) > Number(r.stop_inicial)) && (
+              <div style={{ fontSize: 11.5, color: C.muted, marginTop: 8 }}>
+                La flecha ↑ marca que el stop ya subió: el bot protege ganancia y esa posición no puede terminar perdiendo más que las comisiones.
+              </div>
+            )}
+          </div>
+
+          {/* ── Órdenes esperando ── */}
+          <div style={card}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>
+              Órdenes esperando {pendientes.length > 0 && <span style={{ color: C.muted }}>({pendientes.length})</span>}
+            </div>
+            {!pendientes.length ? (
+              <div style={{ fontSize: 12.5, color: C.muted }}>Ninguna orden puesta. El bot analiza cada 15 minutos y sólo pone orden si el setup cumple score ≥ 7 y R:R ≥ 2.</div>
+            ) : pendientes.map((r) => (
+              <div key={r.id} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, marginTop: 10 }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+                  <span style={{ fontWeight: 700 }}>{r.ticker}</span>
+                  <span style={{ fontSize: 12, color: C.muted }}>
+                    compra {r.qty} si baja a {usd(r.entry_limit)} ≈ {pesos(Number(r.entry_limit) * Number(r.ratio || 0))}
+                  </span>
+                  <span style={{ fontSize: 11.5, color: C.dim, marginLeft: "auto" }}>puesta {fecha(r.created_at)}</span>
+                </div>
+                {r.nota_sim && <div style={{ fontSize: 11.5, color: C.muted, marginTop: 5, lineHeight: 1.5 }}>{r.nota_sim}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* ── Historial ── */}
+          <div style={card}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Todo lo que hizo</div>
+            {!historial.length ? (
+              <div style={{ fontSize: 12.5, color: C.muted }}>Sin movimientos todavía.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+                  <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <th style={thL}>Cuándo</th><th style={thL}>Papel</th><th style={thL}>Qué pasó</th>
+                    <th style={th}>Entrada</th><th style={th}>Salida</th><th style={th}>Comisiones</th>
+                    <th style={th}>Resultado</th><th style={thL}>Decisión</th>
+                  </tr></thead>
+                  <tbody>
+                    {historialVis.map((r) => {
+                      const es = ESTADO[r.status] || { l: r.status, c: C.muted };
+                      const vd = VERED[r.veredicto] || null;
+                      const legacy = r.status === "closed" && r.px_ars_entrada == null;
+                      const pnl = legacy ? Number(r.pnl_usd) : Number(r.pnl_ars);
+                      return (
+                        <Fragment key={r.id}>
+                          <tr onClick={() => setAbierta(abierta === r.id ? null : r.id)}
+                            style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}>
+                            <td style={{ ...tdL, fontSize: 11.5, color: C.muted }}>{fecha(r.exit_ts || r.created_at)}</td>
+                            <td style={{ ...tdL, fontWeight: 700 }}>
+                              {r.ticker}
+                              {legacy && <span style={{ fontSize: 9.5, color: C.yellow, marginLeft: 6, border: `1px solid ${C.yellow}`, borderRadius: 3, padding: "1px 4px" }}>MODELO VIEJO</span>}
+                            </td>
+                            <td style={{ ...tdL, color: es.c, fontSize: 12 }}>
+                              {r.status === "closed" ? `cerró por ${r.exit_reason}` : es.l}
+                              {r.intradia && <span style={{ color: C.green, fontSize: 10.5 }}> · intradía</span>}
+                            </td>
+                            <td style={td}>{legacy ? usd(r.entry_price) : pesos(r.px_ars_entrada)}</td>
+                            <td style={td}>{legacy ? usd(r.exit_price) : pesos(r.px_ars_salida)}</td>
+                            <td style={{ ...td, color: C.muted }}>{legacy ? (r.fees_usd != null ? usd(r.fees_usd) : "—") : pesos(r.fees_ars)}</td>
+                            <td style={{ ...td, fontWeight: 700, color: pnl > 0 ? C.green : pnl < 0 ? C.red : C.dim }}>
+                              {r.status === "cancelled" ? "—" : legacy ? (r.pnl_usd != null ? `${r.pnl_usd >= 0 ? "+" : "−"}US${Math.abs(r.pnl_usd).toFixed(2)}` : "—") : firmado(pnl)}
+                            </td>
+                            <td style={{ ...tdL, color: vd?.c || C.dim, fontSize: 12 }}>{vd?.l || "—"}</td>
+                          </tr>
+                          {abierta === r.id && (
+                            <tr><td colSpan={8} style={{ padding: "10px 12px 14px", background: C.deep, borderBottom: `1px solid ${C.border}` }}>
+                              {r.nota_sim && <div style={{ fontSize: 12.5, color: C.text, lineHeight: 1.6, marginBottom: 8 }}>{r.nota_sim}</div>}
+                              <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.6 }}>
+                                <b>Por qué la tomó:</b> {r.senal || "—"}
+                              </div>
+                              <div style={{ fontSize: 11.5, color: C.dim, marginTop: 6 }}>
+                                nivel {usd(r.entry_limit)} · stop inicial {usd(r.stop_inicial)} · target {usd(r.target)} · score {r.score}/10 · R:R {r.rr}
+                                {r.ratio ? ` · ratio ${Number(r.ratio).toFixed(2)} por US$1` : ""}
+                                {r.broker_order_id ? ` · orden IOL ${r.broker_order_id}` : ""}
+                              </div>
+                            </td></tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {historial.length > 12 && (
+              <button onClick={() => setVerTodo((v) => !v)}
+                style={{ marginTop: 10, padding: "6px 14px", fontSize: 12, cursor: "pointer", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>
+                {verTodo ? "Ver menos" : `Ver las ${historial.length} operaciones`}
+              </button>
+            )}
+          </div>
+
+          <div style={{ fontSize: 11.5, color: C.dim, lineHeight: 1.6 }}>
+            Lo escribe el worker <span className="eco-mono">niveles-auto</span>, que revisa cada 60 segundos durante la rueda.
+            Los niveles se calculan sobre el subyacente en dólares y la ejecución se cuenta en pesos sobre el papel local.
+            {viejas.length > 0 && ` Las ${viejas.length} filas marcadas MODELO VIEJO son de antes del 19/08/2026, cuando el bot simulaba comprar en el segmento USA con otra tarifa: no se promedian con el resto porque serían otra unidad de medida.`}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 /* ══════════════ DECISION LOG ══════════════
  *
