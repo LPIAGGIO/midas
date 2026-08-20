@@ -249,6 +249,7 @@ const NAV = [
       { id: "superinversores", label: "Superinversores", icon: Users, type: "single", requiresAuth: true },
       { id: "decision-log", label: "Decision Log", icon: ShieldCheck, type: "single", requiresAuth: true },
       { id: "bot-iol", label: "Bot IOL", icon: Bot, type: "single", requiresAuth: true, badge: "SIM" },
+      { id: "conciliacion", label: "Conciliación", icon: Check, type: "single", requiresAuth: true },
     ],
   },
 ];
@@ -1515,6 +1516,8 @@ function MidasApp({ allowedModules = null }) {
               <DecisionLogModule key={active} />
             ) : active === "bot-iol" ? (
               <BotIolModule key={active} />
+            ) : active === "conciliacion" ? (
+              <ConciliacionModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
             ) : active === "calc-montecarlo" ? (
@@ -42034,6 +42037,254 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
 }
 
 /* ─────────── Módulo ─────────── */
+
+/* ══════════════ CONCILIACIÓN CONTRA EL BROKER ══════════════
+ *
+ * POR QUÉ EXISTE. El total de Midas y el del broker no daban igual y cada vez
+ * había que sentarse a sumar a mano para encontrar dónde estaba la diferencia.
+ * El 19/08/2026 la búsqueda terminó en que casi todo era una compra y una venta
+ * del día sin importar — pero para llegar a eso hubo que reconstruir la cartera
+ * entera afuera de la app. Esto pone esa comparación adentro: se ve en dos
+ * segundos qué instrumento no cierra, en vez de discutirlo.
+ *
+ * LAS DOS COLUMNAS QUE IMPORTAN, Y POR QUÉ ESTÁN SEPARADAS:
+ *
+ *  - PRECIO y FUENTE. Cuando un papel no tiene precio de mercado, Midas lo
+ *    valúa al costo y sigue de largo. El total del Portfolio dice cuántas
+ *    posiciones están así ("10 a costo · 32 a mercado") pero no CUÁLES ni
+ *    cuánta plata representan. Acá cada fila declara con qué precio se valuó y
+ *    de dónde salió, y arriba se totaliza cuánto del patrimonio está apoyado en
+ *    costo en vez de mercado. Esa es normalmente la mitad de la diferencia.
+ *
+ *  - VALOR DEL BROKER. Se carga a mano y queda guardado en el navegador. No se
+ *    parsea el archivo del broker a propósito: cada uno exporta distinto, un
+ *    parser adivinando columnas se rompe en silencio y devuelve un número
+ *    creíble pero falso — que es exactamente el tipo de error que esta pantalla
+ *    existe para cazar. Trece números tipeados una vez son más confiables.
+ *
+ * La conciliación es contra la TENENCIA, no contra el total: el efectivo del
+ * broker (que puede ser negativo si estás apalancado) es otra cuenta y no se
+ * mezcla acá.
+ */
+function ConciliacionModule() {
+  const { user } = useAuth();
+  const { positions, loading } = useUserPositions();
+  const { fx } = useDashboardFx();
+  const bondPrices = useBondPrices()?.prices || {};
+  const stockPrices = useStockPrices()?.prices || {};
+  const fciPrices = useFciPrices(positions)?.prices || {};
+  const futureTickers = useMemo(
+    () => Array.from(new Set((positions || [])
+      .filter((p) => p.instrument_type === "future")
+      .map((p) => (p.ticker || "").toUpperCase().trim()))),
+    [positions]
+  );
+  const futurePrices = useFuturePrices(futureTickers)?.prices || {};
+
+  const [broker, setBroker] = useState("cocos");
+  const [ref, setRef] = useState({});          // { "cocos|AO28": 76146840 }
+
+  const LS_KEY = "midas:conciliacion:ref";
+  useEffect(() => {
+    try { setRef(JSON.parse(window.localStorage.getItem(LS_KEY) || "{}")); } catch { /* nada */ }
+  }, []);
+  const setRefVal = (k, v) => {
+    setRef((prev) => {
+      const next = { ...prev };
+      if (v === "" || v == null) delete next[k]; else next[k] = v;
+      try { window.localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch { /* nada */ }
+      return next;
+    });
+  };
+
+  const brokers = useMemo(() => {
+    const s = new Set();
+    for (const p of positions || []) s.add(p.broker || "manual");
+    return Array.from(s).sort();
+  }, [positions]);
+
+  // Fuentes que cuentan como precio REAL de mercado. El resto es costo o
+  // fallback, y eso es justo lo que hay que poder ver.
+  const MERCADO = new Set(["byma", "data912", "mae", "market", "manual", "close", "primary", "settle"]);
+
+  const filas = useMemo(() => {
+    if (!positions?.length) return [];
+    const src = positions.filter((p) => (p.broker || "manual") === broker);
+    let cons = [];
+    try { cons = consolidatePositions(src, bondPrices, futurePrices, fciPrices, stockPrices) || []; }
+    catch (e) { console.warn("[conciliacion] consolidate:", e); return []; }
+    const out = [];
+    for (const g of cons) {
+      if (!g || g.isClosed) continue;
+      const q = Number(g.netQty);
+      if (!Number.isFinite(q) || Math.abs(q) < 1e-9) continue;
+      const vMidas = Number(g.valueAtMarket ?? g.valueAtCost);
+      const clave = `${broker}|${g.ticker}`;
+      // Se limpia antes de parsear: parseAmountString devuelve 0 —no null— ante
+      // cualquier cosa que no entienda, y pegar el importe con el signo de peso
+      // adelante ("$76.146.840,00") caia en ese caso. Un cero silencioso acá
+      // inventa una diferencia de millones que parece un error de Midas.
+      const crudo = ref[clave] == null ? "" : String(ref[clave]).replace(/[^0-9.,-]/g, "").trim();
+      const vBroker = crudo === "" ? null : parseAmountString(crudo);
+      out.push({
+        clave,
+        ticker: g.ticker,
+        tipo: g.instrument_type,
+        qty: q,
+        precio: Number(g.currentPrice),
+        fuente: g.priceSource || "cost",
+        aMercado: MERCADO.has(g.priceSource),
+        moneda: g.currency || "ARS",
+        vMidas: Number.isFinite(vMidas) ? vMidas : null,
+        vBroker: Number.isFinite(vBroker) ? vBroker : null,
+      });
+    }
+    return out.sort((a, b) => Math.abs(b.vMidas || 0) - Math.abs(a.vMidas || 0));
+  }, [positions, broker, ref, bondPrices, futurePrices, fciPrices, stockPrices]);
+
+  const tot = useMemo(() => {
+    let midas = 0, brokerT = 0, cargadas = 0, aCosto = 0, valorACosto = 0;
+    for (const f of filas) {
+      midas += f.vMidas || 0;
+      if (f.vBroker != null) { brokerT += f.vBroker; cargadas++; }
+      if (!f.aMercado) { aCosto++; valorACosto += f.vMidas || 0; }
+    }
+    return { midas, brokerT, cargadas, aCosto, valorACosto, dif: brokerT - midas };
+  }, [filas]);
+
+  const f$ = (n) => (n == null || !isFinite(n) ? "—" : `${n < 0 ? "−" : ""}$${Math.abs(Math.round(n)).toLocaleString("es-AR")}`);
+  const card = { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16 };
+  const th = { padding: "8px 10px", fontSize: 10.5, fontWeight: 500, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap", textAlign: "right" };
+  const thL = { ...th, textAlign: "left" };
+  const td = { padding: "8px 10px", fontSize: 12.5, color: C.text, whiteSpace: "nowrap", textAlign: "right", fontFamily: "'Roboto Mono', monospace" };
+  const tdL = { ...td, textAlign: "left", fontFamily: "inherit" };
+
+  if (!user) return <div style={{ ...card, color: C.muted, fontSize: 13 }}>Entrá a tu cuenta para conciliar.</div>;
+  if (loading) return <div style={{ ...card, color: C.muted, fontSize: 13 }}>Cargando…</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={card}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: C.muted }}>Broker:</span>
+          {brokers.map((b) => (
+            <button key={b} onClick={() => setBroker(b)}
+              style={{
+                padding: "5px 14px", fontSize: 12, cursor: "pointer", borderRadius: 6,
+                fontWeight: broker === b ? 700 : 500,
+                border: `1px solid ${broker === b ? C.accent : C.border}`,
+                background: broker === b ? C.accentSoft : "transparent",
+                color: broker === b ? C.accent : C.muted,
+              }}>{b}</button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11.5, color: C.muted, marginTop: 10, lineHeight: 1.6 }}>
+          Se concilia la <strong style={{ color: C.text }}>tenencia</strong>, no el total: el efectivo del broker —que puede ser negativo si estás apalancado— es otra cuenta.
+          Cargá el importe de cada papel como lo muestra tu broker y la diferencia se calcula sola. Queda guardado en este navegador.
+        </div>
+      </div>
+
+      {/* ── Resumen ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
+        {[
+          { k: "Tenencia en Midas", v: f$(tot.midas), s: `${filas.length} posiciones` },
+          { k: "Tenencia en el broker", v: tot.cargadas ? f$(tot.brokerT) : "—", s: tot.cargadas ? `${tot.cargadas} de ${filas.length} cargadas` : "cargá los importes" },
+          {
+            k: "Diferencia", v: tot.cargadas ? f$(tot.dif) : "—",
+            s: tot.cargadas && tot.cargadas < filas.length ? "parcial: faltan papeles" : "",
+            c: !tot.cargadas ? C.text : Math.abs(tot.dif) < 1000 ? C.green : C.red,
+          },
+          {
+            k: "Valuado a costo", v: tot.aCosto ? f$(tot.valorACosto) : "—",
+            s: tot.aCosto ? `${tot.aCosto} posiciones sin precio de mercado` : "todo a mercado",
+            c: tot.aCosto ? C.yellow : C.green,
+          },
+        ].map((m) => (
+          <div key={m.k} style={card}>
+            <div style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase" }}>{m.k}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: m.c || C.text, marginTop: 6, fontFamily: "'Roboto Mono', monospace" }}>{m.v}</div>
+            {m.s && <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>{m.s}</div>}
+          </div>
+        ))}
+      </div>
+
+      {tot.aCosto > 0 && (
+        <div style={{ padding: "10px 14px", background: "rgba(250,204,21,0.06)", borderLeft: `3px solid ${C.yellow}`, fontSize: 11.5, color: C.muted, lineHeight: 1.6 }}>
+          <strong style={{ color: C.yellow }}>{f$(tot.valorACosto)}</strong> de la tenencia está valuado <strong style={{ color: C.text }}>al costo</strong>, no a mercado:
+          son papeles para los que hoy no llegó precio. Ese valor no se mueve con el mercado y es la causa más común de que el total no coincida con el broker.
+          Las filas están marcadas abajo en la columna <em>fuente</em>.
+        </div>
+      )}
+
+      {/* ── Tabla ── */}
+      <div style={card}>
+        {!filas.length ? (
+          <div style={{ fontSize: 12.5, color: C.muted }}>Sin posiciones abiertas en {broker}.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+              <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                <th style={thL}>Papel</th><th style={thL}>Tipo</th><th style={th}>Cantidad</th>
+                <th style={th}>Precio usado</th><th style={thL}>Fuente</th>
+                <th style={th}>Valor Midas</th><th style={th}>Valor broker</th><th style={th}>Diferencia</th>
+              </tr></thead>
+              <tbody>
+                {filas.map((f) => {
+                  const dif = f.vBroker != null && f.vMidas != null ? f.vBroker - f.vMidas : null;
+                  const material = dif != null && Math.abs(dif) > Math.max(1000, Math.abs(f.vMidas || 0) * 0.005);
+                  return (
+                    <tr key={f.clave} style={{ borderBottom: `1px solid ${C.border}`, background: material ? "rgba(248,113,113,0.05)" : "transparent" }}>
+                      <td style={{ ...tdL, fontWeight: 700 }}>{f.ticker}</td>
+                      <td style={{ ...tdL, color: C.muted, fontSize: 11.5 }}>{f.tipo}</td>
+                      <td style={td}>{f.qty.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
+                      <td style={td}>{Number.isFinite(f.precio) ? f.precio.toLocaleString("es-AR", { maximumFractionDigits: 2 }) : "—"}</td>
+                      <td style={tdL}>
+                        <span style={{
+                          fontSize: 10, padding: "2px 6px", borderRadius: 3,
+                          border: `1px solid ${f.aMercado ? C.border : C.yellow}`,
+                          color: f.aMercado ? C.muted : C.yellow,
+                        }}>{f.aMercado ? f.fuente : `${f.fuente} · a costo`}</span>
+                      </td>
+                      <td style={{ ...td, fontWeight: 600 }}>{f$(f.vMidas)}</td>
+                      <td style={{ padding: "5px 6px", textAlign: "right" }}>
+                        <input
+                          value={ref[f.clave] ?? ""}
+                          onChange={(e) => setRefVal(f.clave, e.target.value)}
+                          placeholder="—"
+                          inputMode="decimal"
+                          style={{
+                            width: 130, padding: "5px 8px", textAlign: "right", fontSize: 12.5,
+                            fontFamily: "'Roboto Mono', monospace", borderRadius: 5,
+                            border: `1px solid ${C.border}`, background: C.deep, color: C.text,
+                          }} />
+                      </td>
+                      <td style={{ ...td, fontWeight: 700, color: dif == null ? C.dim : Math.abs(dif) < 1000 ? C.green : C.red }}>
+                        {dif == null ? "—" : f$(dif)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot><tr style={{ borderTop: `2px solid ${C.borderStrong}` }}>
+                <td style={{ ...tdL, fontWeight: 700 }} colSpan={5}>Total</td>
+                <td style={{ ...td, fontWeight: 700 }}>{f$(tot.midas)}</td>
+                <td style={{ ...td, fontWeight: 700 }}>{tot.cargadas ? f$(tot.brokerT) : "—"}</td>
+                <td style={{ ...td, fontWeight: 700, color: !tot.cargadas ? C.dim : Math.abs(tot.dif) < 1000 ? C.green : C.red }}>
+                  {tot.cargadas ? f$(tot.dif) : "—"}
+                </td>
+              </tr></tfoot>
+            </table>
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: C.dim, marginTop: 10, lineHeight: 1.6 }}>
+          Un papel que está en el broker y no acá no aparece en la lista: si te falta uno, es que Midas no tiene esa operación importada.
+          Al revés, un papel acá que el broker no tiene suele ser una venta todavía sin importar.
+          Las diferencias chicas y parejas en varios papeles son precios de distinto momento, no un error.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ══════════════ BOT IOL ══════════════
  *
