@@ -35919,7 +35919,10 @@ function ManualLeadBond({ bond, customExitFx }) {
  * tasa peso del bono con el FX del futuro → te queda una TIR USD
  * conocida desde el día 0, independiente del spot al vencimiento.
  *
- * Matemática (asumiendo hedge perfecto K = X/(1000×F) contratos):
+ * Matemática (hedge perfecto = cubrir el COBRO al vencimiento, no el capital
+ * invertido: son distintos por el retorno del bono. Cada DLR son US$1.000, o
+ * sea 1.000×F pesos al vto, así que hacen falta K = M_total/(1000×F) contratos,
+ * donde M_total es lo que amortiza la letra. Ver SinteticoFriccion):
  *
  *   ARS_factor = M / P                   (gross return ARS sobre el holding period)
  *   USD_factor = ARS_factor × S_0 / F    (factor sintético en USD)
@@ -38088,6 +38091,182 @@ TIR_USD    = USD_factor^(365/T) − 1`}
  * Es componente externo (no inline IIFE) porque el simulador tiene state
  * propio (monto, estrategia/modelo locales del simulador).
  */
+/* ══════════════ SINTÉTICO: DIMENSIONAMIENTO Y AJUSTE DIARIO ══════════════
+ *
+ * QUÉ FALTABA Y POR QUÉ IMPORTA. El resto de la pantalla calcula bien la TIR en
+ * dólares del sintético (letra en pesos + futuro largo), pero la muestra como si
+ * la operación no tuviera fricción — y tiene dos, las dos operativas:
+ *
+ *  1. CUÁNTO COMPRAR. La TIR no dice cuántos nominales de la letra ni cuántos
+ *     contratos de futuro hacen falta. El calce sale de igualar la AMORTIZACIÓN
+ *     de la letra con el NOCIONAL del contrato: cada DLR son US$1.000, o sea
+ *     1.000 × F pesos al vencimiento. Los VN que cubre un contrato son
+ *     (1.000 × F) ÷ (M/100). Sin esta cuenta uno queda descalzado y la "tasa
+ *     fija en dólares" deja de ser fija.
+ *
+ *  2. EL AJUSTE DIARIO. El futuro se liquida todos los días contra el A3500. Si
+ *     el dólar sube, cobrás; si baja o sube menos de lo que ya está priceado,
+ *     INTEGRÁS PESOS todos los días — contra una letra que está inmovilizada
+ *     hasta el vencimiento y no podés tocar. Si esos pesos los fondeás con
+ *     caución tomadora, ese costo se come parte del retorno. La TIR a
+ *     vencimiento es correcta pero es la TIR SIN fricción; la realizada depende
+ *     del camino del dólar y de cuánto cueste bancar los márgenes.
+ *
+ * EL MODELO DEL COSTO, Y SU LÍMITE. El margen acumulado al vencimiento es
+ * exacto: (F − S_T) × 1.000 × contratos. El COSTO de fondearlo no se puede
+ * saber sin el camino, así que se asume que el dólar viaja lineal y el margen
+ * se acumula parejo — el saldo promedio termina siendo la mitad del final. Es
+ * una aproximación y la pantalla lo dice: sirve para dimensionar la liquidez
+ * que hay que tener, no para prometer un número.
+ *
+ * EL ESCENARIO QUE MÁS DUELE es el primero de la tabla: que el dólar se quede
+ * donde está hoy. Ahí integrás todo el carry que el futuro tiene priceado, que
+ * es justo el escenario en el que el sintético "funciona" — cobrás la tasa en
+ * dólares igual, pero tuviste que bancar el margen entero para llegar.
+ */
+function SinteticoFriccion({ sim, caucionTNA, spotMayorista, C, fmtARS }) {
+  const datos = useMemo(() => {
+    const F = Number(sim?.dlrInfo?.price);
+    const VN = Number(sim?.bondVN);
+    const cobro = Number(sim?.arsFromBond);      // pesos que paga la letra al vto
+    const capital = Number(sim?.arsCapital);     // pesos invertidos hoy
+    const dias = Number(sim?.daysRemaining);
+    const tirBruta = Number(sim?.tirUsdAnnualized);
+    const S0 = Number(spotMayorista);
+    const tna = Number(caucionTNA) / 100;
+    if (!(F > 0) || !(cobro > 0) || !(dias > 0) || !(S0 > 0)) return null;
+
+    // Calce: cada contrato son US$1.000 → 1.000 × F pesos al vencimiento.
+    const nocionalContrato = 1000 * F;
+    const contratos = cobro / nocionalContrato;
+    // VN que cubre UN contrato (la cuenta del calce, al revés).
+    const vnPorContrato = VN > 0 && cobro > 0 ? (nocionalContrato / (cobro / VN)) : null;
+
+    // Escenarios por dónde TERMINA el dólar, medido contra el futuro.
+    const esc = [
+      { l: "Se queda donde está hoy", St: S0, nota: "el peor caso realista: integrás todo el carry priceado" },
+      { l: "Sube la mitad de lo priceado", St: S0 + (F - S0) * 0.5, nota: null },
+      { l: "Termina en el futuro", St: F, nota: "sin margen: el futuro acertó" },
+      { l: "Supera el futuro 5%", St: F * 1.05, nota: "cobrás margen en vez de integrarlo" },
+    ];
+
+    // Dólares que se pusieron el día cero (los mismos que usa la TIR bruta de
+    // la pantalla, para que neta y bruta sean comparables).
+    const usdInvertido = Number(sim?.usdEquivalentEntry) || (capital > 0 && S0 > 0 ? capital / S0 : null);
+
+    const filas = esc.map((e) => {
+      // MTM acumulado del LARGO. Cada contrato es US$1.000, así que cada peso
+      // que se mueve el dólar son 1.000 pesos por contrato.
+      // Positivo = cobrás; negativo = integrás.
+      const mtm = (e.St - F) * 1000 * contratos;
+      const integra = mtm < 0 ? -mtm : 0;
+      // Saldo promedio ≈ mitad del final (acumulación pareja a lo largo del plazo).
+      const costo = integra > 0 ? (integra / 2) * tna * (dias / 365) : 0;
+
+      // El cobro de la letra sale al FUTURO (ese es el punto del sintético): el
+      // MTM y el spot final se compensan por construcción. Lo único que cambia
+      // el resultado es el COSTO de haber fondeado el margen, que se paga en
+      // pesos y se pasa a dólares al tipo de cambio de salida.
+      const usdBruto = cobro / F;
+      const usdNeto = usdBruto - costo / e.St;
+      const tirNeta = usdInvertido > 0 && usdNeto > 0
+        ? Math.pow(usdNeto / usdInvertido, 365 / dias) - 1
+        : null;
+      return { ...e, mtm, integra, costo, tirNeta };
+    });
+
+    return { F, S0, dias, contratos, nocionalContrato, vnPorContrato, VN, cobro, capital, tirBruta, filas, tna };
+  }, [sim, caucionTNA, spotMayorista]);
+
+  if (!datos) return null;
+  const pct = (x) => (x == null || !isFinite(x) ? "—" : `${(x * 100).toFixed(2)}%`);
+  const cel = { padding: "7px 9px", fontSize: 12, fontFamily: "'Roboto Mono', monospace", textAlign: "right", whiteSpace: "nowrap" };
+  const celL = { ...cel, textAlign: "left", fontFamily: "inherit" };
+  const th = { padding: "6px 9px", fontSize: 9.5, letterSpacing: "0.05em", textTransform: "uppercase", fontWeight: 500, color: C.dim, textAlign: "right", whiteSpace: "nowrap" };
+  const thL = { ...th, textAlign: "left" };
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      {/* ── Calce ── */}
+      <div style={{ padding: "10px 14px", background: "rgba(91,141,214,0.06)", borderLeft: `3px solid ${C.accentBorder}`, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: C.accent, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 7 }}>
+          Cuánto comprar para quedar calzado
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, fontSize: 12 }}>
+          {[
+            ["Nominales de la letra", datos.VN > 0 ? fmtARS(datos.VN) : "—"],
+            ["Contratos de futuro", datos.contratos.toFixed(2)],
+            ["Nocional por contrato", `$ ${fmtARS(datos.nocionalContrato)}`],
+            ["VN que cubre 1 contrato", datos.vnPorContrato ? fmtARS(datos.vnPorContrato) : "—"],
+          ].map(([k, v]) => (
+            <div key={k}>
+              <div style={{ color: C.dim, fontSize: 10 }}>{k}</div>
+              <div style={{ color: C.text, fontFamily: "'Roboto Mono', monospace", fontWeight: 600 }}>{v}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.55 }}>
+          Cada DLR es <strong style={{ color: C.text }}>US$ 1.000</strong>, o sea <strong style={{ color: C.text }}>$ {fmtARS(datos.nocionalContrato)}</strong> al vencimiento.
+          Los nominales se dimensionan para que <strong style={{ color: C.text }}>lo que amortiza la letra iguale el nocional de los contratos</strong> — así el tipo de cambio de salida queda fijo de verdad.
+          Con {datos.contratos.toFixed(2)} contratos el calce es exacto; como se compran enteros, redondear deja una punta descubierta.
+        </div>
+      </div>
+
+      {/* ── Ajuste diario ── */}
+      <div style={{ padding: "10px 14px", background: "rgba(250,204,21,0.06)", borderLeft: `3px solid ${C.yellow}` }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: C.yellow, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 7 }}>
+          El ajuste diario: la plata que hay que tener mientras dura
+        </div>
+        <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.6, marginBottom: 10 }}>
+          El futuro se liquida <strong style={{ color: C.text }}>todos los días contra el A3500</strong>. Si el dólar sube cobrás la diferencia; si baja
+          —o sube menos de lo que el futuro ya tiene priceado— <strong style={{ color: C.text }}>la integrás en pesos al día siguiente</strong>.
+          Y la letra está <strong style={{ color: C.text }}>inmovilizada hasta el vencimiento</strong>: no se puede vender para cubrir el margen sin romper el sintético.
+          La TIR de arriba ({pct(datos.tirBruta)}) es la de vencimiento, <em>sin</em> esta fricción.
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+            <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>
+              <th style={thL}>Si el dólar al vencimiento…</th>
+              <th style={th}>A integrar</th>
+              <th style={th}>Costo a caución</th>
+              <th style={th}>TIR USD neta</th>
+            </tr></thead>
+            <tbody>
+              {datos.filas.map((f) => (
+                <tr key={f.l} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={celL}>
+                    <div style={{ color: C.text }}>{f.l}</div>
+                    <div style={{ fontSize: 10.5, color: C.dim }}>
+                      $ {fmtARS(f.St)}{f.nota ? ` · ${f.nota}` : ""}
+                    </div>
+                  </td>
+                  <td style={{ ...cel, color: f.integra > 0 ? C.red : f.mtm > 0 ? C.green : C.dim }}>
+                    {f.integra > 0
+                      ? `$ ${fmtARS(f.integra)}`
+                      : f.mtm > 0 ? `cobrás $ ${fmtARS(f.mtm)}` : "—"}
+                  </td>
+                  <td style={{ ...cel, color: f.costo > 0 ? C.red : C.dim }}>
+                    {f.costo > 0 ? `−$ ${fmtARS(f.costo)}` : "—"}
+                  </td>
+                  <td style={{ ...cel, fontWeight: 600, color: f.tirNeta == null ? C.dim : f.tirNeta >= 0 ? C.green : C.red }}>
+                    {pct(f.tirNeta)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ fontSize: 10.5, color: C.dim, marginTop: 9, lineHeight: 1.55 }}>
+          El margen al vencimiento es exacto. El <strong>costo</strong> es una estimación: no se puede saber sin el camino del dólar,
+          así que se asume que viaja parejo y que el saldo promedio a fondear es la mitad del final, a caución tomadora de {(datos.tna * 100).toFixed(1)}% TNA
+          por {datos.dias} días. Sirve para dimensionar <strong>cuánta liquidez hay que tener</strong>, no para prometer un número.
+          Si el dólar se mueve de golpe, el margen llega antes y cuesta más.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BondDetailModal({ row, spotMayorista, spotMep, futuresLive, curveData, selectedHorizon, selectedStrategy, shortestBondTir, dlrCurve, onClose }) {
   // State del simulador (existente). Defaults: ARS 1.000.000, estrategia/horizonte
   // heredados de la pantalla principal, modelo "const" (escenario base).
@@ -39236,6 +39415,17 @@ function BondDetailModal({ row, spotMayorista, spotMep, futuresLive, curveData, 
                 </tbody>
               </table>
             </div>
+
+            {/* Dimensionamiento y ajuste diario: lo que la TIR a vencimiento
+                no cuenta — cuántos nominales y contratos hacen falta, y cuánta
+                plata hay que tener para bancar los márgenes mientras dura. */}
+            <SinteticoFriccion
+              sim={sim}
+              caucionTNA={parseFloat(String(caucionRateInput).replace(",", ".")) || defaultCaucionTNA}
+              spotMayorista={spotMayorista}
+              C={C}
+              fmtARS={fmtARS}
+            />
 
             {/* Texto explicativo dinámico */}
             {explanation && (
