@@ -1294,6 +1294,26 @@ function botDescarte(tk, nivel, faltas) {
   log(`[bot ${tk}] setup en US$${nivel.toFixed(2)} NO califica: ${faltas.join(" · ")}`);
 }
 
+/* Cancela una orden apoyada. Se usa para re-alinear el límite en pesos cuando
+ * el tipo de cambio lo corrió. Igual que iolOrden, NO se probó contra la API en
+ * vivo todavía. */
+async function iolCancelar(numero) {
+  const token = await iolToken();
+  const r = await fetch(`https://api.invertironline.com/api/v2/operar/Cancelar/${encodeURIComponent(numero)}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!r.ok) throw new Error(`IOL cancelar ${numero}: ${r.status}`);
+  return true;
+}
+
+// Cuánto puede despegarse el límite apoyado del nivel vigente antes de
+// recolocar. Medido sobre 231 ruedas de 2026, el CCL se mueve 0,27% en dos días
+// (mediana) y 1,20% en el percentil 90: con 0,3% se recolocaría casi siempre y
+// con 1% se dejaría pasar media cola. 0,5% deja quieta la orden en el caso
+// normal y la corrige cuando el movimiento empieza a pesar contra un stop de
+// 2,5%.
+const DERIVA_MAX = 0.005;
+
 async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
   if (!BOT_UNIVERSO.has(String(tk).toUpperCase())) return;   // opera 3 papeles, no todo el tablero
   const { data: ex } = await supabase.from("paper_iol_trades").select("id,status,entry_limit").eq("sym", sym).in("status", ["pending", "open"]);
@@ -1333,6 +1353,7 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
     entry_limit: entry, stop, stop_inicial: stop, target, r_value: entry - stop,
     modo: MODO_REAL ? "real" : "paper", perfil: PERFIL, ratio: Math.round(rArs * 100) / 100,
     regla_salida: "trailing_2r",
+    px_ars_orden: Math.round(precioUnidad),
     nota_sim: `Nivel de compra US$${entry.toFixed(2)} ≈ ${pesos(precioUnidad)} por unidad. Esperando que el papel baje a buscarlo. Si llega: compra ${qty}, vende en US$${target.toFixed(2)} ≈ ${pesos(target * rArs)}, corta en US$${stop.toFixed(2)} ≈ ${pesos(stop * rArs)}.`,
   };
   if (MODO_REAL) {
@@ -1367,6 +1388,35 @@ async function paperPass() {
     if (!p || !rArs) continue;
 
     if (t.status === "pending") {
+      /* RE-ALINEAR EL LÍMITE EN PESOS.
+       *
+       * El fill se evalúa sobre el subyacente en dólares —ahí está la tesis: se
+       * compra "MU en 915", no "MU en 289.581 pesos"— pero la orden que queda
+       * apoyada en el broker está en pesos y no se entera de que el tipo de
+       * cambio se movió. Sin esto, paper y real divergen: el paper seguiría el
+       * nivel en dólares y el real quedaría clavado en un precio que ya no lo
+       * representa. Y el paper existe justamente para predecir el real.
+       *
+       * Sólo aplica en modo real: en paper no hay orden que corregir, el nivel
+       * se recalcula solo en cada pasada. */
+      if (MODO_REAL && t.broker_order_id && t.px_ars_orden > 0) {
+        const deberia = Number(t.entry_limit) * rArs;
+        const deriva = Math.abs(deberia / Number(t.px_ars_orden) - 1);
+        if (deriva > DERIVA_MAX) {
+          try {
+            await iolCancelar(t.broker_order_id);
+            const nuevo = await iolOrden("compra", t.ticker, t.qty, deberia);
+            await supabase.from("paper_iol_trades").update({
+              broker_order_id: nuevo,
+              px_ars_orden: Math.round(deberia),
+              recolocaciones: (t.recolocaciones || 0) + 1,
+            }).eq("id", t.id);
+            log(`[bot ${t.ticker}] orden recolocada: el dólar la corrió ${(deriva * 100).toFixed(2)}% · ${pesos(t.px_ars_orden)} → ${pesos(deberia)}`);
+          } catch (e) {
+            log(`[bot ${t.ticker}] NO se pudo recolocar (${e.message}) — la orden vieja sigue apoyada en ${pesos(t.px_ars_orden)}`);
+          }
+        }
+      }
       // Una orden límite descansa en el book: alcanza con que el papel haya
       // TOCADO el nivel en algún momento de la rueda, no que esté ahí ahora.
       const lim = Number(t.entry_limit);
