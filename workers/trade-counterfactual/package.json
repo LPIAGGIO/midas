@@ -1,0 +1,13 @@
+{
+  "name": "trade-counterfactual",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mide cada compra y venta contra el contrafactual de Selling Fast and Buying Slow (JF 2023)",
+  "main": "worker.js",
+  "scripts": { "start": "node worker.js" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "ws": "^8.20.1"
+  }
+}

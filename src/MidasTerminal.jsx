@@ -250,6 +250,7 @@ const NAV = [
       { id: "decision-log", label: "Decision Log", icon: ShieldCheck, type: "single", requiresAuth: true },
       { id: "bot-iol", label: "Bot IOL", icon: Bot, type: "single", requiresAuth: true, badge: "SIM" },
       { id: "conciliacion", label: "Conciliación", icon: Check, type: "single", requiresAuth: true },
+      { id: "ventas-vs-compras", label: "Comprar vs Vender", icon: Repeat, type: "single", requiresAuth: true },
     ],
   },
 ];
@@ -1518,6 +1519,8 @@ function MidasApp({ allowedModules = null }) {
               <BotIolModule key={active} />
             ) : active === "conciliacion" ? (
               <ConciliacionModule key={active} />
+            ) : active === "ventas-vs-compras" ? (
+              <VentasVsCompraModule key={active} />
             ) : active === "calc-kelly" ? (
               <KellyCalcModule key={active} />
             ) : active === "calc-montecarlo" ? (
@@ -42037,6 +42040,193 @@ function MapaPerfilVolumenTab({ perfiles, loading, error, tickersCartera }) {
 }
 
 /* ─────────── Módulo ─────────── */
+
+/* ══════════════ ¿COMPRO MEJOR DE LO QUE VENDO? ══════════════
+ *
+ * Replica sobre el libro propio la medición de "Selling Fast and Buying Slow"
+ * (Akepanidtaworn, Di Mascio, Imas & Schmidt, Journal of Finance 2023). Sobre
+ * 783 carteras institucionales de US$573 M promedio, el paper encuentra una
+ * asimetría fuerte: comprando le ganan a un contrafactual aleatorio por ~100 pb
+ * al año, y vendiendo pierden ~80 pb al año contra VENDER AL AZAR otra posición
+ * de su propia cartera.
+ *
+ * La causa que proponen no es falta de habilidad sino atención asimétrica: se
+ * piensa la compra y se despacha la venta con un heurístico — se venden los
+ * extremos, el mejor y el peor de la cartera, porque el retorno pasado es lo
+ * único que salta a la vista en cualquier pantalla. La prueba más limpia que
+ * dan: las ventas hechas en días de balance rinden 150 pb más que las de días
+ * normales, y ahí sí le ganan al contrafactual. Saben vender; no están mirando.
+ *
+ * POR QUÉ ESTA PANTALLA NO DA UN VEREDICTO TODAVÍA. El propio paper muestra que
+ * el daño de las ventas recién aparece pasados los 90 días — a 7 y 28 días el
+ * efecto es indistinguible de cero. Este libro arranca en junio de 2026, así
+ * que hoy sólo llegan los horizontes cortos, justo el tramo donde el paper no
+ * encuentra nada. Leer un número de acá ahora sería confundir ruido con
+ * hallazgo, que es exactamente el error contra el que se construyó todo lo
+ * demás de Midas. Por eso la pantalla muestra cuánto falta en vez de un
+ * resultado, y recién habilita la lectura cuando el horizonte tiene sentido.
+ *
+ * Y hay una razón estadística además de la del paper: las ventanas se solapan
+ * (la misma rueda entra en la medición de muchas operaciones) y los papeles
+ * están correlacionados entre sí, así que el error estándar ingenuo subestima
+ * muchísimo la incertidumbre. El paper usa errores doble-clusterizados. Acá se
+ * muestra el promedio y el n, sin test, para no vender precisión que no hay.
+ */
+function VentasVsCompraModule() {
+  const { user } = useAuth();
+  const [filas, setFilas] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    if (!user) { setFilas([]); return () => { vivo = false; }; }
+    (async () => {
+      const { data, error: e } = await supabase
+        .from("trade_counterfactual")
+        .select("side,horizonte,valor_agregado,ret_trade,ret_contrafactual,ticker,trade_date,n_alternativas")
+        .eq("user_id", user.id);
+      if (!vivo) return;
+      if (e) { setError(e.message); setFilas([]); return; }
+      setFilas(data || []);
+    })();
+    return () => { vivo = false; };
+  }, [user]);
+
+  // El paper considera legible el efecto recién pasados los 90 días corridos
+  // (~63 ruedas). Abajo de eso se muestra el dato pero marcado como prematuro.
+  const H_LEGIBLE = 63;
+  const HORIZONTES = [1, 5, 10, 21, 42, 63, 126, 252];
+
+  const resumen = useMemo(() => {
+    if (!filas?.length) return [];
+    return HORIZONTES.map((H) => {
+      const de = (side) => {
+        const xs = filas.filter((f) => f.horizonte === H && f.side === side).map((f) => Number(f.valor_agregado));
+        if (!xs.length) return null;
+        const m = xs.reduce((s, x) => s + x, 0) / xs.length;
+        return { n: xs.length, media: m };
+      };
+      return { H, compra: de("buy"), venta: de("sell") };
+    });
+  }, [filas]);
+
+  const maxN = useMemo(() => Math.max(0, ...resumen.map((r) => Math.max(r.compra?.n || 0, r.venta?.n || 0))), [resumen]);
+  const hayLegible = resumen.some((r) => r.H >= H_LEGIBLE && (r.compra || r.venta));
+
+  const pct = (x) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(2)}%`);
+  const card = { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16 };
+  const th = { padding: "8px 10px", fontSize: 10.5, fontWeight: 500, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "right", whiteSpace: "nowrap" };
+  const thL = { ...th, textAlign: "left" };
+  const td = { padding: "9px 10px", fontSize: 12.5, color: C.text, textAlign: "right", fontFamily: "'Roboto Mono', monospace", whiteSpace: "nowrap" };
+  const tdL = { ...td, textAlign: "left", fontFamily: "inherit" };
+
+  if (!user) return <div style={{ ...card, color: C.muted, fontSize: 13 }}>Entrá a tu cuenta para ver la medición.</div>;
+  if (filas === null) return <div style={{ ...card, color: C.muted, fontSize: 13 }}>Cargando…</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={card}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 8 }}>
+          ¿Comprás mejor de lo que vendés?
+        </div>
+        <div style={{ fontSize: 12.5, color: C.muted, lineHeight: 1.65 }}>
+          Cada operación se mide contra <strong style={{ color: C.text }}>lo que hicieron las otras posiciones que tenías ese día y no tocaste</strong>.
+          Es la vara del paper <em>Selling Fast and Buying Slow</em> (Journal of Finance, 2023): comparar una venta contra un índice no sirve,
+          porque no podías vender el índice — podías vender otra cosa tuya.
+          <br /><br />
+          Sobre 783 carteras institucionales, el paper encuentra que <strong style={{ color: C.green }}>comprando le ganan al azar por ~100 pb al año</strong> y
+          que <strong style={{ color: C.red }}>vendiendo pierden ~80 pb al año contra vender al azar</strong>. La causa que proponen no es falta de habilidad:
+          es que se piensa la compra y se despacha la venta mirando el retorno pasado, que es lo único que salta a la vista en una pantalla.
+          <br /><br />
+          Se mide sobre el <strong style={{ color: C.text }}>subyacente en dólares</strong>, no sobre el CEDEAR en pesos: el dólar le pega igual a lo que vendiste
+          y a lo que te quedaste, así que en pesos taparía lo único que esta decisión controla, que es la elección del papel.
+        </div>
+      </div>
+
+      {error && <div style={{ ...card, borderColor: C.red, color: C.red, fontSize: 13 }}>{error}</div>}
+
+      {!hayLegible && (
+        <div style={{ padding: "12px 16px", background: "rgba(250,204,21,0.07)", borderLeft: `3px solid ${C.yellow}`, fontSize: 12.5, color: C.muted, lineHeight: 1.65 }}>
+          <strong style={{ color: C.yellow }}>Todavía no se puede leer, y conviene decirlo antes que mostrar los números.</strong>
+          <br /><br />
+          El propio paper muestra que el daño de las ventas <strong style={{ color: C.text }}>recién aparece pasados los 90 días</strong>: a 7 y 28 días el efecto
+          es indistinguible de cero. Este libro arranca en junio de 2026, así que hoy sólo llegan los horizontes cortos — justo el tramo
+          donde el paper no encuentra nada. Cualquier número de la tabla de abajo a menos de 63 ruedas es ruido, y va a dar
+          positivo o negativo según la semana.
+          <br /><br />
+          Además las ventanas se solapan y los papeles están correlacionados entre sí, así que no se muestra ningún test de significancia:
+          el error estándar ingenuo subestimaría muchísimo la incertidumbre y daría una falsa sensación de precisión.
+          <br /><br />
+          <strong style={{ color: C.text }}>Qué falta:</strong> operar y esperar. A 63 ruedas la primera lectura sale a fin de septiembre de 2026;
+          la de 252 ruedas, a mediados de 2027.
+        </div>
+      )}
+
+      <div style={card}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Valor agregado por decisión</div>
+        <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 12 }}>
+          Positivo = la decisión agregó valor. En compras, el papel comprado rindió más que sumar a lo que ya tenías.
+          En ventas, lo vendido rindió menos que las alternativas que te quedaste.
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+            <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>
+              <th style={thL}>Horizonte</th>
+              <th style={th}>Compras</th><th style={th}>n</th>
+              <th style={th}>Ventas</th><th style={th}>n</th>
+              <th style={thL}>Estado</th>
+            </tr></thead>
+            <tbody>
+              {resumen.map((r) => {
+                const listo = r.H >= H_LEGIBLE;
+                const hay = r.compra || r.venta;
+                return (
+                  <tr key={r.H} style={{ borderBottom: `1px solid ${C.border}`, opacity: hay ? 1 : 0.45 }}>
+                    <td style={tdL}>{r.H} rueda{r.H === 1 ? "" : "s"}</td>
+                    <td style={{ ...td, color: !hay || !listo ? C.dim : r.compra.media >= 0 ? C.green : C.red }}>
+                      {r.compra ? pct(r.compra.media) : "—"}
+                    </td>
+                    <td style={{ ...td, color: C.dim, fontSize: 11.5 }}>{r.compra?.n ?? "—"}</td>
+                    <td style={{ ...td, color: !hay || !listo ? C.dim : r.venta.media >= 0 ? C.green : C.red }}>
+                      {r.venta ? pct(r.venta.media) : "—"}
+                    </td>
+                    <td style={{ ...td, color: C.dim, fontSize: 11.5 }}>{r.venta?.n ?? "—"}</td>
+                    <td style={{ ...tdL, fontSize: 11 }}>
+                      {!hay ? <span style={{ color: C.dim }}>sin datos aún</span>
+                        : listo ? <span style={{ color: C.green }}>legible</span>
+                        : <span style={{ color: C.yellow }}>prematuro · el paper no ve efecto acá</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {maxN > 0 && (
+          <div style={{ fontSize: 11, color: C.dim, marginTop: 10, lineHeight: 1.6 }}>
+            El contrafactual promedia <strong>todas</strong> las posiciones no tocadas ese día, mientras que el paper sortea una sola al azar.
+            Es la esperanza de ese sorteo con mucha menos varianza — necesario acá, porque esta cartera tiene ~10 posiciones
+            contra las 78 promedio del paper y un solo sorteo sería ruido puro.
+            Lo calcula el worker <span className="eco-mono">trade-counterfactual</span> todas las noches.
+          </div>
+        )}
+      </div>
+
+      <div style={{ ...card, fontSize: 12, color: C.muted, lineHeight: 1.65 }}>
+        <strong style={{ color: C.text }}>Lo que el paper sugiere hacer mientras tanto.</strong> El hallazgo más accionable no es el promedio:
+        es que las ventas decididas <strong style={{ color: C.text }}>en días de balance rinden 150 pb más</strong> que las de días normales, y ahí sí
+        le ganan al azar. No es que en esos días se venda mejor por casualidad — es que son los días en que uno está mirando de verdad.
+        La conclusión operativa es revisar las posiciones cuando hay información nueva, no cuando el precio llama la atención por haber
+        subido o bajado mucho.
+        <br /><br />
+        <strong style={{ color: C.text }}>Y una advertencia sobre a quién aplica.</strong> Las carteras del paper tienen 78 papeles promedio, mandato
+        institucional y benchmark; ésta tiene ~10 y decide una sola persona. El mecanismo —atención escasa— transfiere; la magnitud no
+        tiene por qué. Además el vínculo entre uso del heurístico y peor performance que reportan es correlacional, y ellos mismos
+        aclaran que no pueden descartar del todo el impacto de precio.
+      </div>
+    </div>
+  );
+}
 
 /* ══════════════ CONCILIACIÓN CONTRA EL BROKER ══════════════
  *
