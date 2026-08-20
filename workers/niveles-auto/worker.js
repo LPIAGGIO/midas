@@ -1332,6 +1332,7 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
     ticker: tk, sym, senal, score, rr, status: "pending", qty,
     entry_limit: entry, stop, stop_inicial: stop, target, r_value: entry - stop,
     modo: MODO_REAL ? "real" : "paper", perfil: PERFIL, ratio: Math.round(rArs * 100) / 100,
+    regla_salida: "trailing_2r",
     nota_sim: `Nivel de compra US$${entry.toFixed(2)} ≈ ${pesos(precioUnidad)} por unidad. Esperando que el papel baje a buscarlo. Si llega: compra ${qty}, vende en US$${target.toFixed(2)} ≈ ${pesos(target * rArs)}, corta en US$${stop.toFixed(2)} ≈ ${pesos(stop * rArs)}.`,
   };
   if (MODO_REAL) {
@@ -1393,10 +1394,33 @@ async function paperPass() {
 
     const entry = Number(t.entry_price), R = Number(t.r_value);
     let stop = Number(t.stop);
-    // Trailing por múltiplos de R: +1R → breakeven, +2R → protege 1R. Nunca baja.
+    /* TRAILING DESDE +2R, no desde +1R (cambiado el 20/08/2026).
+     *
+     * La versión anterior movía el stop a punto de equilibrio apenas la
+     * posición daba +1R, y eso contradecía el filtro de entrada. R es la
+     * distancia al stop —típicamente 2 o 3%—, así que apenas el papel subía eso
+     * el stop saltaba a la entrada y cualquier retroceso cerraba la operación.
+     * Pero para entrar se exige R:R >= 2, o sea que el target vive en 2R o más:
+     * quedaba matemáticamente casi inalcanzable.
+     *
+     * El backtest con las funciones de este mismo worker sobre 5 años de MU y
+     * GGAL y 1,5 de SNDK lo mostró crudo: de 22 operaciones UNA llegó al target
+     * (12 por stop, 9 por trailing) y el movimiento bruto medio fue +0,51% —
+     * cuando el filtro promete 2:1. Con el arranque en +2R: 4 de 20 al target y
+     * bruto medio +2,20%.
+     *
+     * OJO CON ESOS NÚMEROS: se probaron cuatro variantes sobre ~20 operaciones
+     * y se eligió la mejor, con t-stat de 0,19 y 1,23. Estadísticamente no
+     * prueban nada. Lo que justifica el cambio es que un sistema que pide 2:1
+     * para entrar y se sale en 1:1 se contradice solo, y eso es aritmética, no
+     * muestra. El backtest únicamente lo hizo visible.
+     *
+     * Ahora: +2R → breakeven, +3R → protege 1R, y así. Nunca baja.
+     * Las operaciones anteriores quedan marcadas regla_salida='trailing_1r'
+     * para que el scorecard no promedie dos estrategias distintas. */
     const k = Math.floor((p - entry) / R);
-    if (k >= 1 && entry + (k - 1) * R > stop) {
-      stop = entry + (k - 1) * R;
+    if (k >= 2 && entry + (k - 2) * R > stop) {
+      stop = entry + (k - 2) * R;
       await supabase.from("paper_iol_trades").update({ stop }).eq("id", t.id);
       log(`[bot ${t.ticker}] trailing: stop sube a US$${stop.toFixed(2)} (+${k}R)`);
     }
