@@ -1057,6 +1057,20 @@ const DERECHOS = 0.0005 * IVA;                                  // 0,0605%
 const COMISION = { gold: 0.005, platinum: 0.003, black: 0.001 };
 const PERFIL = String(process.env.IOL_PERFIL || "gold").toLowerCase();
 
+// TARIFA SOMBRA: qué habría costado la misma operación en Cocos. No es una
+// estimación — sale de medir 183 operaciones reales de CEDEARs del libro de LP
+// ($11.093 M operados): Cocos NO cobra comisión, sólo derechos de mercado más
+// IVA, y eso da 0,0545% por punta contra 0,6655% de IOL Gold. Doce veces menos.
+//
+// Se registra en paralelo porque el bot está en IOL por una sola razón —es el
+// único que se puede automatizar hoy, Cocos todavía no tiene API— y esa razón
+// es transitoria. Sin la sombra, dentro de tres meses el scorecard diría si la
+// estrategia funciona EN IOL GOLD, y se correría el riesgo de descartar algo
+// que sí funciona donde va a terminar operándose. Con stop -2,5% y target +6%
+// el listón es 45% de aciertos en Gold y 34% en Cocos: misma estrategia, dos
+// varas distintas.
+const FEE_COCOS = 0.000545;
+
 // bonificada = segunda pata de una operatoria intradiaria: IOL no cobra su
 // comisión, quedan sólo los derechos de mercado.
 const feePunta = (notionalArs, bonificada) =>
@@ -1403,6 +1417,11 @@ async function paperPass() {
     const intradia = t.entry_ts ? diaAr(t.entry_ts) === diaAr(new Date()) : false;
     const fees = feePunta(pxArsEnt * t.qty, false) + feePunta(pxArsSal * t.qty, intradia);
     const pnlArs = (pxArsSal - pxArsEnt) * t.qty - fees;
+    // La misma operación con la tarifa de Cocos. En Cocos no hay bonificación
+    // intradiaria que modelar: como no cobran comisión, las dos patas cuestan
+    // igual y sólo se pagan los derechos de mercado.
+    const feesAlt = (pxArsEnt + pxArsSal) * t.qty * FEE_COCOS;
+    const pnlAlt = (pxArsSal - pxArsEnt) * t.qty - feesAlt;
     const veredicto = pnlArs > 0 ? "acierto" : "error";
 
     let ordenSalida = null;
@@ -1414,12 +1433,14 @@ async function paperPass() {
     await supabase.from("paper_iol_trades").update({
       status: "closed", exit_price: exitUsd, exit_ts: new Date().toISOString(), exit_reason: reason,
       px_ars_salida: pxArsSal, fees_ars: Math.round(fees), pnl_ars: Math.round(pnlArs),
+      fees_ars_alt: Math.round(feesAlt), pnl_ars_alt: Math.round(pnlAlt), tarifa_alt: "cocos",
       intradia, veredicto,
       pnl_pct: Math.round((pnlArs / (pxArsEnt * t.qty)) * 10000) / 100,
       broker_order_id: ordenSalida || t.broker_order_id,
       nota_sim: `Cerró por ${reason}${intradia ? " el mismo día (IOL bonifica la comisión de la segunda pata)" : ""}. Vendió ${t.qty} × ${pesos(pxArsSal)} contra ${pesos(pxArsEnt)} de entrada. Comisiones ${pesos(fees)}. Resultado ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} → la decisión fue ${veredicto === "acierto" ? "CORRECTA" : "EQUIVOCADA"}.`,
     }).eq("id", t.id);
     log(`[bot ${t.ticker}] CIERRE ${reason}${intradia ? " (intradía)" : ""}: ${pesos(pxArsSal)} · comisiones ${pesos(fees)} · P&L ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} · ${veredicto.toUpperCase()}`);
+    log(`[bot ${t.ticker}]   la misma en Cocos: comisiones ${pesos(feesAlt)} · P&L ${pnlAlt >= 0 ? "+" : "-"}${pesos(Math.abs(pnlAlt))}`);
   }
 }
 
