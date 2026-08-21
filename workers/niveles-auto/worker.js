@@ -1069,7 +1069,18 @@ const PERFIL = String(process.env.IOL_PERFIL || "gold").toLowerCase();
 // que sí funciona donde va a terminar operándose. Con stop -2,5% y target +6%
 // el listón es 45% de aciertos en Gold y 34% en Cocos: misma estrategia, dos
 // varas distintas.
-const FEE_COCOS = 0.000545;
+// 0,050% de derechos + IVA. BYMA cobra DOS tasas distintas, medidas exactas
+// sobre 183 operaciones reales de CEDEARs de LP: 0,044% cuando se compra y
+// vende el mismo papel en el dia ("Compra/Venta Trading", 94 ops) y 0,050%
+// cuando no ("Compra/Venta", 89 ops). Son doce por ciento de diferencia.
+//
+// El bot opera SWING —entra un dia y sale otro—, asi que le corresponde la
+// cara. Antes habia un 0,0545% que era el promedio ponderado de las dos, y eso
+// no describe ninguna de las dos operatorias: subestimaba el swing y
+// sobreestimaba el intradia.
+//
+// En Cocos no hay comision del broker: se paga solo esto.
+const FEE_COCOS = 0.0005 * IVA;
 
 // bonificada = segunda pata de una operatoria intradiaria: IOL no cobra su
 // comisión, quedan sólo los derechos de mercado.
