@@ -17259,9 +17259,22 @@ function ConsolidatedSection({
           tickers históricos — "Bonos (3)" es lo que hay en cartera HOY. */}
       {(() => {
         const nets = new Map(); // ticker → { net, type }
+        // FIX 24/08/2026: una LETRA VENCIDA no es tenencia. Su vencimiento
+        // entra en el CSV como "Renta y Amortizacion" (caja, sin ticker), no
+        // como venta, asi que el neto nunca llega a 0 y quedaba contada acá
+        // para siempre: el chip decia "Bono (5)" con 3 bonos en cartera
+        // (S29Y6 vencio el 29/05 y S30A6 el 30/04, y seguian sumando).
+        // consolidatePositions ya las descarta con esta misma regla — por eso
+        // la LISTA mostraba 3 y solo el CONTADOR estaba mal. Replicamos el
+        // criterio para que chip y lista digan lo mismo.
+        const _hoyISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
         for (const p of positions) {
           const tk = (p.ticker || "").trim().toUpperCase();
           if (!tk) continue;
+          if (p.instrument_type === "bond_ars" || p.instrument_type === "bond_usd") {
+            const mat = parseLetraMaturity(tk);
+            if (mat && mat < _hoyISO) continue;
+          }
           const q = (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
           const prev = nets.get(tk) || { net: 0, type: p.instrument_type };
           prev.net += q;
