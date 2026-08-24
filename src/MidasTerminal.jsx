@@ -8657,6 +8657,51 @@ function useStockPrices() {
           }
         }
 
+        // FIX 24/08/2026 - ENTRE RUEDAS, LOS CEDEARs CAIAN A COSTO.
+        //
+        // data912 se vacia al cerrar la rueda y no se vuelve a llenar hasta la
+        // apertura. Medido a las 10:16 del 24/08 (BYMA abre 11:00): el endpoint
+        // arg_cedears devolvia 3 instrumentos y arg_stocks 97. Sin precio, el
+        // resolver saltaba directo a "cost" y la posicion se valuaba al PPP:
+        // GLD figuraba en 13.340.000 (lo pagado) en vez de 13.510.000 (cierre
+        // del viernes), escondiendo 170.000 ya ganados.
+        //
+        // El cierre lo tenemos en iol_quotes, que sincroniza el worker de IOL.
+        // Lo usamos SOLO para los tickers que el feed no trajo, con source
+        // "close" para que la UI lo muestre como cierre y no como precio vivo.
+        // Los futuros ya hacian esto con su settlement; esta es la misma idea.
+        try {
+          // iol_quotes son ~33 filas (los tickers que sincroniza el worker),
+          // asi que la traemos entera en vez de armar la lista de faltantes:
+          // este hook no recibe los tickers de la cartera.
+          {
+            const { data: cierres } = await supabase
+              .from("iol_quotes")
+              .select("ticker, last, prev_close, quote_date");
+            let repuestos = 0;
+            for (const c of cierres || []) {
+              const px = Number(c?.last);
+              if (!(px > 0)) continue;
+              const tk = (c.ticker || "").toUpperCase().trim();
+              if (map[tk]?.price > 0) continue;
+              const prev = Number(c?.prev_close);
+              map[tk] = {
+                price: px,
+                previousClose: prev > 0 ? prev : null,
+                changePct: prev > 0 ? (px / prev - 1) * 100 : null,
+                source: "close",
+                closeDate: c.quote_date || null,
+              };
+              repuestos++;
+            }
+            if (repuestos > 0) {
+              console.info(`[useStockPrices] ${repuestos} ticker(s) completados con el ultimo cierre de iol_quotes`);
+            }
+          }
+        } catch (e) {
+          console.warn("[useStockPrices] no se pudo completar con cierres:", e?.message || e);
+        }
+
         if (!mounted) return;
         const now = new Date().toISOString();
         setPrices(map);
@@ -13136,6 +13181,9 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
   // P&L "vs costo" (al usuario le importa cuánto ganó en total, no solo
   // lo no acreditado). En el return final lo sumamos al pnl.
   let realizedFuturesPnL = 0;
+  // Idem para los tipos consolidables (bono/accion/CEDEAR/ON/FCI): el P&L de
+  // lo que YA se cerro no es tenencia. Ver el detalle en la rama del split.
+  let realizedClosedPnL = 0;
 
   // Separamos las posiciones en TRES grupos según cómo se valúan:
   //
@@ -13242,6 +13290,30 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
         continue;
       }
       valuedAny = true;
+
+      // FIX 24/08/2026 - "TENENCIA VALORIZADA" INCLUIA LO YA VENDIDO.
+      //
+      // consolidatePositions parte cada ticker en un grupo ABIERTO (netQty != 0,
+      // valor = mercado) y uno CERRADO (isClosed, valor = P&L realizado,
+      // costo = 0). Este loop los sumaba a los dos en totalMarket, que es lo
+      // que la UI muestra como "Tenencia valorizada". Resultado: al patrimonio
+      // se le sumaba el resultado historico de operaciones que ya no existen.
+      //
+      // Medido contra el broker el 24/08: la lista daba 160.223.293,95 y el
+      // encabezado 150.083.703,50. Los 10.139.590,45 de diferencia son el
+      // realizado de los 27 tickers con neto cero (MU -13,3M, SNDK -4,9M,
+      // SPCX -4,8M contra NU +5,9M e YPFD +3,5M). Coincide dentro de $3.000,
+      // que es el ruido de calcular contra PPP en vez de flujo de caja.
+      //
+      // Ahora van a realizedClosedPnL, igual que los futuros ya acreditados:
+      // salen de la tenencia pero se siguen contando en el P&L vs costo, asi
+      // que el "historico" no cambia. Mismo criterio que ya usa
+      // computeLiquidityBreakdown ("cerrado -> su P&L ya esta en cash").
+      if (g.isClosed) {
+        realizedClosedPnL += convertedMarket;
+        continue;
+      }
+
       totalMarket += convertedMarket;
 
       if (g.valueAtCost != null) {
@@ -13334,7 +13406,7 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
   // pnl nuevo  = (totalMarket + realizedFuturesPnL) - totalCost
   //            = bonosPnL + futurosPnL_no_acreditado + futurosPnL_acreditado
   //            = bonosPnL + futurosPnL_total      ← equivalente al viejo
-  const pnl = totalMarket + realizedFuturesPnL - totalCost;
+  const pnl = totalMarket + realizedFuturesPnL + realizedClosedPnL - totalCost;
   const pnlPct = totalCost > 0 ? (pnl / totalCost) * 100 : null;
 
   return {
@@ -13343,6 +13415,7 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
     pnl: valuedAny ? pnl : null,
     pnlPct: valuedAny ? pnlPct : null,
     realizedFuturesPnL,
+    realizedClosedPnL,
     unvalued,
     pricesFromMarket,
     pricesFromCost,
