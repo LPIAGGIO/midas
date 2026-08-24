@@ -12437,11 +12437,40 @@ function buildFutureAdjLookup(pendingAdjustments, confirmedAdjustments) {
  *
  * Devuelve null si no hay precio utilizable.
  */
-function computeFutureUncreditedPnl(g, futureAdjLookup) {
+function computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices) {
   const price = Number(g?.currentPrice);
   if (!Number.isFinite(price) || price <= 0) return null;
   const mult = FUTURE_MULTIPLIER_DEFAULT;
-  const tc = futureAdjLookup?.tickerConfirmed?.get((g.ticker || "").toUpperCase().trim()) || null;
+  const tk = (g.ticker || "").toUpperCase().trim();
+  let tc = futureAdjLookup?.tickerConfirmed?.get(tk) || null;
+
+  // FIX 24/08/2026 - EL ENCABEZADO RESTABA ~25M QUE YA ESTABAN EN LA CAJA.
+  //
+  // `tc` marca "hasta que settle ya cobre". Salia UNICAMENTE de los ajustes
+  // confirmados en futures_daily_adjustments. Pero los futuros de LP vienen
+  // del Libro: Cocos le acredita el ajuste diario y eso entra por la cuenta
+  // corriente importada ("Credito Indice" / "Debito Indice"), sin pasar nunca
+  // por esa tabla. Con la tabla vacia tc quedaba null, la base pasaba a ser el
+  // PRECIO DE ENTRADA, y la funcion devolvia el P&L de VIDA del contrato
+  // -incluidos los ya vencidos y cobrados hace meses- como si estuviera
+  // pendiente de acreditar. Medido contra Cocos el 24/08: -25.030.645,65.
+  //
+  // El settle ya no depende de esa tabla: lo trae el feed (mtr_market_data via
+  // /api/mtr-md), la misma fuente que da el precio. Todo lo anterior al ultimo
+  // settle esta cobrado, venga por adjustments o por el Libro; lo posterior no.
+  // En un contrato CERRADO las dos patas quedan basadas en el mismo settle y
+  // el aporte da 0, que es lo correcto.
+  if (!tc) {
+    const settle = Number(futurePrices?.[tk]?.settlement);
+    if (Number.isFinite(settle) && settle > 0) {
+      // Corte = ultimo dia habil. Un lote comprado HOY todavia no settleo, asi
+      // que su base sigue siendo el precio de entrada.
+      const hoyAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const d = new Date(hoyAR + "T12:00:00Z");
+      do { d.setUTCDate(d.getUTCDate() - 1); } while (isNonBusinessDay(d.toISOString().slice(0, 10)));
+      tc = { date: d.toISOString().slice(0, 10), settle };
+    }
+  }
   let sum = 0;
   for (const op of g.operations || []) {
     if (!op) continue;
@@ -13159,7 +13188,7 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
       // todavía no recibió. Todo lo demás (ajustes confirmados + historia
       // previa a la carga) YA está dentro del cash — sumarlo acá duplica
       // (fantasma de +1,9M detectado 12/06 contra Cocos).
-      const nonAcreditedPnL = computeFutureUncreditedPnl(g, futureAdjLookup);
+      const nonAcreditedPnL = computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices);
       if (nonAcreditedPnL == null) {
         unvalued++;
         continue;
@@ -13695,7 +13724,7 @@ function computeLiquidityBreakdown(positions, fx, valuationCurrency, windowKey, 
             // patrimonio — solo el MTM que la caja todavía no recibió. La
             // fórmula vieja (lifetime − Σ actual_amount) arrastraba la
             // historia previa a la carga de adjustments como "por cobrar".
-            const nonAcreditedPnL = computeFutureUncreditedPnl(g, futureAdjLookup);
+            const nonAcreditedPnL = computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices);
             if (nonAcreditedPnL != null && Number.isFinite(nonAcreditedPnL)) {
               result["ARS"] += nonAcreditedPnL;
             }
