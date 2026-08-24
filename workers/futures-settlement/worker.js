@@ -630,8 +630,36 @@ async function main() {
   info(`${positions.length} posicion(es) en ${tickers.length} ticker(s) abierto(s): ${tickers.join(", ")}`);
   for (const k of vivas) info(`  neto ${k.split("__")[1]}: ${netoPorClave[k]}`);
 
+  // PASO 1 - settlements: se capturan SIEMPRE para todo ticker abierto. Es dato
+  // de referencia puro (precio de cierre oficial), no toca la caja de nadie.
   await captureSettlements(tickers, desde, settleDate);
-  await generateAdjustments(positions, settleDate);
+
+  // PASO 2 - ajustes: aca SI hay que excluir lo derivado del Libro.
+  //
+  // Verificado el 24/08/2026 contra libro_movimientos: la importacion de la
+  // cuenta corriente de Cocos ya trae los ajustes diarios como caja, con los
+  // tipos "Credito Indice" / "Debito Indice" (88 filas entre abril y agosto).
+  // Los montos coinciden peso a peso con lo que calcula este worker: 07/08
+  // -1.500.000, 13/08 -450.000, 18/08 +3.250.000, 19/08 -450.000, 20/08
+  // -150.000. Si ademas generaramos filas en futures_daily_adjustments y el
+  // usuario las confirmara, esa caja entraria DOS VECES.
+  //
+  // Por eso los ajustes solo se generan para futuros que NO vienen del Libro
+  // (por ejemplo, cargados a mano o traidos de otro broker sin cuenta
+  // corriente importada). Ese era el motivo real del filtro viejo; el error
+  // era aplicarlo tambien al Paso 1 y quedarse sin historico de settlements.
+  const paraAjustes = positions.filter(
+    (p) => !p.extra || p.extra.source !== "derivado_libro"
+  );
+  const delLibro = positions.length - paraAjustes.length;
+  if (delLibro > 0) {
+    info(`${delLibro} posicion(es) vienen del Libro: su caja ya esta en la cuenta corriente importada, no se generan ajustes.`);
+  }
+  if (paraAjustes.length > 0) {
+    await generateAdjustments(paraAjustes, settleDate);
+  } else {
+    info("Ninguna posicion requiere ajustes por acreditacion.");
+  }
 
   info("Fin OK.");
 }
