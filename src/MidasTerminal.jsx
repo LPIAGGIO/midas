@@ -8660,7 +8660,7 @@ function useStockPrices() {
         // FIX 24/08/2026 - ENTRE RUEDAS, LOS CEDEARs CAIAN A COSTO.
         //
         // data912 se vacia al cerrar la rueda y no se vuelve a llenar hasta la
-        // apertura. Medido a las 10:16 del 24/08 (BYMA abre 11:00): el endpoint
+        // apertura. Medido a las 10:16 del 24/08 (BYMA abre 10:30): el endpoint
         // arg_cedears devolvia 3 instrumentos y arg_stocks 97. Sin precio, el
         // resolver saltaba directo a "cost" y la posicion se valuaba al PPP:
         // GLD figuraba en 13.340.000 (lo pagado) en vez de 13.510.000 (cierre
