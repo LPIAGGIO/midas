@@ -15456,17 +15456,28 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
     // Clasificación del instrumento por security_id / symbol:
     //   futuros DLR  -> rx_DDF_DLR_*  ó  symbol "DLR/JUN26"
     //   bonos BYMA   -> bm_*          ó  symbol "MERV - XMEV - AL30 - 24hs"
-    const isFuture = sec.startsWith("rx_DDF_DLR") || /^DLR\//.test(sym);
+    // Futuros soportados. Cada producto tiene su tamaño de contrato y su
+    // moneda de liquidacion, y NO se pueden asumir: el DLR liquida en pesos
+    // con 1.000 USD por contrato; el ORO liquida en DOLARES con 1 onza troy
+    // por contrato (reglamento MatbaRofex: "denominado, cotizado, negociado,
+    // registrado, ajustado y compensado en dolares estadounidenses").
+    // Meter el oro con el multiplicador del dolar habria inventado un
+    // resultado 1.000 veces mas grande.
+    const isFutureDlr = sec.startsWith("rx_DDF_DLR") || /^DLR\//.test(sym);
+    const isFutureOro = sec.startsWith("rx_DUAL_ORO") || sym.toUpperCase().startsWith("ORO/");
+    const isFuture = isFutureDlr || isFutureOro;
     const isBond = sec.startsWith("bm_") || / - XMEV - /.test(sym) || /\bMERV\b/.test(sym);
 
     let ticker = null, instrumentType = null, entryCurrency = null,
       settlement = "CI", price = rawPrice, plazo = null, kind = "—",
-      route = "position", movementType = null, cashAmount = 0;
+      route = "position", movementType = null, cashAmount = 0,
+      contractSize = null;
 
     if (isFuture) {
       ticker = sym.replace("/", "").toUpperCase();
       instrumentType = "future";
-      entryCurrency = "ARS";
+      entryCurrency = isFutureOro ? "USD-MEP" : "ARS";
+      contractSize = isFutureOro ? 1 : null;   // null = default 1000 (DLR)
       settlement = "CI";
       price = rawPrice; // futuros: precio tal cual (1461)
       kind = "Futuro";
@@ -15557,7 +15568,7 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
     out.push({
       orderId: oid, account, ticker, side, qty: cum, price, date, status, reason,
       instrumentType, entryCurrency, settlement, plazo, kind,
-      route, movementType, cashAmount,
+      route, movementType, cashAmount, contractSize,
     });
   }
   return out;
@@ -15660,7 +15671,12 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
             settlement: r.settlement,
             broker: "cocos",
             notes: null,
-            extra: { matriz_order_id: r.orderId, matriz_account: r.account, source: "csv_matriz" },
+            extra: {
+              matriz_order_id: r.orderId, matriz_account: r.account, source: "csv_matriz",
+              // getFutureMultiplier lee extra.contract_size; sin esto el ORO
+              // caeria al default de 1.000 del DLR.
+              ...(r.contractSize ? { contract_size: r.contractSize } : {}),
+            },
           });
         }
         inserted++;
