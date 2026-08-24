@@ -18,9 +18,11 @@
  * editar el monto si Cocos le liquido algo distinto) -> eso crea el
  * cash_movement. La confirmacion NO la hace este worker.
  *
- * Fuente del settlement: la tabla `mtr_market_data` de Supabase, poblada
- * por el worker `mtr-market-data` que mantiene un WS abierto contra el
- * visor A3 de matbarofex (PRODUCCION).
+ * Fuente del settlement: la API publica de MatbaRofex (closing-prices), que
+ * devuelve el historico por rango de fechas. Ver el detalle y las dos trampas
+ * de esa API en el bloque "Fetch del settlement" mas abajo.
+ *
+ * Backfill: `node worker.js --backfill-from=YYYY-MM-DD` reconstruye huecos.
  *
  * REFACTORIZADO 2026-05-28: antes pegaba a /api/primary-md de Vercel, que
  * consultaba reMarkets (sandbox). Resultado: settlements del demo, no de
@@ -110,111 +112,118 @@ function lastBusinessDayBefore(iso) {
   return d.toISOString().slice(0, 10);
 }
 
-// --------------- Fetch del settlement (Supabase: mtr_market_data) ---------------
+// --------------- Fetch del settlement (API MatbaRofex) ---------------
 //
-// Lee el settlement actual desde la tabla `mtr_market_data`, que el worker
-// `mtr-market-data` mantiene actualizada via WS al visor de produccion.
+// CAMBIO 24/08/2026: antes leia `mtr_market_data`, que guarda UNA fila por
+// instrumento con el settlement VIGENTE. Servia para el dia, pero hacia
+// imposible el backfill: si el worker se caia una semana, no habia forma de
+// recuperar los settlements perdidos. Y se cayo 20 dias (06/08 al 21/08).
 //
-// Validacion de fecha: chequea que `settlement_ts` de la tabla coincida con
-// `expectedSettleDate` (la fecha que el worker calculo via lastBusinessDayBefore).
-// Si no coincide -> freshness="stale" -> captureSettlements va a saltear ese
-// ticker con warning, en vez de etiquetar mal el settle. Esto pasa, por
-// ejemplo, si se corre el worker manualmente despues del cierre de un dia
-// habil pero antes del cron de la 1 AM (la tabla ya tiene el settle "nuevo"
-// pero settleDate sigue siendo el del dia anterior).
+// Ahora pega a la API publica de MatbaRofex, que devuelve el historico por
+// rango de fechas y no pide credenciales:
+//   GET /api/v2/closing-prices?product=DLR&from=YYYY-MM-DD&to=YYYY-MM-DD
 //
-// Devuelve: { TICKER_UPPER: { settlement, freshness, actualSettleDate } }
-async function fetchSettlements(tickers, expectedSettleDate) {
-  // Map ticker app ("DLRMAY26") -> security_id ("rx_DDF_DLR_MAY26").
-  const securityIds = [];
-  const appToSec = {};
-  for (const t of tickers) {
-    const m = (t || "").toUpperCase().trim().match(/^(DLR)([A-Z]{3})(\d{2})$/);
-    if (!m) {
-      warn(`Ticker no mapeable a security_id: ${t}`);
-      continue;
+// DOS TRAMPAS de esta API, las dos verificadas contra la respuesta real:
+//   1. La misma respuesta trae las OPCIONES sobre futuro. Se distinguen por
+//      `optionType` != null (ej. "DLR092026 Call 1550"). Hay que filtrarlas o
+//      se mezclan primas con settlements.
+//   2. Pagina de a 100 registros y el unico parametro que la destraba es
+//      `pageSize` — ni `limit`, ni `size`, ni `offset` hacen nada. Sin
+//      pageSize, un rango largo vuelve truncado SIN AVISAR.
+//
+// El worker deja de depender de que `mtr-market-data` este vivo.
+const MTBA_API = "https://apicem.matbarofex.com.ar/api/v2/closing-prices";
+const MTBA_PAGE = 500;
+const MES_NUM = { ENE: "01", FEB: "02", MAR: "03", ABR: "04", MAY: "05", JUN: "06",
+                  JUL: "07", AGO: "08", SEP: "09", OCT: "10", NOV: "11", DIC: "12" };
+
+// Ticker de la app ("DLRSEP26") -> simbolo de la API ("DLR092026").
+function tickerAApi(t) {
+  const m = String(t || "").toUpperCase().trim().match(/^DLR([A-Z]{3})(\d{2})$/);
+  if (!m) return null;
+  const mes = MES_NUM[m[1]];
+  return mes ? "DLR" + mes + "20" + m[2] : null;
+}
+
+async function getJson(url, intentos = 3) {
+  let ultimo = null;
+  for (let i = 1; i <= intentos; i++) {
+    try {
+      const r = await fetch(url, {
+        headers: { "User-Agent": "midas-futures-settlement/1.0", Accept: "application/json" },
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return await r.json();
+    } catch (e) {
+      ultimo = e;
+      if (i < intentos) await new Promise((s) => setTimeout(s, 1500 * i));
     }
-    const secId = `rx_DDF_DLR_${m[2]}${m[3]}`;
-    securityIds.push(secId);
-    appToSec[t.toUpperCase().trim()] = secId;
   }
-  if (securityIds.length === 0) return {};
+  throw new Error("MatbaRofex no responde: " + (ultimo && ultimo.message));
+}
 
-  const { data, error } = await supabase
-    .from("mtr_market_data")
-    .select("security_id, settlement, settlement_ts")
-    .in("security_id", securityIds);
-  if (error) throw new Error(`leyendo mtr_market_data: ${error.message}`);
+// Devuelve { TICKER_APP: { "YYYY-MM-DD": settlement } } para el rango pedido.
+async function fetchSettlementsRango(tickers, desde, hasta) {
+  const apiATicker = {};
+  for (const t of tickers) {
+    const sim = tickerAApi(t);
+    if (!sim) { warn("Ticker no mapeable a simbolo de la API: " + t); continue; }
+    apiATicker[sim] = String(t).toUpperCase().trim();
+  }
+  if (Object.keys(apiATicker).length === 0) return {};
 
-  const bySecId = {};
-  for (const row of data || []) bySecId[row.security_id] = row;
+  const url = MTBA_API + "?product=DLR&from=" + desde + "&to=" + hasta + "&pageSize=" + MTBA_PAGE;
+  const j = await getJson(url);
+  const arr = Array.isArray(j) ? j : (j && (j.data || j.results || j.items)) || [];
+  info("MatbaRofex: " + arr.length + " registros entre " + desde + " y " + hasta);
 
   const out = {};
-  for (const t of tickers) {
-    const key = t.toUpperCase().trim();
-    const secId = appToSec[key];
-    if (!secId) {
-      out[key] = { settlement: null, freshness: "none", actualSettleDate: null };
-      continue;
-    }
-    const row = bySecId[secId];
-    if (!row || row.settlement == null || !row.settlement_ts) {
-      out[key] = { settlement: null, freshness: "none", actualSettleDate: null };
-      continue;
-    }
-    // settlement_ts es timestamptz (ej "2026-05-27T00:00:00+00"). Slice a fecha.
-    const actualDate = new Date(row.settlement_ts).toISOString().slice(0, 10);
-    out[key] = {
-      settlement: Number(row.settlement),
-      freshness: actualDate === expectedSettleDate ? "fresh" : "stale",
-      actualSettleDate: actualDate,
-    };
+  let opciones = 0;
+  for (const row of arr) {
+    if (row.optionType != null) { opciones++; continue; }   // trampa 1
+    const tk = apiATicker[row.symbol];
+    if (!tk) continue;
+    if (row.settlement == null || !(Number(row.settlement) > 0)) continue;
+    if (!row.dateTime) continue;
+    const fecha = String(row.dateTime).slice(0, 10);
+    (out[tk] = out[tk] || {})[fecha] = Number(row.settlement);
+  }
+  if (opciones) info("  (se descartaron " + opciones + " filas de opciones sobre futuro)");
+
+  // Si la respuesta vino justo en el tope de pagina, avisamos: puede faltar data.
+  if (arr.length >= MTBA_PAGE) {
+    warn("La respuesta llego al tope de " + MTBA_PAGE + " registros - puede estar truncada. Achicar el rango.");
   }
   return out;
 }
 
 // --------------- Paso 1: capturar settlements ---------------
-async function captureSettlements(tickers, settleDate) {
-  const feed = await fetchSettlements(tickers, settleDate);
+// `desde`/`hasta` acotan el rango. En la corrida diaria son el mismo dia (el
+// ultimo habil); en un backfill, `desde` es la fecha del hueco.
+async function captureSettlements(tickers, desde, hasta) {
+  const feed = await fetchSettlementsRango(tickers, desde, hasta);
   const rows = [];
   for (const t of tickers) {
-    const entry = feed[t];
-    if (!entry || entry.settlement == null) {
-      warn(`Sin settlement para ${t} en mtr_market_data - se omite la captura`);
+    const porFecha = feed[t];
+    if (!porFecha || Object.keys(porFecha).length === 0) {
+      warn("Sin settlements para " + t + " en el rango " + desde + ".." + hasta);
       continue;
     }
-    if (entry.freshness !== "fresh") {
-      // La tabla tiene un settle pero su fecha (actualSettleDate) no es la
-      // que esperamos (settleDate). No lo escribimos: etiquetarlo con la
-      // fecha equivocada generaria datos sucios. Probable causa: worker
-      // corrido a deshora, o feed retrasado.
-      warn(
-        `${t}: settlement_ts (${entry.actualSettleDate}) != settleDate esperado (${settleDate}) -> se omite. ` +
-        `¿Worker corriendo a deshora o feed atrasado?`
-      );
-      continue;
+    const fechas = Object.keys(porFecha).sort();
+    info(t + ": " + fechas.length + " settlement(s), " + fechas[0] + " -> " + fechas[fechas.length - 1] +
+         " (ultimo=" + porFecha[fechas[fechas.length - 1]] + ")");
+    for (const f of fechas) {
+      rows.push({ ticker: t, settle_date: f, settlement: porFecha[f], captured_at: new Date().toISOString() });
     }
-    info(`${t}: settlement=${entry.settlement} (freshness=${entry.freshness}) -> ${settleDate}`);
-    rows.push({
-      ticker: t,
-      settle_date: settleDate,
-      settlement: entry.settlement,
-      captured_at: new Date().toISOString(),
-    });
   }
-  if (rows.length === 0) {
-    warn("Ningun settlement capturado.");
-    return 0;
-  }
-  if (DRY_RUN) {
-    info(`[DRY-RUN] Se guardarian ${rows.length} settlement(s) - no se escribe nada.`);
-    return rows.length;
-  }
+  if (rows.length === 0) { warn("Ningun settlement capturado."); return 0; }
+  if (DRY_RUN) { info("[DRY-RUN] Se guardarian " + rows.length + " settlement(s) - no se escribe nada."); return rows.length; }
   const { error } = await supabase
     .from("futures_settlements_history")
     .upsert(rows, { onConflict: "ticker,settle_date" });
-  if (error) throw new Error(`upsert futures_settlements_history: ${error.message}`);
-  info(`${rows.length} settlement(s) guardados/actualizados para ${settleDate}.`);
+  if (error) throw new Error("upsert futures_settlements_history: " + error.message);
+  info(rows.length + " settlement(s) guardados/actualizados.");
   return rows.length;
 }
 
@@ -564,7 +573,11 @@ async function generateAdjustments(positions, endSettleDate) {
 async function main() {
   const today = todayAR();
   const settleDate = lastBusinessDayBefore(today);
-  info(`Inicio - hoy(AR)=${today}, settle objetivo=${settleDate} (fuente: mtr_market_data)`);
+  // `--backfill-from=YYYY-MM-DD` reconstruye el hueco. Sin el, solo el ultimo habil.
+  const argBf = process.argv.find((a) => a.startsWith("--backfill-from="));
+  const desde = argBf ? argBf.split("=")[1] : settleDate;
+  info(`Inicio - hoy(AR)=${today}, settle objetivo=${settleDate} (fuente: API MatbaRofex)`);
+  if (desde !== settleDate) info(`BACKFILL activo: se capturan settlements desde ${desde}`);
   if (DRY_RUN) info("Modo DRY-RUN activo - no se escribira nada en la base.");
 
   // Posiciones de futuros de TODOS los usuarios.
@@ -574,26 +587,50 @@ async function main() {
     .eq("instrument_type", "future");
   if (posErr) throw new Error(`leyendo positions: ${posErr.message}`);
 
-  // Excluir futuros DERIVADOS DEL LIBRO (import Cocos, extra.source='derivado_libro'):
-  // su P&L de ajustes YA esta en la caja del libro (Sigma-total), NO van por
-  // acreditacion. Sin esto el worker regenera cada noche filas fantasma para los
-  // futuros netos 0 de un CSV importado -> banner "N movimientos pendientes" que
-  // no corresponde (LP: el cartel solo debe salir si habia tenencia abierta real).
-  const positions = (allPositions || []).filter(
-    (p) => !p || !p.extra || p.extra.source !== "derivado_libro"
-  );
+  // FIX 24/08/2026 - ESTE FILTRO TENIA EL WORKER MUERTO DESDE EL 06/08.
+  //
+  // Antes se excluia por ORIGEN: `extra.source !== 'derivado_libro'`. La idea
+  // era no generar filas fantasma para los futuros neteados a 0 que trae un
+  // CSV de Cocos importado. Pero el 21/08 la reimportacion del Libro marco
+  // TODAS las posiciones como derivado_libro -> el filtro las excluyo a todas
+  // -> "No hay posiciones de futuros reales" y 20 dias sin ajustes, con 500
+  // contratos DLR vivos.
+  //
+  // El origen nunca fue el criterio correcto: lo que decide si un contrato
+  // genera acreditacion diaria es si esta ABIERTO, no como entro a la base.
+  // Ahora filtramos por NETO por (usuario, ticker): pasan solo los tickers con
+  // posicion viva. Eso cumple el objetivo original -los round-trips cerrados
+  // netean 0 y quedan afuera, sin banner fantasma- y ademas es indiferente a
+  // como se importo la posicion.
+  const netoPorClave = {};
+  for (const p of allPositions || []) {
+    const tk = (p.ticker || "").toUpperCase().trim();
+    if (!tk || !p.user_id) continue;
+    const signo = p.operation_type === "sell" ? -1 : 1;
+    const k = `${p.user_id}__${tk}`;
+    netoPorClave[k] = (netoPorClave[k] || 0) + signo * (Number(p.quantity) || 0);
+  }
+  const vivas = new Set(Object.keys(netoPorClave).filter((k) => Math.abs(netoPorClave[k]) > 1e-9));
+  const positions = (allPositions || []).filter((p) => {
+    const tk = (p.ticker || "").toUpperCase().trim();
+    return tk && p.user_id && vivas.has(`${p.user_id}__${tk}`);
+  });
+
+  const cerrados = Object.keys(netoPorClave).length - vivas.size;
+  if (cerrados > 0) info(`${cerrados} (usuario,ticker) con neto 0 - cerrados, se omiten.`);
 
   if (positions.length === 0) {
-    info("No hay posiciones de futuros reales (excluidas las derivadas del libro). Nada que hacer.");
+    info("No hay futuros con posicion abierta. Nada que hacer.");
     return;
   }
 
   const tickers = Array.from(
     new Set(positions.map((p) => (p.ticker || "").toUpperCase().trim()).filter(Boolean))
   );
-  info(`${positions.length} posicion(es) de futuros reales (de ${(allPositions || []).length} totales), ${tickers.length} ticker(s): ${tickers.join(", ")}`);
+  info(`${positions.length} posicion(es) en ${tickers.length} ticker(s) abierto(s): ${tickers.join(", ")}`);
+  for (const k of vivas) info(`  neto ${k.split("__")[1]}: ${netoPorClave[k]}`);
 
-  await captureSettlements(tickers, settleDate);
+  await captureSettlements(tickers, desde, settleDate);
   await generateAdjustments(positions, settleDate);
 
   info("Fin OK.");
