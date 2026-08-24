@@ -12483,6 +12483,23 @@ function buildFutureAdjLookup(pendingAdjustments, confirmedAdjustments) {
  * Devuelve null si no hay precio utilizable.
  */
 function computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices) {
+  // FIX 24/08/2026 (2) - UN CONTRATO CERRADO NO TIENE NADA PENDIENTE.
+  //
+  // Por definicion: si el neto es cero, el broker ya liquido todo. No hace
+  // falta ningun settle para saberlo, y salir aca ANTES de mirar precios evita
+  // depender de que el feed siga listando el contrato.
+  //
+  // Sin este corte, un vencido que desaparecio del feed devolvia el P&L de
+  // VIDA. Paso con DLRABR26 (vencio en abril): mtr_market_data ya no lo tiene,
+  // el fallback al settle no encontraba nada, la base volvia a ser el precio de
+  // entrada y el encabezado restaba -7.218.996 de plata cobrada hace cuatro
+  // meses. Los otros vencidos -MAY, JUN, JUL, AGO- zafaban solo porque el feed
+  // todavia los lista con su ultimo settle.
+  //
+  // Medido: con este corte el patrimonio pasa de 154.941.742,42 a
+  // 162.160.738,42, que es la suma de las posiciones abiertas.
+  if (g?.isClosed || Number(g?.netQty) === 0) return 0;
+
   const price = Number(g?.currentPrice);
   if (!Number.isFinite(price) || price <= 0) return null;
   const mult = FUTURE_MULTIPLIER_DEFAULT;
