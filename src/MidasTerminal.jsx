@@ -4213,6 +4213,42 @@ function ImportCuentaCorrienteModal({ existingComprobantes, onDone, onClose }) {
 }
 
 /* Ledger de la cuenta corriente: tabla cruda con comisiones + totales por período. */
+// FIX 25/08/2026 - EL WIPE SE LLEVABA LO QUE NO PODIA VOLVER.
+//
+// "Borrar todo" y borrar un lote hacian delete de TODAS las posiciones de
+// cocos, sin mirar el origen. Eso incluia lo cargado desde el
+// ReporteOperaciones (source='csv_matriz'), y ahi viven los dos unicos
+// instrumentos que la cuenta corriente NO trae:
+//
+//   - futuros de ORO: el CSV de la CC solo lista DLR (verificado el 25/08
+//     sobre movimientos_cuenta (8): 6 tickers de futuros, todos DLR/*)
+//   - opciones: la CC etiqueta la prima con el ticker del SUBYACENTE
+//     ("GGAL"), no con la serie (GFGC7400AG), asi que _categoriaMov las
+//     manda a caja a proposito y no genera posicion
+//
+// Todo lo demas se puede volver a derivar del libro. Esto no: una vez
+// borrado, la unica forma de recuperarlo es reimportar el ReporteOperaciones
+// del dia exacto en que se opero.
+//
+// El import diario de la CC (applyDerived) nunca los toco -solo borra
+// source='derivado_libro'-, asi que el agujero estaba solo en el wipe.
+async function borrarPosicionesCocos(userId) {
+  const { data: candidatos } = await supabase
+    .from("positions")
+    .select("id, instrument_type, ticker, extra")
+    .eq("user_id", userId)
+    .eq("broker", "cocos");
+  const preservar = (candidatos || [])
+    .filter((p) => p?.extra?.source === "csv_matriz" &&
+      (p.instrument_type === "option" ||
+       String(p.ticker || "").toUpperCase().startsWith("ORO")))
+    .map((p) => p.id);
+  let q = supabase.from("positions").delete().eq("user_id", userId).eq("broker", "cocos");
+  if (preservar.length) q = q.not("id", "in", "(" + preservar.join(",") + ")");
+  await q;
+  return preservar.length;
+}
+
 function CuentaCorrienteView() {
   const { rows, loading, reload } = useLibroMovimientos();
   const [importOpen, setImportOpen] = useState(false);
@@ -4245,7 +4281,7 @@ function CuentaCorrienteView() {
     // (cualquier fuente) + caja. IOL (broker='iol') queda intacto.
     await supabase.from("import_batches").delete().eq("user_id", user.id);
     await supabase.from("libro_movimientos").delete().eq("user_id", user.id);
-    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
+    await borrarPosicionesCocos(user.id);
     await supabase.from("cash_movements").delete().eq("user_id", user.id);
     setConfirmWipe(false); reload();
   };
@@ -4857,7 +4893,7 @@ function ImportacionesView() {
     // broker='cocos' de cualquier fuente + caja). IOL y Balanz quedan intactos.
     await supabase.from("import_batches").delete().eq("user_id", user.id).or("broker.is.null,broker.neq.balanz");
     await supabase.from("libro_movimientos").delete().eq("user_id", user.id);
-    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos");
+    await borrarPosicionesCocos(user.id);
     await supabase.from("cash_movements").delete().eq("user_id", user.id);
     setConfirmDel(null); reloadBatches(); reloadMovs();
   };
