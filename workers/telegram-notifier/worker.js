@@ -54,6 +54,7 @@ const Z_BUF_MAX = 40, Z_BUF_MIN = 20;
 const DESARB_SPREAD_PCT = 1.5;  // umbral spread del canje (alto: el cross-bond real es ~0, el resto es ruido de precios stale)
 const VENC_DAYS = 7;            // avisar si vence en <= N dias
 const EOD_DEFAULT_HOUR = 18;    // hora ART del resumen de cierre
+const EOD_WAIT_HOURS = 3;       // horas que el resumen espera el settle oficial de A3
 
 // Cooldowns (ms) para no repetir la misma senal.
 const CD = {
@@ -706,6 +707,26 @@ async function buildEodSummary(userId, rawBy, fut) {
   return lines.join("\n");
 }
 
+// El resumen sale a la hora elegida (18hs por defecto), PERO si el usuario
+// tiene futuros espera a que A3 publique el ajuste del dia: a las 18 muchas
+// veces todavia no esta y el P&L de futuros saldria contra el ultimo precio
+// operado en vez del settle oficial. Se reintenta hora a hora hasta
+// EOD_WAIT_HOURS; si a esa altura sigue sin publicarse, sale igual avisando
+// que el ajuste es provisorio (mejor un resumen marcado que ninguno).
+// Tiene futuros que pesan en el resumen de hoy? Mismo criterio que
+// futuresDayBlock: neto abierto distinto de cero, u operados hoy. Un DLR
+// vencido hace meses no debe hacer esperar el settle.
+function futurosVivos(raw, dateStr) {
+  const net = {};
+  let hoy = false;
+  for (const p of raw) {
+    if (p.instrument_type !== "future") continue;
+    if (p.entry_date === dateStr) hoy = true;
+    net[p.ticker] = (net[p.ticker] || 0) + (p.operation_type === "sell" ? -1 : 1) * (Number(p.quantity) || 0);
+  }
+  return hoy || Object.values(net).some((q) => Math.abs(q) > 1e-6);
+}
+
 async function evalEodScheduled(users) {
   const subs = users.filter((u) => prefOn(u.prefs, "eod_summary", false));
   if (!subs.length) return;
@@ -713,11 +734,22 @@ async function evalEodScheduled(users) {
   if (!isBizDay(p.dow)) return;
   const positionsBy = await loadPositionsRaw(subs.map((u) => u.userId));
   const fut = await loadFutures();
+  let settled = null;   // se consulta una sola vez por vuelta, y solo si hace falta
   for (const u of subs) {
     const hour = Number((u.prefs || {}).eod_hour) || EOD_DEFAULT_HOUR;
-    if (p.hour !== hour) continue;
+    if (p.hour < hour || p.hour > hour + EOD_WAIT_HOURS) continue;
     if (await recentlySent(u.userId, "eod", p.dateStr, 23 * 60 * 60 * 1000)) continue;
-    const txt = await buildEodSummary(u.userId, positionsBy, fut);
+    let provisorio = false;
+    const tieneFuturos = futurosVivos(positionsBy[u.userId] || [], p.dateStr);
+    if (tieneFuturos) {
+      if (settled === null) settled = await futuresSettledToday(p.dateStr);
+      if (!settled) {
+        if (p.hour < hour + EOD_WAIT_HOURS) { console.log(`[eod] ${u.userId} espera settle`); continue; }
+        provisorio = true;
+      }
+    }
+    let txt = await buildEodSummary(u.userId, positionsBy, fut);
+    if (provisorio) txt += "\n\n<i>A3 todavia no publico el ajuste del dia: el P&L de futuros es provisorio.</i>";
     await sendMessage(u.chatId, txt);
     await logSent(u.userId, "eod", p.dateStr, "cierre", "resumen diario");
     console.log(`[eod] ${u.userId} ${p.dateStr}`);

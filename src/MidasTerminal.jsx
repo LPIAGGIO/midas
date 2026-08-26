@@ -12945,7 +12945,13 @@ function computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices) {
   // En un contrato CERRADO las dos patas quedan basadas en el mismo settle y
   // el aporte da 0, que es lo correcto.
   if (!tc) {
-    const settle = Number(futurePrices?.[tk]?.settlement);
+    // FIX 26/08/2026 - LA BASE ERA settlement Y TENIA QUE SER reference.
+    // El ajuste diario es SIEMPRE settle de hoy contra settle de AYER.
+    // `settlement` ROLA: durante la rueda trae un provisorio y tras el cierre
+    // pasa a ser el de HOY, asi que usarlo de base compara hoy contra hoy.
+    // `reference` es el settle del dia anterior y no rola — es la base
+    // correcta, y asi lo calcula Matriz.
+    const settle = Number(futurePrices?.[tk]?.reference);
     if (Number.isFinite(settle) && settle > 0) {
       // Corte = ultimo dia habil. Un lote comprado HOY todavia no settleo, asi
       // que su base sigue siendo el precio de entrada.
@@ -12956,6 +12962,14 @@ function computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices) {
     }
   }
   let sum = 0;
+  // El PRECIO tambien tiene que ser el settle cuando ya salio: el ajuste no se
+  // liquida contra el ultimo operado sino contra el settlement del dia. Con
+  // NOV26 el 26/08 la diferencia era 1.596 (ultimo) contra 1.597 (settle):
+  // $400.000 sobre 400 contratos. Mientras el settle del dia no este
+  // publicado se usa el precio vivo, que es una estimacion.
+  const settleHoy = Number(futurePrices?.[tk]?.settlement);
+  const precio = (Number.isFinite(settleHoy) && settleHoy > 0) ? settleHoy : price;
+
   for (const op of g.operations || []) {
     if (!op) continue;
     const qty = Number(op.quantity) || 0;
@@ -12982,7 +12996,7 @@ function computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices) {
       ? tc.settle
       : Number(op.entry_price);
     if (!Number.isFinite(base)) continue;
-    sum += (price - base) * sign * qty * mult;
+    sum += (precio - base) * sign * qty * mult;
   }
   return sum;
 }
