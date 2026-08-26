@@ -1485,6 +1485,41 @@ async function paperPass() {
       await supabase.from("paper_iol_trades").update({ stop }).eq("id", t.id);
       log(`[bot ${t.ticker}] trailing: stop sube a US$${stop.toFixed(2)} (+${k}R)`);
     }
+    /* MARCA A MERCADO EN PESOS (26/08/2026).
+     *
+     * Hasta acá el resultado en pesos sólo existía al cerrar, así que mientras
+     * la operación estaba viva sólo se veía el lado dólar. No son lo mismo: el
+     * CEDEAR se mueve con el papel Y con el CCL. Medido sobre la MU abierta:
+     * +2,46% en dólares contra +2,95% en pesos — medio punto que puso el dólar.
+     *
+     * Importa porque son decisiones distintas: el stop y el target están
+     * calculados sobre el precio en DÓLARES, pero lo que entra a la caja es el
+     * resultado en PESOS.
+     *
+     * Se valúa contra la punta COMPRADORA (bid), que es a lo que podrías
+     * vender ahora — no contra el último operado, que puede estar arriba de lo
+     * que el mercado te paga. Si no hay bid, cae al teórico por el ratio. */
+    {
+      const entArs = Number(t.px_ars_entrada);
+      if (entArs > 0 && rArs > 0) {
+        const teoricoAhora = Math.round(p * rArs);
+        const bidAhora = f.arsBid[tkU];
+        const pxArsAhora = bidAhora > 0 ? Math.min(teoricoAhora, bidAhora) : teoricoAhora;
+        // comisiones de las DOS puntas: la de entrada ya se pagó, la de salida
+        // se pagaría al cerrar. El no realizado se muestra neto de las dos para
+        // que sea comparable con el pnl_ars de una cerrada.
+        const feesEst = feePunta(entArs * t.qty, false) + feePunta(pxArsAhora * t.qty, false);
+        const pnlArsAb = (pxArsAhora - entArs) * t.qty - feesEst;
+        const pnlUsdAb = (p - Number(t.entry_price)) * t.qty;
+        await supabase.from("paper_iol_trades").update({
+          px_ars_actual: pxArsAhora,
+          pnl_ars_abierto: Math.round(pnlArsAb),
+          pnl_usd_abierto: Math.round(pnlUsdAb * 100) / 100,
+          marcado_at: new Date().toISOString(),
+        }).eq("id", t.id);
+      }
+    }
+
     let exitUsd = null, reason = null;
     if (p <= stop) { exitUsd = Math.min(stop, p); reason = stop > Number(t.stop_inicial) ? "trailing" : "stop"; }
     else if (p >= Number(t.target)) { exitUsd = Math.max(Number(t.target), p); reason = "target"; }

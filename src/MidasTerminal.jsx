@@ -43328,7 +43328,7 @@ function BotIolModule() {
                   <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>
                     <th style={thL}>Papel</th><th style={th}>Cant.</th><th style={th}>Entrada</th>
                     <th style={th}>Invertido</th><th style={th}>Vende en</th><th style={th}>Corta en</th>
-                    <th style={th}>Ahora</th><th style={th}>Camino al target</th>
+                    <th style={th}>Ahora</th><th style={th}>Va ganando</th><th style={th}>Camino al target</th>
                   </tr></thead>
                   <tbody>
                     {abiertas.map((r) => {
@@ -43345,7 +43345,29 @@ function BotIolModule() {
                           <td style={td}>{pesos(Number(r.px_ars_entrada) * r.qty)}</td>
                           <td style={{ ...td, color: C.green }}>{pesos(tgt * rArs)}<div style={{ fontSize: 10.5, color: C.dim }}>{usd(tgt)}</div></td>
                           <td style={{ ...td, color: C.red }}>{pesos(stp * rArs)}<div style={{ fontSize: 10.5, color: C.dim }}>{usd(stp)}{stp > Number(r.stop_inicial) ? " ↑" : ""}</div></td>
-                          <td style={td}>{p ? usd(p) : "—"}</td>
+                          <td style={td}>
+                            {r.px_ars_actual ? pesos(r.px_ars_actual) : "—"}
+                            <div style={{ fontSize: 10.5, color: C.dim }}>{p ? usd(p) : "—"}</div>
+                          </td>
+                          {/* El resultado en PESOS es el que entra a la caja: el CEDEAR se
+                              mueve con el papel Y con el CCL, asi que no coincide con el
+                              lado dolar. El worker lo marca cada minuto contra la punta
+                              compradora y neto de las comisiones de las dos patas. */}
+                          <td style={td}>
+                            {r.pnl_ars_abierto == null ? "—" : (
+                              <>
+                                <span style={{ color: Number(r.pnl_ars_abierto) >= 0 ? C.green : C.red, fontWeight: 600 }}>
+                                  {Number(r.pnl_ars_abierto) >= 0 ? "+" : "−"}{pesos(Math.abs(Number(r.pnl_ars_abierto)))}
+                                </span>
+                                <div style={{ fontSize: 10.5, color: C.dim }}>
+                                  {r.pnl_usd_abierto != null ? (Number(r.pnl_usd_abierto) >= 0 ? "+" : "−") + usd(Math.abs(Number(r.pnl_usd_abierto))) : "—"}
+                                  {r.px_ars_entrada > 0 && r.px_ars_actual > 0 && (
+                                    <> · {(100 * (Number(r.px_ars_actual) / Number(r.px_ars_entrada) - 1)).toFixed(2)}%</>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </td>
                           <td style={td}>
                             {avance == null ? "—" : (
                               <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
@@ -43361,6 +43383,14 @@ function BotIolModule() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {abiertas.length > 0 && (
+              <div style={{ fontSize: 11.5, color: C.muted, marginTop: 8 }}>
+                Arriba en pesos, abajo en dólares. No coinciden y está bien: el CEDEAR se mueve
+                con el papel <b>y</b> con el dólar, así que el resultado en pesos incluye lo que
+                aportó el CCL. El de pesos ya viene neto de comisiones de ida y vuelta, valuado
+                contra la punta compradora — lo que hoy te pagarían por vender.
               </div>
             )}
             {abiertas.some((r) => Number(r.stop) > Number(r.stop_inicial)) && (
