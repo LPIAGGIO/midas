@@ -877,6 +877,105 @@ function ContanosButton({ pantalla }) {
   );
 }
 
+/**
+ * Checklist del primer ingreso. Idea tomada de elteorico.ar (26/08/2026): al
+ * loguearte por primera vez te muestra "Configurá tu cuenta / Empezá a operar"
+ * con los pasos tildados.
+ *
+ * Por que importa acá: Midas no sirve de nada hasta que importás la cuenta
+ * corriente, y eso no es obvio para alguien que entra por primera vez. Sin
+ * guía, el usuario nuevo ve un portfolio vacío y se va.
+ *
+ * Los pasos viven en el front (agregar uno no pide migración); en la base
+ * (`user_onboarding`) sólo guardamos cuáles se completaron. Algunos se
+ * autodetectan mirando si el dato ya existe — no tiene sentido pedirle que
+ * tilde algo que ya hizo.
+ */
+function OnboardingChecklist({ onNavigate }) {
+  const { user } = useAuth();
+  const [hechos, setHechos] = useState(null);
+  const [oculto, setOculto] = useState(false);
+  const [auto, setAuto] = useState({});
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let vivo = true;
+    (async () => {
+      const [{ data: pasos }, { data: lotes }, { data: aper }, { data: alertas }] = await Promise.all([
+        supabase.from("user_onboarding").select("paso").eq("user_id", user.id),
+        supabase.from("import_batches").select("id").eq("user_id", user.id).limit(1),
+        supabase.from("broker_opening_cash").select("currency").eq("user_id", user.id).limit(1),
+        supabase.from("price_alerts").select("id").eq("user_id", user.id).limit(1),
+      ]);
+      if (!vivo) return;
+      setHechos(new Set((pasos || []).map((p) => p.paso)));
+      setAuto({
+        importar: (lotes || []).length > 0,
+        apertura: (aper || []).length > 0,
+        alertas: (alertas || []).length > 0,
+      });
+    })();
+    return () => { vivo = false; };
+  }, [user?.id]);
+
+  const PASOS = [
+    { id: "importar", t: "Importá tu cuenta corriente", d: "Bajá el CSV de movimientos de tu broker y subilo. De ahí sale tu cartera y tu caja.", ir: "importaciones", cta: "Ir a Importaciones" },
+    { id: "apertura", t: "Cargá el saldo de apertura", d: "El CSV no dice con cuánto arrancaste. Sin ese dato tu caja queda corrida contra la del broker.", ir: "importaciones", cta: "Cargarlo" },
+    { id: "alertas", t: "Poné tu primera alerta", d: "Un precio que quieras vigilar. Te llega sin tener Midas abierto.", ir: "alertas", cta: "Ir a Alertas" },
+    { id: "telegram", t: "Conectá Telegram", d: "Para que los avisos te lleguen al teléfono.", ir: "alertas", cta: "Conectar" },
+  ];
+
+  const listo = (p) => auto[p.id] || hechos?.has(p.id);
+  const completos = PASOS.filter(listo).length;
+
+  const marcar = async (id) => {
+    if (!user?.id) return;
+    setHechos((p) => new Set([...(p || []), id]));
+    await supabase.from("user_onboarding").upsert({ user_id: user.id, paso: id }, { onConflict: "user_id,paso" });
+  };
+
+  if (!user || hechos === null || oculto) return null;
+  if (completos === PASOS.length) return null;
+
+  return (
+    <div style={{ border: `1px solid ${C.accent}`, borderRadius: 10, padding: 18, marginBottom: 20, background: C.panel }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+        <span style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'Raleway', sans-serif" }}>Bienvenido a Midas</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 11, color: C.muted, fontFamily: "'JetBrains Mono', monospace" }}>{completos}/{PASOS.length}</span>
+          <button onClick={() => setOculto(true)} title="Ocultar hasta la próxima sesión"
+            style={{ fontSize: 11, cursor: "pointer", background: "transparent", color: C.dim, border: "none" }}>✕</button>
+        </div>
+      </div>
+      <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 14 }}>
+        Tres o cuatro pasos y la pantalla empieza a decirte algo. Sin importar tu cuenta, Midas está vacío.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {PASOS.map((p) => {
+          const ok = listo(p);
+          return (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", border: `1px solid ${C.border}`, borderRadius: 8, opacity: ok ? 0.55 : 1 }}>
+              <div style={{ width: 20, height: 20, borderRadius: "50%", flexShrink: 0, border: `2px solid ${ok ? "#34D399" : C.border}`, background: ok ? "#34D399" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#0b0f14", fontWeight: 700 }}>
+                {ok ? "✓" : ""}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, color: C.text, fontWeight: 600, textDecoration: ok ? "line-through" : "none" }}>{p.t}</div>
+                <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>{p.d}</div>
+              </div>
+              {!ok && (
+                <button onClick={() => { marcar(p.id); if (onNavigate) onNavigate(p.ir); }}
+                  style={{ padding: "6px 13px", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, background: "transparent", color: C.accent, border: `1px solid ${C.accent}`, borderRadius: 6, whiteSpace: "nowrap" }}>
+                  {p.cta}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function MidasApp({ allowedModules = null }) {
   const [collapsed, setCollapsed] = useState(false);
   const [now, setNow] = useState(new Date());
@@ -1718,7 +1817,7 @@ function MidasApp({ allowedModules = null }) {
             ) : active === "flujo-posiciones" ? (
               <PositionFlowModule key={active} alertsSys={globalAlerts} />
             ) : active === "dashboard" ? (
-              <DashboardModule />
+              <><OnboardingChecklist onNavigate={setActive} /><DashboardModule /></>
             ) : (
               <EmptyWorkspace key={active} active={active} />
             )}
