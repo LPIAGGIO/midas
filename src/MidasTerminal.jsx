@@ -796,20 +796,25 @@ export default function MidasTerminal() {
 /**
  * "Contanos": canal directo del usuario al admin sin salir de la app.
  * Idea tomada de elteorico.ar (26/08/2026), que lo tiene fijo en el header
- * mientras la app esta en construccion.
+ * mientras la app está en construcción.
  *
- * Guarda en `feedback` con la pantalla desde donde se mando — sin eso, la
+ * Guarda en `feedback` con la pantalla desde donde se mandó — sin eso, la
  * mitad de los reportes son "no anda" sin contexto y hay que ir a preguntar.
- * El usuario ve solo lo suyo (RLS); el admin lo lee con el mail de quien
- * escribio via admin_list_feedback().
+ * El usuario ve sólo lo suyo (RLS); el admin lo lee con el mail de quien
+ * escribió vía admin_list_feedback().
+ *
+ * El modal está separado del botón porque lo abren DOS lugares: el botón del
+ * header y el link de la barra de construcción. Con el estado adentro del
+ * botón, la barra habría necesitado su propio modal duplicado.
  */
-function ContanosButton({ pantalla }) {
+function ContanosModal({ open, onClose, pantalla }) {
   const { user } = useAuth();
-  const [open, setOpen] = useState(false);
   const [txt, setTxt] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [ok, setOk] = useState(false);
   const MAX = 2000;
+
+  useEffect(() => { if (open) { setTxt(""); setOk(false); } }, [open]);
 
   const enviar = async () => {
     const m = txt.trim();
@@ -823,57 +828,68 @@ function ContanosButton({ pantalla }) {
     setEnviando(false);
     if (error) { setOk("Error: " + error.message); return; }
     setOk(true); setTxt("");
-    setTimeout(() => { setOpen(false); setOk(false); }, 1600);
+    setTimeout(() => { onClose(); }, 1600);
   };
 
-  if (!user) return null;
+  if (!open || !user) return null;
   return (
-    <>
-      <button onClick={() => setOpen(true)} title="Contanos qué se rompió o qué falta"
-        style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", fontSize: 11.5,
-          fontWeight: 600, cursor: "pointer", background: "transparent", color: C.accent,
-          border: `1px solid ${C.accent}`, borderRadius: 999, whiteSpace: "nowrap",
-          fontFamily: "'Roboto', sans-serif" }}>
-        <MessageSquare size={13} strokeWidth={1.8} /> Contanos
-      </button>
-      {open && (
-        <div onClick={() => setOpen(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999,
-            display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div onClick={(e) => e.stopPropagation()}
-            style={{ width: "min(660px,100%)", background: C.panel, border: `1px solid ${C.border}`,
-              borderRadius: 12, padding: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <MessageSquare size={16} color={C.accent} strokeWidth={1.8} />
-              <span style={{ fontSize: 15, fontWeight: 700, color: C.text, fontFamily: "'Raleway', sans-serif" }}>Contanos</span>
-            </div>
-            <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-              Lo que te trabó, lo que no se entendió, lo que falta, o lo que harías distinto.
-              Si algo se rompió, contá qué estabas haciendo cuando pasó.
-            </div>
-            <textarea value={txt} onChange={(e) => setTxt(e.target.value.slice(0, MAX))} autoFocus rows={7}
-              style={{ width: "100%", background: C.deep, color: C.text, border: `1px solid ${C.accent}`,
-                borderRadius: 8, padding: 12, fontSize: 13, fontFamily: "'Roboto', sans-serif",
-                outline: "none", resize: "vertical" }} />
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-              <span style={{ fontSize: 11, color: ok === true ? "#34d399" : C.dim }}>
-                {ok === true ? "Gracias. Lo leemos." : typeof ok === "string" ? ok : `${txt.length}/${MAX}`}
-              </span>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setOpen(false)} style={{ padding: "7px 16px", fontSize: 12, cursor: "pointer",
-                  background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8 }}>Cancelar</button>
-                <button onClick={enviar} disabled={enviando || !txt.trim()}
-                  style={{ padding: "7px 18px", fontSize: 12, fontWeight: 600,
-                    cursor: enviando || !txt.trim() ? "default" : "pointer", background: C.accent,
-                    color: "#0b0f14", border: "none", borderRadius: 8, opacity: !txt.trim() ? .5 : 1 }}>
-                  {enviando ? "Enviando…" : "Enviar"}
-                </button>
-              </div>
-            </div>
+    <div onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ width: "min(660px,100%)", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <MessageSquare size={16} color={C.accent} strokeWidth={1.8} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: C.text, fontFamily: "'Raleway', sans-serif" }}>Contanos</span>
+        </div>
+        <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+          Lo que te trabó, lo que no se entendió, lo que falta, o lo que harías distinto.
+          Si algo se rompió, contá qué estabas haciendo cuando pasó.
+        </div>
+        <textarea value={txt} onChange={(e) => setTxt(e.target.value.slice(0, MAX))} autoFocus rows={7}
+          style={{ width: "100%", background: C.deep, color: C.text, border: `1px solid ${C.accent}`, borderRadius: 8, padding: 12, fontSize: 13, fontFamily: "'Roboto', sans-serif", outline: "none", resize: "vertical" }} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+          <span style={{ fontSize: 11, color: ok === true ? "#34d399" : C.dim }}>
+            {ok === true ? "Gracias. Lo leemos." : typeof ok === "string" ? ok : `${txt.length}/${MAX}`}
+          </span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} style={{ padding: "7px 16px", fontSize: 12, cursor: "pointer", background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8 }}>Cancelar</button>
+            <button onClick={enviar} disabled={enviando || !txt.trim()}
+              style={{ padding: "7px 18px", fontSize: 12, fontWeight: 600, cursor: enviando || !txt.trim() ? "default" : "pointer", background: C.accent, color: "#0b0f14", border: "none", borderRadius: 8, opacity: !txt.trim() ? .5 : 1 }}>
+              {enviando ? "Enviando…" : "Enviar"}
+            </button>
           </div>
         </div>
-      )}
-    </>
+      </div>
+    </div>
+  );
+}
+
+function ContanosButton({ onClick }) {
+  const { user } = useAuth();
+  if (!user) return null;
+  return (
+    <button onClick={onClick} title="Contanos qué se rompió o qué falta"
+      style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: "transparent", color: C.accent, border: `1px solid ${C.accent}`, borderRadius: 999, whiteSpace: "nowrap", fontFamily: "'Roboto', sans-serif" }}>
+      <MessageSquare size={13} strokeWidth={1.8} /> Contanos
+    </button>
+  );
+}
+
+function BarraConstruccion({ onContanos }) {
+  const [cerrada, setCerrada] = useState(() => {
+    try { return localStorage.getItem("midas_construccion_off") === "1"; } catch { return false; }
+  });
+  if (cerrada) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", background: "rgba(251,146,60,.08)", borderBottom: `1px solid rgba(251,146,60,.25)`, fontSize: 11.5, fontFamily: "'Roboto', sans-serif" }}>
+      <span style={{ color: "#FB923C", fontWeight: 700 }}>En construcción.</span>
+      <span style={{ color: C.muted }}>
+        Algo raro o una idea,{" "}
+        <button onClick={onContanos} style={{ color: "#FB923C", background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 11.5, textDecoration: "underline", fontFamily: "inherit" }}>contanos</button>.
+      </span>
+      <button onClick={() => { setCerrada(true); try { localStorage.setItem("midas_construccion_off", "1"); } catch {} }}
+        style={{ marginLeft: "auto", color: C.dim, background: "none", border: "none", cursor: "pointer", fontSize: 13, lineHeight: 1 }}>×</button>
+    </div>
   );
 }
 
@@ -987,6 +1003,9 @@ function MidasApp({ allowedModules = null }) {
   const [now, setNow] = useState(new Date());
   const [open, setOpen] = useState({ bcra: false, mercado: false, analizadores: false, calculadoras: false, reportes: false });
   const [active, setActive] = useState("dashboard");
+  // El modal de "Contanos" lo abren dos lugares: el boton del header y el link
+  // de la barra de construccion. Por eso el estado vive aca y no adentro del boton.
+  const [contanosOpen, setContanosOpen] = useState(false);
 
   // ─── Mobile / PWA: la sidebar pasa a ser un drawer (menú hamburguesa) ───
   const [isMobile, setIsMobile] = useState(
@@ -1151,6 +1170,7 @@ function MidasApp({ allowedModules = null }) {
 
   return (
     <PrivacyProvider>
+    <ContanosModal open={contanosOpen} onClose={() => setContanosOpen(false)} pantalla={active} />
     <div
       style={{
         fontFamily: "'Roboto', system-ui, sans-serif",
@@ -1221,12 +1241,6 @@ function MidasApp({ allowedModules = null }) {
         .eco-nav-row { transition: background-color 0.15s ease, color 0.15s ease; }
         .eco-nav-row:hover { background-color: rgba(241,245,249,0.04); }
 
-        .eco-search { transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease; }
-        .eco-search:focus-within {
-          border-color: ${C.accentBorder};
-          background-color: ${C.bg};
-          box-shadow: 0 0 0 3px ${C.accentSoft};
-        }
 
         .eco-fade-in { animation: ecoFade 0.35s ease both; }
         @keyframes ecoFade {
@@ -1295,6 +1309,7 @@ function MidasApp({ allowedModules = null }) {
       `}</style>
 
       {/* ─────────── NAVBAR ─────────── */}
+      <BarraConstruccion onContanos={() => setContanosOpen(true)} />
       <header
         style={{
           backgroundColor: C.bg,
@@ -1372,46 +1387,7 @@ function MidasApp({ allowedModules = null }) {
 
         {/* Buscador */}
         <div className="flex-1 flex items-center justify-center px-6 min-w-0">
-          {!isMobile && (
-          <div
-            className="eco-search flex items-center gap-3 w-full"
-            style={{
-              maxWidth: 520,
-              border: `1px solid ${C.border}`,
-              backgroundColor: C.deep,
-              padding: "8px 14px",
-            }}
-          >
-            <Search size={14} color={C.muted} strokeWidth={1.8} />
-            <input
-              type="text"
-              placeholder="Buscar por título…"
-              style={{
-                background: "transparent",
-                border: "none",
-                color: C.text,
-                fontSize: 13,
-                letterSpacing: "0.01em",
-                width: "100%",
-                fontWeight: 400,
-                fontFamily: "'Roboto', sans-serif",
-              }}
-            />
-            <span
-              className="eco-mono"
-              style={{
-                fontSize: 10,
-                color: C.dim,
-                letterSpacing: "0.08em",
-                border: `1px solid ${C.border}`,
-                padding: "1px 5px",
-              }}
-            >
-              ⌘K
-            </span>
-          </div>
-          )}
-          <div style={{ marginLeft: 10 }}><ContanosButton pantalla={active} /></div>
+          <ContanosButton onClick={() => setContanosOpen(true)} />
         </div>
 
         {/* Sección derecha */}
@@ -1532,9 +1508,24 @@ function MidasApp({ allowedModules = null }) {
                           </>
                         ) : (
                           <>
-                            <span style={{ fontWeight: 700, fontSize: 9, color: a.kind === "down" ? C.red : C.green, border: `1px solid ${a.kind === "down" ? C.red : C.green}`, borderRadius: 3, padding: "1px 4px" }}>{a.kind === "down" ? "▼" : "▲"}</span>
+                            {(() => {
+                              // El badge dice QUE HACER (sale de la nota), no hacia donde
+                              // cruzo el precio: un soporte es dir='down' y es COMPRA.
+                              const acc = accionDeAlerta(a.nota);
+                              const col = acc ? acc.color : (a.kind === "down" ? C.red : C.green);
+                              return (
+                                <span style={{ fontWeight: 700, fontSize: 9, color: col, border: `1px solid ${col}`, borderRadius: 3, padding: "1px 4px", whiteSpace: "nowrap" }}>
+                                  {a.kind === "down" ? "▼" : "▲"}{acc ? " " + acc.txt : ""}
+                                </span>
+                              );
+                            })()}
                             <span style={{ color: C.text, fontWeight: 600 }}>{a.ticker}</span>
                             <span style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>@ {a.level}</span>
+                            {a.nota && (
+                              <span title={a.nota} style={{ color: C.dim, fontSize: 10.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                                {String(a.nota).replace(/^AUTO · /, "").split(" · ").slice(0, 2).join(" · ")}
+                              </span>
+                            )}
                           </>
                         )}
                       </div>
@@ -25866,6 +25857,29 @@ function useOnlinePresence() {
   return count;
 }
 
+/**
+ * Que hay que HACER con una alerta, leido de su nota.
+ *
+ * El campo `dir` dice hacia donde cruzo el precio, NO que operar: una alerta
+ * de soporte es dir='down' -salta cuando el precio BAJA hasta el nivel- y es
+ * justamente una senal de COMPRA. El panel pintaba flecha roja hacia abajo y
+ * se leia como "vender". Reportado por LP el 26/08/2026 con UBER: la alerta de
+ * $65.245 decia "zona de COMPRA" en la nota y en el panel parecia una venta.
+ *
+ * Los RATCHET son otra cosa -stop dinamico que sigue a una posicion abierta- y
+ * no son ni entrada ni salida: se marcan aparte.
+ */
+function accionDeAlerta(nota) {
+  const t = String(nota || "").toLowerCase();
+  if (t.startsWith("ratchet") || t.includes("stop dinámico") || t.includes("stop dinamico"))
+    return { txt: "STOP", color: "#FBBF24" };
+  if (t.includes("stop loss")) return { txt: "STOP", color: "#FBBF24" };
+  if (t.includes("zona de compra") || t.includes("soporte")) return { txt: "COMPRA", color: "#34D399" };
+  if (t.includes("take profit") || t.includes("venta") || t.includes("resistencia"))
+    return { txt: "VENTA", color: "#F87171" };
+  return null;
+}
+
 function useGlobalAlerts() {
   const { user } = useAuth();
   const { positions } = useUserPositions();
@@ -25874,9 +25888,9 @@ function useGlobalAlerts() {
     if (!user) { setPalerts([]); return; }
     let cancelled = false;
     const load = () =>
-      supabase.from("price_alerts").select("id,ticker,price,dir,triggered_at").eq("user_id", user.id).is("triggered_at", null).then(({ data }) => {
+      supabase.from("price_alerts").select("id,ticker,price,dir,nota,triggered_at").eq("user_id", user.id).is("triggered_at", null).then(({ data }) => {
         if (cancelled) return;
-        setPalerts((data || []).map((r) => ({ id: r.id, ticker: r.ticker, price: Number(r.price), dir: r.dir })));
+        setPalerts((data || []).map((r) => ({ id: r.id, ticker: r.ticker, price: Number(r.price), dir: r.dir, nota: r.nota })));
       });
     load();
     // 5s: en papeles volátiles los 15s de antes regalaban medio movimiento.
@@ -25951,7 +25965,7 @@ function useGlobalAlerts() {
       if (!hit) continue;
       firedRef.current.add(a.id);
       if (!muted) fire(`${a.dir === "up" ? "🎯" : "🛑"} ${a.ticker}`, `Precio ${price} cruzó tu alerta ${a.price}`);
-      setLog((l) => [{ id: a.id + "_" + Date.now(), ts, ticker: a.ticker, kind: a.dir, price, level: a.price }, ...l].slice(0, 40));
+      setLog((l) => [{ id: a.id + "_" + Date.now(), ts, ticker: a.ticker, kind: a.dir, price, level: a.price, nota: a.nota }, ...l].slice(0, 40));
       supabase.from("price_alerts").update({ triggered_at: new Date().toISOString() }).eq("id", a.id).then(() => {});
     }
   }, [consolidated, futPrices, d912, palerts, fire, muted, gStockPx]);
