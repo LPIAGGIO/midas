@@ -644,16 +644,25 @@ async function main() {
   // -150.000. Si ademas generaramos filas en futures_daily_adjustments y el
   // usuario las confirmara, esa caja entraria DOS VECES.
   //
-  // Por eso los ajustes solo se generan para futuros que NO vienen del Libro
-  // (por ejemplo, cargados a mano o traidos de otro broker sin cuenta
-  // corriente importada). Ese era el motivo real del filtro viejo; el error
-  // era aplicarlo tambien al Paso 1 y quedarse sin historico de settlements.
+  // Por eso los ajustes solo se generan para futuros que NO vienen de un
+  // import de Cocos (por ejemplo, cargados a mano o traidos de otro broker
+  // sin cuenta corriente importada). Ese era el motivo real del filtro viejo;
+  // el error era aplicarlo tambien al Paso 1 y quedarse sin historico.
+  //
+  // FIX 25/08/2026: el filtro eximia SOLO a 'derivado_libro', pero los fills
+  // intradia que LP importa de Matriz entran con source 'csv_matriz' y son la
+  // MISMA cuenta Cocos: su Indice diario tambien llega por el Libro. Caso
+  // real: los 50 DLRSEP26 + 14 DLRNOV26 del 25/08 (csv_matriz) hubieran
+  // generado pendings por ~+183.000 cuya caja ya venia en el Credito Indice
+  // de +33.000 del dia -> doble caja al confirmar. Criterio: cualquier source
+  // de import de Cocos queda exento de ajustes.
+  const CAJA_VIA_LIBRO = new Set(["derivado_libro", "csv_matriz"]);
   const paraAjustes = positions.filter(
-    (p) => !p.extra || p.extra.source !== "derivado_libro"
+    (p) => !p.extra || !CAJA_VIA_LIBRO.has(p.extra.source)
   );
   const delLibro = positions.length - paraAjustes.length;
   if (delLibro > 0) {
-    info(`${delLibro} posicion(es) vienen del Libro: su caja ya esta en la cuenta corriente importada, no se generan ajustes.`);
+    info(`${delLibro} posicion(es) vienen de imports de Cocos (libro/matriz): su caja entra por la cuenta corriente importada, no se generan ajustes.`);
   }
   if (paraAjustes.length > 0) {
     await generateAdjustments(paraAjustes, settleDate);
