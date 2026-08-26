@@ -4698,6 +4698,86 @@ function ImportacionesModule() {
   return <ImportacionesView />;
 }
 
+/**
+ * Saldo de apertura por moneda. El CSV de movimientos de Cocos NO trae una fila
+ * de saldo inicial: arranca en una fecha arbitraria y desde ahi lista
+ * movimientos, asi que sumarlos da el DELTA del periodo, no el saldo.
+ *
+ * Sin esto la caja de Midas queda desplazada una constante contra la del
+ * broker. Verificado con LP en dos dias distintos: $2.699.929,87 el 24/08 y
+ * $2.699.929,86 el 26/08 — un centavo de diferencia, o sea apertura y no un
+ * error que se acumula. En dolares el hueco era u$s 52,68.
+ *
+ * Se carga una vez. applyDerived lo suma como un movimiento mas cada vez que
+ * reconstruye la caja.
+ */
+function SaldoAperturaCard({ userId, onSaved }) {
+  const MONEDAS = ["ARS", "USD-MEP", "USD-CCL"];
+  const [vals, setVals] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    let vivo = true;
+    (async () => {
+      const { data } = await supabase.from("broker_opening_cash")
+        .select("currency, amount").eq("user_id", userId).eq("broker", "cocos");
+      if (!vivo) return;
+      const m = {};
+      for (const r of data || []) m[r.currency] = String(r.amount);
+      setVals(m);
+    })();
+    return () => { vivo = false; };
+  }, [userId]);
+
+  const guardar = async () => {
+    if (!userId) return;
+    setSaving(true); setMsg(null);
+    const filas = MONEDAS
+      .map((c) => ({ currency: c, amount: Number(String(vals[c] ?? "").replace(",", ".")) }))
+      .filter((r) => Number.isFinite(r.amount))
+      .map((r) => ({ user_id: userId, broker: "cocos", currency: r.currency, amount: r.amount, updated_at: new Date().toISOString() }));
+    const { error } = filas.length
+      ? await supabase.from("broker_opening_cash").upsert(filas, { onConflict: "user_id,broker,currency" })
+      : { error: null };
+    setSaving(false);
+    setMsg(error ? "Error: " + error.message : "Guardado. Reconstruí el portfolio para aplicarlo.");
+    if (!error && onSaved) onSaved();
+  };
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 16 }}>
+      <div style={{ fontSize: 13, color: C.text, fontWeight: 700, marginBottom: 4, fontFamily: "'Raleway', sans-serif" }}>
+        Saldo de apertura
+      </div>
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+        El CSV del broker no dice con cuánto arrancaste: sólo lista movimientos desde una fecha.
+        Sin este dato tu caja queda corrida una constante. Poné acá lo que tenías el día
+        <b> anterior</b> al primer movimiento del archivo — negativo si estabas en descubierto.
+        Se carga una vez.
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        {MONEDAS.map((c) => (
+          <div key={c}>
+            <div style={{ fontSize: 10, color: C.dim, marginBottom: 3 }}>{c}</div>
+            <input value={vals[c] ?? ""} onChange={(e) => setVals((p) => ({ ...p, [c]: e.target.value }))}
+              placeholder="0" inputMode="decimal"
+              style={{ width: 150, padding: "6px 8px", fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
+                background: "transparent", color: C.text, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+          </div>
+        ))}
+        <button onClick={guardar} disabled={saving}
+          style={{ padding: "7px 14px", fontSize: 11.5, fontWeight: 600, cursor: saving ? "default" : "pointer",
+            border: `1px solid ${C.border}`, background: "transparent", color: C.text, borderRadius: 6 }}>
+          {saving ? "Guardando…" : "Guardar"}
+        </button>
+      </div>
+      {msg && <div style={{ fontSize: 11.5, marginTop: 10, color: msg.startsWith("Error") ? C.red : "#34d399" }}>{msg}</div>}
+    </div>
+  );
+}
+
 function ImportacionesView() {
   const { user } = useAuth();
   const [tab, setTab] = useState("importar");
@@ -4801,6 +4881,32 @@ function ImportacionesView() {
       const plug = T + C - K; // Σ(cash) = -C + K + plug = T (el total SETTLED del libro)
       if (Math.abs(plug) > 0.005) cashRows.push({ user_id: user.id, movement_date: today, movement_type: plug >= 0 ? "deposit" : "withdrawal", currency: cur, amount: Math.abs(plug), notes: "Saldo derivado del libro (ancla al total)", broker: "cocos" });
     }
+    // SALDO DE APERTURA (25/08/2026). El CSV de Cocos no trae fila de saldo
+    // inicial: arranca en una fecha arbitraria y lista movimientos desde ahi.
+    // Sumarlos da el DELTA del periodo, no el saldo — falta con cuanto se
+    // empezo. Medido contra el broker en dos dias distintos, el hueco de LP dio
+    // $2.699.929,87 (24/08) y $2.699.929,86 (26/08): constante, o sea apertura.
+    // Cada usuario lo carga una vez por moneda en broker_opening_cash.
+    try {
+      const { data: aperturas } = await supabase
+        .from("broker_opening_cash")
+        .select("currency, amount")
+        .eq("user_id", user.id)
+        .eq("broker", "cocos");
+      for (const a of aperturas || []) {
+        const monto = Number(a?.amount);
+        if (!Number.isFinite(monto) || Math.abs(monto) < 0.005) continue;
+        cashRows.push({
+          user_id: user.id, movement_date: today,
+          movement_type: monto >= 0 ? "deposit" : "withdrawal",
+          currency: a.currency, amount: Math.abs(monto),
+          notes: "Saldo de apertura (anterior al CSV)", broker: "cocos",
+        });
+      }
+    } catch (e) {
+      console.warn("[applyDerived] no se pudo leer el saldo de apertura:", e?.message || e);
+    }
+
     // T+1 pendiente: cada trade con liquidación FUTURA se fecha en su
     // fecha_liquidacion. balanceByCurrency lo excluye de la caja de hoy
     // (movement_date > hoy) y aparece en la liquidez proyectada de esa fecha.
@@ -5014,6 +5120,7 @@ function ImportacionesView() {
               {movs.length > 0 && <button onClick={reaplicar} disabled={applying} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: applying ? "default" : "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>{applying ? "Reconstruyendo…" : "↻ Reconstruir portfolio desde el libro"}</button>}
             </div>
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 14 }}>Cada archivo que importás, por broker. Son independientes — podés tener imports de distintos brokers.</div>
+            <SaldoAperturaCard userId={user?.id} onSaved={reloadMovs} />
             {rebuildMsg && <div style={{ fontSize: 11.5, marginBottom: 10, color: rebuildMsg.startsWith("Error") ? C.red : "#34d399" }}>{rebuildMsg}</div>}
             {batches.length === 0 && sinLote === 0 ? (
               <div style={{ fontSize: 12, color: C.dim, padding: "16px 0" }}>Todavía no importaste nada. Subí tu CSV arriba.</div>
