@@ -907,12 +907,21 @@ function OnboardingChecklist({ onNavigate }) {
         supabase.from("broker_opening_cash").select("currency").eq("user_id", user.id).limit(1),
         supabase.from("price_alerts").select("id").eq("user_id", user.id).limit(1),
       ]);
+      // el link de Telegram vive en telegram_links; si ya esta vinculado, el
+      // paso va tildado solo (mismo criterio que los otros tres)
+      let tg = [];
+      try {
+        const r = await supabase.from("telegram_links").select("chat_id")
+          .eq("user_id", user.id).not("chat_id", "is", null).limit(1);
+        tg = r.data || [];
+      } catch { /* si la tabla no esta accesible, el paso queda manual */ }
       if (!vivo) return;
       setHechos(new Set((pasos || []).map((p) => p.paso)));
       setAuto({
         importar: (lotes || []).length > 0,
         apertura: (aper || []).length > 0,
         alertas: (alertas || []).length > 0,
+        telegram: tg.length > 0,
       });
     })();
     return () => { vivo = false; };
@@ -922,7 +931,7 @@ function OnboardingChecklist({ onNavigate }) {
     { id: "importar", t: "Importá tu cuenta corriente", d: "Bajá el CSV de movimientos de tu broker y subilo. De ahí sale tu cartera y tu caja.", ir: "importaciones", cta: "Ir a Importaciones" },
     { id: "apertura", t: "Cargá el saldo de apertura", d: "El CSV no dice con cuánto arrancaste. Sin ese dato tu caja queda corrida contra la del broker.", ir: "importaciones", cta: "Cargarlo" },
     { id: "alertas", t: "Poné tu primera alerta", d: "Un precio que quieras vigilar. Te llega sin tener Midas abierto.", ir: "alertas", cta: "Ir a Alertas" },
-    { id: "telegram", t: "Conectá Telegram", d: "Para que los avisos te lleguen al teléfono.", ir: "alertas", cta: "Conectar" },
+    { id: "telegram", t: "Conectá Telegram", d: "Para que los avisos te lleguen al teléfono, con Midas cerrado.", ir: "settings", cta: "Conectar" },
   ];
 
   const listo = (p) => auto[p.id] || hechos?.has(p.id);
