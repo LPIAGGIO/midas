@@ -901,11 +901,10 @@ function OnboardingChecklist({ onNavigate }) {
     if (!user?.id) return;
     let vivo = true;
     (async () => {
-      const [{ data: pasos }, { data: lotes }, { data: aper }, { data: alertas }] = await Promise.all([
+      const [{ data: pasos }, { data: lotes }, { data: aper }] = await Promise.all([
         supabase.from("user_onboarding").select("paso").eq("user_id", user.id),
         supabase.from("import_batches").select("id").eq("user_id", user.id).limit(1),
         supabase.from("broker_opening_cash").select("currency").eq("user_id", user.id).limit(1),
-        supabase.from("price_alerts").select("id").eq("user_id", user.id).limit(1),
       ]);
       // el link de Telegram vive en telegram_links; si ya esta vinculado, el
       // paso va tildado solo (mismo criterio que los otros tres)
@@ -920,7 +919,6 @@ function OnboardingChecklist({ onNavigate }) {
       setAuto({
         importar: (lotes || []).length > 0,
         apertura: (aper || []).length > 0,
-        alertas: (alertas || []).length > 0,
         telegram: tg.length > 0,
       });
     })();
@@ -930,7 +928,6 @@ function OnboardingChecklist({ onNavigate }) {
   const PASOS = [
     { id: "importar", t: "Importá tu cuenta corriente", d: "Bajá el CSV de movimientos de tu broker y subilo. De ahí sale tu cartera y tu caja.", ir: "importaciones", cta: "Ir a Importaciones" },
     { id: "apertura", t: "Cargá el saldo de apertura", d: "El CSV no dice con cuánto arrancaste. Sin ese dato tu caja queda corrida contra la del broker.", ir: "importaciones", cta: "Cargarlo" },
-    { id: "alertas", t: "Poné tu primera alerta", d: "Un precio que quieras vigilar. Te llega sin tener Midas abierto.", ir: "alertas", cta: "Ir a Alertas" },
     { id: "telegram", t: "Conectá Telegram", d: "Para que los avisos te lleguen al teléfono, con Midas cerrado.", ir: "settings", cta: "Conectar" },
   ];
 
@@ -957,7 +954,7 @@ function OnboardingChecklist({ onNavigate }) {
         </div>
       </div>
       <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 14 }}>
-        Tres o cuatro pasos y la pantalla empieza a decirte algo. Sin importar tu cuenta, Midas está vacío.
+        Con esto la pantalla empieza a decirte algo. Sin importar tu cuenta, Midas está vacío.
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {PASOS.map((p) => {
