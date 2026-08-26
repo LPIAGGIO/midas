@@ -988,6 +988,7 @@ function MidasApp({ allowedModules = null }) {
   // El modal de "Contanos" lo abren dos lugares: el boton del header y el link
   // de la barra de construccion. Por eso el estado vive aca y no adentro del boton.
   const [contanosOpen, setContanosOpen] = useState(false);
+  const [quienesOpen, setQuienesOpen] = useState(false);
 
   // ─── Mobile / PWA: la sidebar pasa a ser un drawer (menú hamburguesa) ───
   const [isMobile, setIsMobile] = useState(
@@ -1423,7 +1424,15 @@ function MidasApp({ allowedModules = null }) {
               >
                 {marketOpen ? "Mercado Abierto" : "Mercado Cerrado"}
                 {onlineCount != null && (
-                  <span style={{ color: C.accent, fontWeight: 600 }}> · {onlineCount} usuario{onlineCount === 1 ? "" : "s"}</span>
+                  // El contador solo lo ve un admin (online_users_count() devuelve
+                  // null al resto), asi que si esta visible el click ya esta habilitado.
+                  <span style={{ position: "relative", display: "inline-block" }}>
+                    <button onClick={() => setQuienesOpen((o) => !o)} title="Ver quiénes están conectados"
+                      style={{ color: C.accent, fontWeight: 600, background: "none", border: "none", padding: 0, cursor: "pointer", font: "inherit" }}>
+                      {" · "}{onlineCount} usuario{onlineCount === 1 ? "" : "s"}
+                    </button>
+                    {quienesOpen && <OnlineUsersPopover onClose={() => setQuienesOpen(false)} />}
+                  </span>
                 )}
               </span>
             </div>
@@ -25833,6 +25842,55 @@ function flowBeep() {
 /* Chequeo GLOBAL de alertas — corre siempre (montado en MidasTerminal), dispara
  * sonido + notificación del SO en cualquier pantalla, y mantiene el log + el
  * contador para la campanita del header. */
+/**
+ * Popover con QUIENES estan conectados. Se abre tocando el contador del header.
+ *
+ * El gate real esta en la base: online_users_list() es SECURITY DEFINER con
+ * is_admin() adentro y le devuelve CERO FILAS a un no-admin, aunque llame a la
+ * RPC a mano. El front solo refleja eso — si vuelve vacio, no se muestra nada.
+ * Mismo patron que admin_list_users y admin_list_feedback.
+ */
+function OnlineUsersPopover({ onClose }) {
+  const [users, setUsers] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    supabase.rpc("online_users_list").then(({ data }) => { if (vivo) setUsers(data || []); });
+    return () => { vivo = false; };
+  }, []);
+
+  const hace = (s) => (s < 60 ? "hace " + s + "s" : "hace " + Math.floor(s / 60) + " min");
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9998 }} />
+      <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, zIndex: 9999, minWidth: 260, maxWidth: 340, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: "0 8px 28px rgba(0,0,0,.5)", overflow: "hidden" }}>
+        <div style={{ padding: "9px 13px", borderBottom: `1px solid ${C.border}`, fontSize: 11.5, fontWeight: 600, color: C.text }}>
+          Conectados ahora
+        </div>
+        {users === null ? (
+          <div style={{ padding: "14px 13px", fontSize: 11.5, color: C.dim }}>Cargando…</div>
+        ) : users.length === 0 ? (
+          <div style={{ padding: "14px 13px", fontSize: 11.5, color: C.dim }}>Nadie más por acá.</div>
+        ) : (
+          users.map((u) => (
+            <div key={u.user_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 13px", borderTop: `1px solid ${C.border}`, fontSize: 11.5 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#34D399", flexShrink: 0 }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ color: C.text, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {u.display_name || u.email}
+                  {u.es_admin && <span style={{ fontSize: 8.5, color: C.accent, border: `1px solid ${C.accent}`, padding: "0 4px", borderRadius: 3, marginLeft: 6 }}>ADMIN</span>}
+                </div>
+                {u.display_name && <div style={{ color: C.dim, fontSize: 10.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email}</div>}
+              </div>
+              <span style={{ color: C.dim, fontSize: 10, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{hace(u.hace_segundos)}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
 // Presencia: cada sesión logueada late (upsert) cada 60s en user_presence; el
 // conteo de conectados (últimos 2 min) lo devuelve online_users_count(), que
 // SOLO responde número a admins (al resto null → no se muestra nada).
