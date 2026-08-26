@@ -3386,8 +3386,11 @@ const TG_BOT_USERNAME = "midas_ar_BOT";
 const NOTIF_CATALOG = [
   { key: "price_alerts", label: "Alertas de precio", ready: true,
     desc: "Cuando un instrumento cruza un nivel que pusiste en Flujo de Posiciones. Suena aunque tengas Midas cerrado." },
-  { key: "scalping_dlr", label: "Senales Scalping DLR", ready: true,
-    desc: "Spread calendario JUL-JUN fuera de banda y reversion z-score sobre JUN26, en horario de rueda (10-15hs). En validacion: son candidatas, no senales con edge probado." },
+  // La descripcion vieja hablaba del calendario JUL-JUN y de un z-score sobre
+  // JUN26 — contratos vencidos hace meses — y de un scalping que el worker ya
+  // no hace. Lo que evalua HOY (buildScalpingSignals) es desvio de la curva.
+  { key: "scalping_dlr", label: "Dolar futuro fuera de la curva", ready: true,
+    desc: "Cuando un mes se despega del resto: avisa si quedo caro o barato contra la mediana de la curva y cuantos pesos tendria que moverse para alinearse. Mira los 3 contratos mas cercanos, salta al pasar 0,25% de desvio y solo en la transicion, no en cada tick. En horario de rueda." },
   { key: "desarbitrajes", label: "Desarbitrajes MEP", ready: true,
     desc: "Cuando el spread del canje de soberanos supera el umbral. Indicativo (sin puntas)." },
   { key: "eod_summary", label: "Resumen de fin de dia", ready: true,
