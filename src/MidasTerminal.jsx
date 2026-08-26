@@ -18,6 +18,7 @@ import {
   Home,
   TrendingUp,
   Search,
+  MessageSquare,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -522,6 +523,99 @@ function AdminUserDetail({ user, onBack, onChanged }) {
  * autoriza; un no-admin no obtiene data aunque fuerce la ruta. Fase B — slice 1:
  * lista de usuarios. Próximo: drilldown, permisos de módulos, suspender, borrar.
  */
+/**
+ * Bandeja de feedback del panel de admin. Lee por admin_list_feedback()
+ * (SECURITY DEFINER con el gate adentro), que es lo que permite ver el MAIL de
+ * quien escribio: auth.users no es legible desde un cliente normal.
+ *
+ * El estado sirve para no releer lo mismo: nuevo -> leido -> en_curso ->
+ * resuelto / descartado.
+ */
+function AdminFeedbackInbox() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filtro, setFiltro] = useState("abiertos");
+  const [err, setErr] = useState(null);
+
+  const cargar = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.rpc("admin_list_feedback");
+    setErr(error ? error.message : null);
+    setItems(data || []);
+    setLoading(false);
+  };
+  useEffect(() => { cargar(); }, []);
+
+  const cambiarEstado = async (id, estado) => {
+    setItems((p) => p.map((x) => (x.id === id ? { ...x, estado } : x)));
+    const { error } = await supabase.from("feedback")
+      .update({ estado, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) { setErr(error.message); cargar(); }
+  };
+
+  const ESTADOS = { nuevo: "#FBBF24", leido: "#94a3b8", en_curso: "#22D3EE", resuelto: "#34D399", descartado: "#64748b" };
+  const visibles = items.filter((x) =>
+    filtro === "todos" ? true
+      : filtro === "abiertos" ? !["resuelto", "descartado"].includes(x.estado)
+        : x.estado === filtro);
+  const nuevos = items.filter((x) => x.estado === "nuevo").length;
+
+  return (
+    <div style={{ marginTop: 28 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: C.text, fontFamily: "'Raleway', sans-serif" }}>Bandeja de feedback</span>
+        {nuevos > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#0b0f14", background: "#FBBF24", padding: "2px 7px", borderRadius: 999 }}>{nuevos} sin leer</span>}
+        <button onClick={cargar} style={{ marginLeft: "auto", padding: "5px 11px", fontSize: 11, cursor: "pointer", background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 6 }}>↻ Actualizar</button>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+        {["abiertos", "nuevo", "en_curso", "resuelto", "todos"].map((f) => (
+          <button key={f} onClick={() => setFiltro(f)}
+            style={{
+              padding: "4px 11px", fontSize: 11, cursor: "pointer", borderRadius: 999,
+              background: filtro === f ? C.accent : "transparent", color: filtro === f ? "#0b0f14" : C.muted,
+              border: `1px solid ${filtro === f ? C.accent : C.border}`, fontWeight: filtro === f ? 700 : 400,
+            }}>
+            {f.replace("_", " ")}
+          </button>
+        ))}
+      </div>
+      {err && <div style={{ color: C.red, fontSize: 12, marginBottom: 10 }}>Error: {err}</div>}
+      {loading ? <div style={{ fontSize: 12, color: C.dim }}>Cargando…</div>
+        : visibles.length === 0 ? <div style={{ fontSize: 12, color: C.dim, padding: "14px 0" }}>Nada por acá.</div>
+          : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {visibles.map((f) => (
+                <div key={f.id} style={{ border: `1px solid ${C.border}`, borderLeft: `3px solid ${ESTADOS[f.estado] || C.border}`, borderRadius: 8, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
+                    <div style={{ fontSize: 12, color: C.text, fontWeight: 600 }}>
+                      {f.display_name || f.email}
+                      {f.pantalla && <span style={{ fontSize: 10, color: C.dim, marginLeft: 8, border: `1px solid ${C.border}`, padding: "1px 6px", borderRadius: 3 }}>{f.pantalla}</span>}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: C.dim }}>
+                      {new Date(f.created_at).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: C.text, whiteSpace: "pre-wrap", lineHeight: 1.55, marginBottom: 8 }}>{f.mensaje}</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {["leido", "en_curso", "resuelto", "descartado"].map((e) => (
+                      <button key={e} onClick={() => cambiarEstado(f.id, e)} disabled={f.estado === e}
+                        style={{
+                          padding: "3px 9px", fontSize: 10, cursor: f.estado === e ? "default" : "pointer", borderRadius: 5,
+                          background: "transparent", color: f.estado === e ? ESTADOS[e] : C.dim,
+                          border: `1px solid ${f.estado === e ? ESTADOS[e] : C.border}`, fontWeight: f.estado === e ? 700 : 400,
+                        }}>
+                        {e.replace("_", " ")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+    </div>
+  );
+}
+
 function AdminPanel() {
   const { user } = useAuth();
   const [isAdmin, setIsAdmin] = useState(null);
@@ -616,6 +710,7 @@ function AdminPanel() {
       <div style={{ fontSize: 10, color: C.dim, marginTop: 12, lineHeight: 1.5 }}>
         Tocá un usuario para ver su detalle: permisos de módulos, suspender, y su cartera/caja/libro con opción de borrar. El acceso está <b style={{ color: C.muted }}>enforced por RLS</b> en la base (<code>is_admin()</code>), no solo en el front.
       </div>
+      <AdminFeedbackInbox />
     </div>
   );
 }
@@ -696,6 +791,90 @@ export default function MidasTerminal() {
     return <div style={{ minHeight: "100vh", background: "#0F1B2B" }}><CedearValuacionModule compact /></div>;
   }
   return <MidasApp allowedModules={access.isAdmin ? null : access.allowedModules} />;
+}
+
+/**
+ * "Contanos": canal directo del usuario al admin sin salir de la app.
+ * Idea tomada de elteorico.ar (26/08/2026), que lo tiene fijo en el header
+ * mientras la app esta en construccion.
+ *
+ * Guarda en `feedback` con la pantalla desde donde se mando — sin eso, la
+ * mitad de los reportes son "no anda" sin contexto y hay que ir a preguntar.
+ * El usuario ve solo lo suyo (RLS); el admin lo lee con el mail de quien
+ * escribio via admin_list_feedback().
+ */
+function ContanosButton({ pantalla }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [txt, setTxt] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [ok, setOk] = useState(false);
+  const MAX = 2000;
+
+  const enviar = async () => {
+    const m = txt.trim();
+    if (!m || !user?.id) return;
+    setEnviando(true);
+    const { error } = await supabase.from("feedback").insert({
+      user_id: user.id, mensaje: m.slice(0, MAX),
+      pantalla: pantalla || null,
+      user_agent: (navigator.userAgent || "").slice(0, 400),
+    });
+    setEnviando(false);
+    if (error) { setOk("Error: " + error.message); return; }
+    setOk(true); setTxt("");
+    setTimeout(() => { setOpen(false); setOk(false); }, 1600);
+  };
+
+  if (!user) return null;
+  return (
+    <>
+      <button onClick={() => setOpen(true)} title="Contanos qué se rompió o qué falta"
+        style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", fontSize: 11.5,
+          fontWeight: 600, cursor: "pointer", background: "transparent", color: C.accent,
+          border: `1px solid ${C.accent}`, borderRadius: 999, whiteSpace: "nowrap",
+          fontFamily: "'Roboto', sans-serif" }}>
+        <MessageSquare size={13} strokeWidth={1.8} /> Contanos
+      </button>
+      {open && (
+        <div onClick={() => setOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999,
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width: "min(660px,100%)", background: C.panel, border: `1px solid ${C.border}`,
+              borderRadius: 12, padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <MessageSquare size={16} color={C.accent} strokeWidth={1.8} />
+              <span style={{ fontSize: 15, fontWeight: 700, color: C.text, fontFamily: "'Raleway', sans-serif" }}>Contanos</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+              Lo que te trabó, lo que no se entendió, lo que falta, o lo que harías distinto.
+              Si algo se rompió, contá qué estabas haciendo cuando pasó.
+            </div>
+            <textarea value={txt} onChange={(e) => setTxt(e.target.value.slice(0, MAX))} autoFocus rows={7}
+              style={{ width: "100%", background: C.deep, color: C.text, border: `1px solid ${C.accent}`,
+                borderRadius: 8, padding: 12, fontSize: 13, fontFamily: "'Roboto', sans-serif",
+                outline: "none", resize: "vertical" }} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+              <span style={{ fontSize: 11, color: ok === true ? "#34d399" : C.dim }}>
+                {ok === true ? "Gracias. Lo leemos." : typeof ok === "string" ? ok : `${txt.length}/${MAX}`}
+              </span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setOpen(false)} style={{ padding: "7px 16px", fontSize: 12, cursor: "pointer",
+                  background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8 }}>Cancelar</button>
+                <button onClick={enviar} disabled={enviando || !txt.trim()}
+                  style={{ padding: "7px 18px", fontSize: 12, fontWeight: 600,
+                    cursor: enviando || !txt.trim() ? "default" : "pointer", background: C.accent,
+                    color: "#0b0f14", border: "none", borderRadius: 8, opacity: !txt.trim() ? .5 : 1 }}>
+                  {enviando ? "Enviando…" : "Enviar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 function MidasApp({ allowedModules = null }) {
@@ -1127,6 +1306,7 @@ function MidasApp({ allowedModules = null }) {
             </span>
           </div>
           )}
+          <div style={{ marginLeft: 10 }}><ContanosButton pantalla={active} /></div>
         </div>
 
         {/* Sección derecha */}
