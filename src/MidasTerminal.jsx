@@ -937,11 +937,11 @@ function OnboardingChecklist({ onNavigate }) {
   const listo = (p) => auto[p.id] || hechos?.has(p.id);
   const completos = PASOS.filter(listo).length;
 
-  const marcar = async (id) => {
-    if (!user?.id) return;
-    setHechos((p) => new Set([...(p || []), id]));
-    await supabase.from("user_onboarding").upsert({ user_id: user.id, paso: id }, { onConflict: "user_id,paso" });
-  };
+  // FIX 26/08/2026: antes el paso se marcaba al TOCAR el boton. Tocar "Ir a
+  // Importaciones" y no importar dejaba el paso tildado igual, o sea que el
+  // checklist mentia. Ahora los cuatro pasos salen SOLO de la autodeteccion
+  // (el dato existe o no existe); user_onboarding queda para pasos futuros que
+  // no se puedan detectar mirando la base.
 
   if (!user || hechos === null || oculto) return null;
   if (completos === PASOS.length) return null;
@@ -972,7 +972,7 @@ function OnboardingChecklist({ onNavigate }) {
                 <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>{p.d}</div>
               </div>
               {!ok && (
-                <button onClick={() => { marcar(p.id); if (onNavigate) onNavigate(p.ir); }}
+                <button onClick={() => { if (onNavigate) onNavigate(p.ir); }}
                   style={{ padding: "6px 13px", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, background: "transparent", color: C.accent, border: `1px solid ${C.accent}`, borderRadius: 6, whiteSpace: "nowrap" }}>
                   {p.cta}
                 </button>
