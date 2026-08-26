@@ -875,24 +875,6 @@ function ContanosButton({ onClick }) {
   );
 }
 
-function BarraConstruccion({ onContanos }) {
-  const [cerrada, setCerrada] = useState(() => {
-    try { return localStorage.getItem("midas_construccion_off") === "1"; } catch { return false; }
-  });
-  if (cerrada) return null;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", background: "rgba(251,146,60,.08)", borderBottom: `1px solid rgba(251,146,60,.25)`, fontSize: 11.5, fontFamily: "'Roboto', sans-serif" }}>
-      <span style={{ color: "#FB923C", fontWeight: 700 }}>En construcción.</span>
-      <span style={{ color: C.muted }}>
-        Algo raro o una idea,{" "}
-        <button onClick={onContanos} style={{ color: "#FB923C", background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 11.5, textDecoration: "underline", fontFamily: "inherit" }}>contanos</button>.
-      </span>
-      <button onClick={() => { setCerrada(true); try { localStorage.setItem("midas_construccion_off", "1"); } catch {} }}
-        style={{ marginLeft: "auto", color: C.dim, background: "none", border: "none", cursor: "pointer", fontSize: 13, lineHeight: 1 }}>×</button>
-    </div>
-  );
-}
-
 /**
  * Checklist del primer ingreso. Idea tomada de elteorico.ar (26/08/2026): al
  * loguearte por primera vez te muestra "Configurá tu cuenta / Empezá a operar"
@@ -1309,7 +1291,6 @@ function MidasApp({ allowedModules = null }) {
       `}</style>
 
       {/* ─────────── NAVBAR ─────────── */}
-      <BarraConstruccion onContanos={() => setContanosOpen(true)} />
       <header
         style={{
           backgroundColor: C.bg,
@@ -1387,7 +1368,17 @@ function MidasApp({ allowedModules = null }) {
 
         {/* Buscador */}
         <div className="flex-1 flex items-center justify-center px-6 min-w-0">
-          <ContanosButton onClick={() => setContanosOpen(true)} />
+          {/* El aviso de construccion va INLINE con el boton, no en una barra
+              aparte: en su propia franja arriba se comia una fila entera de
+              alto y quedaba lejos del canal que ofrece. Fijo, sin cerrar. */}
+          <div className="flex items-center gap-2.5" style={{ minWidth: 0 }}>
+            {!isMobile && (
+              <span style={{ fontSize: 11.5, color: C.muted, whiteSpace: "nowrap", fontFamily: "'Roboto', sans-serif" }}>
+                <b style={{ color: "#FB923C", fontWeight: 700 }}>En construcción.</b> Algo raro o una idea,
+              </span>
+            )}
+            <ContanosButton onClick={() => setContanosOpen(true)} />
+          </div>
         </div>
 
         {/* Sección derecha */}
