@@ -43863,7 +43863,7 @@ function DecisionLogModule() {
   const [filas, setFilas] = useState(null);
   const [error, setError] = useState(null);
   const [tick, setTick] = useState(0);
-  const [marca, setMarca] = useState("px_1d");     // px_1d | px_5d | px_21d
+  const [marca, setMarca] = useState("auto");      // auto | px_1d | px_5d | px_21d
   const [horizonte, setHorizonte] = useState("todos");
   const [abierta, setAbierta] = useState(null);
 
@@ -43886,18 +43886,27 @@ function DecisionLogModule() {
   }, [user, tick]);
 
   const MARCAS = [
+    { id: "auto", bench: null, label: "Según horizonte" },
     { id: "px_1d", bench: "bench_1d", label: "1 rueda" },
     { id: "px_5d", bench: "bench_5d", label: "5 ruedas" },
     { id: "px_21d", bench: "bench_21d", label: "21 ruedas" },
   ];
   const marcaAct = MARCAS.find((m) => m.id === marca) || MARCAS[0];
+  // Cada llamado se mide en la ventana que declaro, no en una global. Medir un
+  // "no entrar" intradia a 5 ruedas lo convierte en otra prediccion: SNDK del
+  // 12/08 fue acierto ese dia (-0,35% contra SMH) y a 5 ruedas figura como
+  // error de +23,10%, sobre un movimiento sobre el que nunca opine. Con las 9
+  // primeras filas la diferencia entre medir bien y medir todo a 5 ruedas es
+  // 3 aciertos de 5 contra 1 de 5.
+  const VENTANA = { intradia: "px_1d", dias: "px_5d", semanas: "px_21d" };
 
   // Calculo por fila: retorno del papel, del benchmark, exceso, y si el
   // llamado acerto (el exceso fue en la direccion que se predijo).
   const calc = useMemo(() => {
     if (!filas) return [];
     return filas.map((r) => {
-      const px = r[marcaAct.id], bx = r[marcaAct.bench];
+      const campo = marcaAct.id === "auto" ? (VENTANA[r.horizonte] || "px_5d") : marcaAct.id;
+      const px = r[campo], bx = r[campo.replace("px_", "bench_")];
       const rp = px != null && r.precio_ref ? px / Number(r.precio_ref) - 1 : null;
       const rb = bx != null && r.bench_ref ? bx / Number(r.bench_ref) - 1 : null;
       const exceso = rp != null && rb != null ? rp - rb : (rp != null ? rp : null);
