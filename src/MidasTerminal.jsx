@@ -15713,6 +15713,19 @@ function ticker_isBondLike(instrumentType) {
   );
 }
 
+// Fecha de liquidacion de un trade T+1: el proximo dia habil de BYMA. Salta
+// fines de semana y feriados con la misma tabla que usan los futuros, asi que
+// una venta del viernes liquida el lunes y no el sabado.
+function proximoHabil(yyyymmdd) {
+  const d = new Date(yyyymmdd + "T12:00:00");
+  for (let i = 0; i < 10; i++) {
+    d.setDate(d.getDate() + 1);
+    const iso = d.toISOString().slice(0, 10);
+    if (!isNonBusinessDay(iso)) return iso;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
 function applyConventionToValue(instrumentType, qty, price) {
   // Bonos / ONs: precio cada 100 VN
   if (
@@ -16114,6 +16127,32 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
               ...(r.contractSize ? { contract_size: r.contractSize } : {}),
             },
           });
+          // La operación tambien mueve PLATA, y hasta ahora eso se perdia: la
+          // posicion se descontaba de la tenencia el mismo dia pero el efectivo
+          // recien aparecia cuando se importaba el libro al dia siguiente. En el
+          // medio el patrimonio quedaba corto por el importe de todo lo vendido
+          // (27/08: $12.789.688 de NVDA, META y AVGO — el papel salia de la
+          // cartera y la plata no entraba por ningun lado).
+          //
+          // Solo para lo que liquida a T+1: los futuros y el FCI liquidan en el
+          // dia y su caja ya viene por otro lado. El importe usa
+          // applyConventionToValue para respetar la escala de cada instrumento
+          // (los bonos cotizan por 100 VN, las opciones por 100).
+          if (r.settlement === "T1") {
+            const bruto = Math.abs(applyConventionToValue(r.instrumentType, r.qty, r.price));
+            if (bruto > 0) {
+              const { error: eCash } = await supabase.from("cash_movements").insert({
+                user_id: user.id,
+                movement_type: r.side === "sell" ? "sale_proceeds" : "purchase_cost",
+                currency: r.entryCurrency,
+                amount: bruto,
+                movement_date: proximoHabil(r.date),
+                notes: `${r.side === "sell" ? "Venta" : "Compra"} ${r.ticker} (liquida T+1)`,
+                source_ref: r.orderId,
+              });
+              if (eCash) throw eCash;
+            }
+          }
         }
         inserted++;
       } catch (err) {
