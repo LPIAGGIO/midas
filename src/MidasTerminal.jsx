@@ -16109,7 +16109,7 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
           });
           if (error) throw error;
         } else {
-          await addPosition({
+          const nueva = await addPosition({
             instrument_type: r.instrumentType,
             operation_type: r.side,
             ticker: r.ticker,
@@ -16138,7 +16138,10 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
           // dia y su caja ya viene por otro lado. El importe usa
           // applyConventionToValue para respetar la escala de cada instrumento
           // (los bonos cotizan por 100 VN, las opciones por 100).
-          if (r.settlement === "T1") {
+          // El check `cash_movements_related_position_logic` exige que
+          // sale_proceeds/purchase_cost apunten a una posicion, asi que va
+          // atado al id que devuelve addPosition.
+          if (r.settlement === "T1" && nueva?.id) {
             const bruto = Math.abs(applyConventionToValue(r.instrumentType, r.qty, r.price));
             if (bruto > 0) {
               const { error: eCash } = await supabase.from("cash_movements").insert({
@@ -16147,6 +16150,8 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
                 currency: r.entryCurrency,
                 amount: bruto,
                 movement_date: proximoHabil(r.date),
+                related_position_id: nueva.id,
+                broker: "cocos",
                 notes: `${r.side === "sell" ? "Venta" : "Compra"} ${r.ticker} (liquida T+1)`,
                 source_ref: r.orderId,
               });
