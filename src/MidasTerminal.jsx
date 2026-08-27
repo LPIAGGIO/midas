@@ -15713,19 +15713,6 @@ function ticker_isBondLike(instrumentType) {
   );
 }
 
-// Fecha de liquidacion de un trade T+1: el proximo dia habil de BYMA. Salta
-// fines de semana y feriados con la misma tabla que usan los futuros, asi que
-// una venta del viernes liquida el lunes y no el sabado.
-function proximoHabil(yyyymmdd) {
-  const d = new Date(yyyymmdd + "T12:00:00");
-  for (let i = 0; i < 10; i++) {
-    d.setDate(d.getDate() + 1);
-    const iso = d.toISOString().slice(0, 10);
-    if (!isNonBusinessDay(iso)) return iso;
-  }
-  return d.toISOString().slice(0, 10);
-}
-
 function applyConventionToValue(instrumentType, qty, price) {
   // Bonos / ONs: precio cada 100 VN
   if (
@@ -16141,31 +16128,11 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
           // El check `cash_movements_related_position_logic` exige que
           // sale_proceeds/purchase_cost apunten a una posicion, asi que va
           // atado al id que devuelve addPosition.
-          // Los FUTUROS quedan afuera y no es un detalle: operar un futuro no
-          // mueve un peso (el total del libro es 0), su caja son los ajustes
-          // diarios. Cobrarle qty x 1.000 x precio inventaria cientos de
-          // millones que nunca existieron.
-          if (nueva?.id && r.instrumentType !== "future" && r.instrumentType !== "fci") {
-            const bruto = Math.abs(applyConventionToValue(r.instrumentType, r.qty, r.price));
-            // CI acredita en el dia y T1 al habil siguiente. El lanzamiento
-            // cubierto de GGAL del 27/08 liquidaba CI y por pedirle T1 se
-            // perdian los $201.006 de la prima.
-            const esT1 = r.settlement === "T1";
-            if (bruto > 0) {
-              const { error: eCash } = await supabase.from("cash_movements").insert({
-                user_id: user.id,
-                movement_type: r.side === "sell" ? "sale_proceeds" : "purchase_cost",
-                currency: r.entryCurrency,
-                amount: bruto,
-                movement_date: esT1 ? proximoHabil(r.date) : r.date,
-                related_position_id: nueva.id,
-                broker: "cocos",
-                notes: `${r.side === "sell" ? "Venta" : "Compra"} ${r.ticker} (liquida ${esT1 ? "T+1" : "CI"})`,
-                source_ref: r.orderId,
-              });
-              if (eCash) throw eCash;
-            }
-          }
+          // La caja de esta operacion NO se crea aca: la hace el trigger
+          // trg_cash_from_import en la base. Vivia en el front y eso la ataba a
+          // que el navegador tuviera el bundle al dia; el 27/08 fallo tres veces
+          // seguidas por importar con la version vieja, dejando las posiciones
+          // cargadas y la plata afuera. En la base corre siempre.
         }
         inserted++;
       } catch (err) {
