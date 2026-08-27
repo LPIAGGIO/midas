@@ -32571,6 +32571,13 @@ function esFlujoExterno(m) {
   return /^(Recibo De Cobro|Orden De Pago|Nota De Credito)/i.test(m.tipo_operacion || "");
 }
 
+// El libro no trae contract_size, así que sale del ticker: el DLR es de 1.000
+// dólares por contrato y el ORO de 1 onza. Ver futuresContractSize() para las
+// posiciones, que sí lo tienen guardado en extra.
+function futMultiplier(ticker) {
+  return /^ORO/i.test(ticker || "") ? 1 : FUTURE_MULTIPLIER_DEFAULT;
+}
+
 function CajaTiempoModule() {
   const { rows, loading } = useLibroMovimientos();
   const { user } = useAuth();
@@ -32630,6 +32637,12 @@ function CajaTiempoModule() {
     // la plata entra por liquidación — el 25/08 eran $28,3M de agujero, y el
     // rendimiento diario quedaba dominado por ese vaivén contable.
     let ejecARS = opening.ARS;
+    // Futuros: el libro los trae como "Compra/Venta Indice" (con ticker,
+    // cantidad y precio, total 0 porque operarlos no mueve caja) y los ajustes
+    // diarios como "Credito/Debito Indice" (sin ticker, con total). Se lleva la
+    // posición por un lado y lo que pasó por caja por el otro.
+    const futs = new Map();
+    let futCaja = 0;
     const pos = new Map();
     const out = [];
     for (const d of days) {
@@ -32644,6 +32657,25 @@ function CajaTiempoModule() {
         const m = porEjec[iE++];
         if (m.moneda !== "USD") ejecARS += Number(m.total) || 0;
         const cat = m.categoria;
+        if (cat === "futuro" || cat === "futuro_liq") {
+          // OJO: futuro_liq NO son futuros. Son "Credito/Debito Cambio", o sea
+          // compraventa de divisas que el importador mete en esta categoría.
+          // Sumarlos al resultado de futuros lo ensucia en $7M: el neto de
+          // Credito/Debito Indice cierra contra el devengado, el otro no.
+          if (cat === "futuro" && !/Gtia/i.test(m.tipo_operacion || "")) futCaja += Number(m.total) || 0;
+          const qf = Number(m.cantidad) || 0;
+          if (cat === "futuro" && m.ticker && Math.abs(qf) > 1e-12) {
+            // Con el neto y Σ(cantidad × precio) alcanza: el resultado del
+            // ticker es (settle × neto − Σqp) × multiplicador, que vale igual
+            // para la parte cerrada (donde el settle se cancela) y para la
+            // abierta. Y Σqp/neto es el break-even de lo que sigue vivo.
+            const g = futs.get(m.ticker) || { ticker: m.ticker, qty: 0, sumQP: 0 };
+            g.qty += qf;
+            g.sumQP += qf * (Number(m.precio) || 0);
+            futs.set(m.ticker, g);
+          }
+          continue;
+        }
         if (!["trade_cedear", "trade_otro", "trade_bono", "fci"].includes(cat) || !m.ticker) continue;
         const type = cat === "trade_cedear" ? "cedear" : cat === "trade_otro" ? "stock" : cat === "fci" ? "fci" : "bond";
         // FCI: la cantidad viene ×1000. Bonos: el precio viene por 100 nominales.
@@ -32663,7 +32695,10 @@ function CajaTiempoModule() {
         if (p.type === "bond") { const mat = parseLetraMaturity(p.ticker); if (mat && mat < d) continue; }
         holds.push({ type: p.type, ticker: p.ticker, qty: p.qty, cost: p.cost });
       }
-      out.push({ date: d, cashARS, cashUSD, flowARS, pendARS: ejecARS - cashARS, holds });
+      // Van TODOS los tickers, no solo los vivos: los cerrados aportan
+      // resultado devengado aunque ya no tengan posición.
+      const futSnap = [...futs.values()].map((g) => ({ ticker: g.ticker, qty: g.qty, sumQP: g.sumQP }));
+      out.push({ date: d, cashARS, cashUSD, flowARS, pendARS: ejecARS - cashARS, futCaja, futs: futSnap, holds });
     }
     return out;
   }, [rows, days, opening]);
@@ -32672,16 +32707,17 @@ function CajaTiempoModule() {
   // completa de precios no hay serie de patrimonio y no hay rendimiento.
   const [px, setPx] = useState(null);
   const universo = useMemo(() => {
-    const eq = new Set(), bo = new Set(), fc = new Set();
+    const eq = new Set(), bo = new Set(), fc = new Set(), fu = new Set();
     for (const m of rows) {
       if (!m.ticker) continue;
       if (m.categoria === "trade_cedear" || m.categoria === "trade_otro") eq.add(m.ticker);
       else if (m.categoria === "trade_bono") bo.add(m.ticker);
       else if (m.categoria === "fci") fc.add(m.ticker);
+      else if (m.categoria === "futuro" || m.categoria === "futuro_liq") fu.add(m.ticker);
     }
-    return { eq: [...eq], bo: [...bo], fc: [...fc] };
+    return { eq: [...eq], bo: [...bo], fc: [...fc], fu: [...fu] };
   }, [rows]);
-  const universoKey = universo.eq.concat(universo.bo, universo.fc).sort().join(",");
+  const universoKey = universo.eq.concat(universo.bo, universo.fc, universo.fu).sort().join(",");
   const desde = days[0] || todayStr;
 
   useEffect(() => {
@@ -32724,6 +32760,10 @@ function CajaTiempoModule() {
           }
           for (const b of Object.values(best)) push("b|" + b.ticker, b.date, b.v);
         }));
+      if (universo.fu.length) jobs.push(pagina(() => supabase.from("futures_settlements_history").select("ticker,settlement,settle_date")
+        .in("ticker", universo.fu).gte("settle_date", desde).order("settle_date")).then((d) => {
+          for (const r of d) push("u|" + r.ticker, r.settle_date, Number(r.settlement));
+        }));
       if (universo.fc.length) jobs.push(pagina(() => supabase.from("fci_quotes").select("fondo,vcp,fecha")
         .gte("fecha", desde).order("fecha")).then((d) => {
           for (const t of universo.fc) {
@@ -32762,15 +32802,40 @@ function CajaTiempoModule() {
     return { ...h, value: mkt ?? h.cost, atMarket: mkt != null, priceDate: mkt != null ? hit.date : null, res: mkt != null ? mkt - h.cost : 0 };
   }, [priceAt]);
 
-  // Serie de patrimonio: efectivo ARS + cartera valuada, día por día.
+  // Resultado de futuros DEVENGADO a una fecha menos lo que ya se cobró por
+  // caja. Los futuros liquidan diario, así que casi todo su resultado ya está
+  // en el efectivo; lo que queda es el ajuste del último día, que el broker
+  // acredita recién al siguiente. Validado contra el libro: al 26/08 el
+  // devengado da -$17.598.052 y los Credito/Debito Indice suman -$17.491.023;
+  // la diferencia de -$107.029 es exactamente el ajuste de ese día
+  // (NOV26 -$157.000 por 314 contratos + SEP26 +$50.000 por 50).
+  const futPendAt = useCallback((s) => {
+    let dev = 0;
+    for (const f of s.futs) {
+      const hit = priceAt("u|" + f.ticker, s.date);
+      // Sin settle no se puede devengar la parte abierta. Si está cerrado el
+      // settle se cancela solo y el resultado es exacto igual.
+      if (Math.abs(f.qty) > 1e-9 && !hit) return null;
+      dev += ((hit ? hit.price : 0) * f.qty - f.sumQP) * futMultiplier(f.ticker);
+    }
+    return dev - s.futCaja;
+  }, [priceAt]);
+
+  // Serie de patrimonio: efectivo ARS + a liquidar + cartera + futuros por devengar.
   const equity = useMemo(() => {
     if (!serie.length || px == null) return null;
+    // Si un día no se puede devengar (falta el settle de un ticker abierto) se
+    // arrastra el último valor bueno. Caer a cero metería un salto de millones
+    // en la serie y el rendimiento de ese día seria puro artefacto.
+    let ultimoFp = 0;
     return serie.map((s) => {
       let cartera = 0;
       for (const h of s.holds) cartera += valuar(h, s.date).value;
-      return { date: s.date, v: s.cashARS + s.pendARS + cartera, flow: s.flowARS, cartera };
+      const fp = futPendAt(s);
+      if (fp != null) ultimoFp = fp;
+      return { date: s.date, v: s.cashARS + s.pendARS + cartera + ultimoFp, flow: s.flowARS, cartera };
     });
-  }, [serie, px, valuar]);
+  }, [serie, px, valuar, futPendAt]);
 
   const perf = useMemo(() => {
     if (!equity || iSel < 1) return null;
@@ -32810,10 +32875,27 @@ function CajaTiempoModule() {
     });
   }, [equity, iSel]);
 
-  const snapT = serie[iSel] || { cashARS: 0, cashUSD: 0, pendARS: 0, holds: [] };
+  const snapT = serie[iSel] || { cashARS: 0, cashUSD: 0, pendARS: 0, futCaja: 0, futs: [], holds: [] };
   const valued = useMemo(() => snapT.holds.map((h) => valuar(h, T)).sort((a, b) => b.value - a.value), [snapT, T, valuar]);
+
+  // Futuros a la fecha: no son tenencia (valen cero apenas se ajustan) pero sí
+  // exposición. El resultado abierto que se muestra YA SE COBRÓ por caja día a
+  // día, así que es informativo y no entra al total: sumarlo sería contarlo dos
+  // veces, porque los Credito/Debito Indice ya están en el efectivo.
+  const futsVal = useMemo(() => snapT.futs.filter((f) => Math.abs(f.qty) > 1e-9).map((f) => {
+    const hit = priceAt("u|" + f.ticker, T);
+    const mult = futMultiplier(f.ticker);
+    const settle = hit ? hit.price : null;
+    const be = f.sumQP / f.qty;   // break-even de lo que sigue abierto
+    return {
+      ...f, mult, settle, be, settleDate: hit ? hit.date : null,
+      nocional: (settle ?? be) * f.qty * mult,
+      res: settle == null ? null : (settle * f.qty - f.sumQP) * mult,
+    };
+  }).sort((a, b) => Math.abs(b.nocional) - Math.abs(a.nocional)), [snapT, T, priceAt]);
+  const futPend = futPendAt(snapT);
   const carteraVal = valued.reduce((s, h) => s + h.value, 0);
-  const totalARS = snapT.cashARS + snapT.pendARS + carteraVal;
+  const totalARS = snapT.cashARS + snapT.pendARS + carteraVal + (futPend || 0);
 
   const fmt$ = (n, cur = "ARS") => `${n < 0 ? "−" : ""}${cur === "USD" ? "US$" : "$"}${Math.abs(n).toLocaleString("es-AR", { maximumFractionDigits: cur === "USD" ? 2 : 0 })}`;
   const fmtPct = (x) => `${x >= 0 ? "+" : "−"}${(Math.abs(x) * 100).toFixed(2)}%`;
@@ -32848,7 +32930,9 @@ function CajaTiempoModule() {
           <div className="flex" style={{ gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
             {[["Efectivo ARS", fmt$(snapT.cashARS)], ["Efectivo USD", fmt$(snapT.cashUSD, "USD")],
               ...(Math.abs(snapT.pendARS) > 1 ? [["A liquidar", fmt$(snapT.pendARS)]] : []),
-              ["Cartera (contado)", fmt$(carteraVal)], ["Total", fmt$(totalARS)]].map(([l, v]) => (
+              ["Cartera (contado)", fmt$(carteraVal)],
+              ...(futPend != null && Math.abs(futPend) > 1 ? [["Futuros a acreditar", fmt$(futPend)]] : []),
+              ["Total", fmt$(totalARS)]].map(([l, v]) => (
               <div key={l} style={{ flex: "1 1 180px", border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "12px 14px" }}>
                 <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>{l}</div>
                 <div style={{ fontSize: 19, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>{v}</div>
@@ -32902,8 +32986,47 @@ function CajaTiempoModule() {
               </tbody>
             </table>
           </div>
+          {futsVal.length ? (
+            <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden", marginTop: 14 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ color: C.dim, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.1em", background: "rgba(255,255,255,0.02)" }}>
+                    <th style={{ textAlign: "left", padding: "8px 10px" }}>Futuros al {fmtFecha(T)}</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px" }}>Contratos</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px" }}>Break-even</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px" }}>Ajuste</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px" }}>Exposición</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px" }}>Result. abierto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {futsVal.map((f) => (
+                    <tr key={f.ticker} style={{ borderTop: `1px solid ${C.border}` }}>
+                      <td style={{ padding: "7px 10px" }}>
+                        <span style={{ color: C.text, fontWeight: 600 }}>{f.ticker}</span>{" "}
+                        <span style={{ fontSize: 9.5, color: f.qty > 0 ? C.green : C.red }}>{f.qty > 0 ? "long" : "short"}</span>
+                        {f.settleDate && f.settleDate !== T ? <span style={{ fontSize: 9.5, color: C.dim }}> · ajuste {fmtFecha(f.settleDate)}</span> : null}
+                      </td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.muted }}>{f.qty.toLocaleString("es-AR")}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.muted }}>{f.be.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.text }}>{f.settle == null ? "—" : f.settle.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.text, fontWeight: 600 }}>{fmt$(f.nocional)}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600, color: f.res == null ? C.dim : f.res > 0 ? C.green : f.res < 0 ? C.red : C.dim }}>{f.res == null ? "—" : fmt$(f.res)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ borderTop: `1px solid ${C.border}`, background: "rgba(255,255,255,0.02)" }}>
+                    <td colSpan={5} style={{ padding: "7px 10px", color: C.muted, fontSize: 11 }}>
+                      Resultado de futuros ya cobrado por caja hasta esta fecha
+                    </td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, color: snapT.futCaja > 0 ? C.green : snapT.futCaja < 0 ? C.red : C.dim }}>{fmt$(snapT.futCaja)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ) : null}
           <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>
-            El efectivo arranca del saldo de apertura del broker y suma todos los movimientos liquidados hasta la fecha (aportes, ventas, compras, ajustes de futuros, cauciones). "A liquidar" es lo operado que todavía no se acreditó o debitó: sin eso el total se hunde el día de una venta y rebota al siguiente. Los bonos vienen cotizados por 100 nominales en el libro y acá se muestran por unidad. Futuros no aparecen como tenencia: liquidan diario por caja. "(costo)" = sin cierre confiable para ese papel en esa fecha. Las letras ya vencidas se excluyen (su cobro está en el efectivo).
+            El efectivo arranca del saldo de apertura del broker y suma todos los movimientos liquidados hasta la fecha (aportes, ventas, compras, ajustes de futuros, cauciones). "A liquidar" es lo operado que todavía no se acreditó o debitó: sin eso el total se hunde el día de una venta y rebota al siguiente. Los bonos vienen cotizados por 100 nominales en el libro y acá se muestran por unidad. "(costo)" = sin cierre confiable para ese papel en esa fecha. Las letras ya vencidas se excluyen (su cobro está en el efectivo).
+            {" "}Los futuros liquidan diario, así que su resultado ya entró al efectivo día por día (la última fila de su tabla). Lo único que suma al total es "Futuros a acreditar": el ajuste devengado que el broker todavía no pasó por caja, normalmente el del último día. El "resultado abierto" de cada contrato es contra su break-even y ya está cobrado, por eso no se suma otra vez. Si todavía no importaste el CSV del día, la posición y el ajuste van a estar atrasados hasta que lo hagas.
             {" "}El rendimiento es time-weighted: descuenta aportes y retiros, así que mide cómo trabajó la plata y no cuánta entró.
           </p>
         </>
