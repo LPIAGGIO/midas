@@ -32524,21 +32524,75 @@ El dividendo suele pagarse <strong style={{ color: C.muted }}>trimestral</strong
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
 // Caja en el tiempo — reconstruye la cuenta (efectivo + tenencias) a
 // CUALQUIER fecha desde el libro de Cocos (libro_movimientos), con un slider
-// de días. Idea tomada de Aquila. Tenencias por costo promedio corrido
-// (venta descarga al promedio → el remanente conserva su costo); valuación
-// al cierre histórico de esa fecha: equity_daily_close (CEDEARs/acciones),
-// fci_quotes (VCP), daily_close_prices (bonos/letras). Si el valor a mercado
-// da >5× o <1/5 del costo se asume mismatch de escala y se cae al costo
-// (badge "(costo)"). Letras ya vencidas a la fecha T se excluyen (su
-// amortización entró a la caja como "Renta y Amortización", no como venta).
-// Futuros excluidos: liquidan diario por caja, el efectivo ya los captura.
+// de días, y mide el rendimiento del período.
+//
+// TRES CONVENCIONES QUE HAY QUE RESPETAR, todas verificadas contra el libro:
+//
+//  1. BONOS: el libro cotiza el precio POR CADA 100 NOMINALES. En las 48 filas
+//     de trade_bono (soberanos ARS y USD, LECAPs, boncers, sin una sola
+//     excepción) |total| / |cantidad × precio| = 0,0100. Sin dividir por 100 la
+//     tenencia sale inflada 100 veces: los bonos de LP daban $10.571 millones
+//     en vez de $105,7 millones, y de paso el guard de escala los tiraba
+//     siempre a "(costo)" porque el mercado nunca podía acercarse.
+//  2. SALDO DE APERTURA: el CSV de Cocos no trae la fila del saldo inicial, así
+//     que la suma cruda de movimientos da el DELTA, no el saldo. El offset vive
+//     en broker_opening_cash y hay que sumarlo (para LP: −$2.699.929,86 ARS,
+//     que es exactamente lo que separaba esta pantalla de Liquidez proyectada).
+//  3. daily_close_prices trae VARIAS filas por ticker y fecha, una por segmento
+//     y plazo, y entre segmentos hay hasta 12% de diferencia (TXMJ9 al 25/08:
+//     0,911 en el segmento 2 contra 0,811 en el 8). Se prefiere el segmento 2
+//     (concurrencia), que es el que coincide con los precios a los que operó.
+//
+// Tenencias por costo promedio corrido (la venta descarga al promedio → el
+// remanente conserva su costo); valuación al cierre histórico de esa fecha:
+// equity_daily_close (CEDEARs/acciones), fci_quotes (VCP), daily_close_prices
+// (bonos/letras). Si el precio más fresco quedó a más de 14 días, o el valor a
+// mercado da >5× o <1/5 del costo, se cae al costo (badge "(costo)"). Letras ya
+// vencidas a la fecha T se excluyen (su amortización entró a la caja como
+// "Renta y Amortización", no como venta). Futuros excluidos: liquidan diario
+// por caja, el efectivo ya los captura.
+//
+// EL RENDIMIENTO ES TIME-WEIGHTED (TWR), no (V_final/V_inicial − 1): la cuenta
+// recibe aportes y retiros, y un aporte de $50M no es una ganancia del 50%. Se
+// neutraliza el flujo externo de cada día — r = (V − flujo) / V_ayer − 1 — y se
+// encadenan los días. Si el patrimonio de la víspera fue ≤ 0 el porcentaje no
+// existe (no se puede dividir por un patrimonio negativo): ese día corta la
+// cadena y el período muestra "—", pero el resultado en pesos, que sí es
+// medible siempre, se sigue mostrando.
 // ═══════════════════════════════════════════════════════════════════════
+
+// Un movimiento de la categoría "cash" es plata que ENTRA O SALE de la cuenta
+// (transferencias), no rendimiento. Los dividendos en especie viajan en la
+// misma categoría pero SÍ son rendimiento, así que quedan afuera.
+function esFlujoExterno(m) {
+  if (m.categoria !== "cash") return false;
+  return /^(Recibo De Cobro|Orden De Pago|Nota De Credito)/i.test(m.tipo_operacion || "");
+}
+
 function CajaTiempoModule() {
   const { rows, loading } = useLibroMovimientos();
+  const { user } = useAuth();
   const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+
+  // Saldo de apertura del broker: sin esto el efectivo es un delta, no un saldo.
+  const [opening, setOpening] = useState({ ARS: 0, USD: 0 });
+  useEffect(() => {
+    if (!user) return;
+    let cancel = false;
+    supabase.from("broker_opening_cash").select("currency,amount").eq("user_id", user.id)
+      .then(({ data }) => {
+        if (cancel || !data) return;
+        const o = { ARS: 0, USD: 0 };
+        for (const r of data) {
+          const amt = Number(r.amount) || 0;
+          if (String(r.currency).startsWith("USD")) o.USD += amt; else o.ARS += amt;
+        }
+        setOpening(o);
+      });
+    return () => { cancel = true; };
+  }, [user]);
 
   const days = useMemo(() => {
     if (!rows.length) return [];
@@ -32557,98 +32611,221 @@ function CajaTiempoModule() {
   const iSel = idx < 0 ? days.length - 1 : Math.min(idx, days.length - 1);
   const T = days[iSel] || todayStr;
 
-  // Reconstrucción a T: caja por moneda + tenencias a costo promedio corrido.
-  const snap = useMemo(() => {
-    const cash = {};
+  // Reconstrucción de TODA la serie en una sola pasada cronológica: el efectivo
+  // avanza por fecha de liquidación y las tenencias por fecha de ejecución, cada
+  // uno con su puntero, sacando una foto por día. Hacerlo así (en vez de
+  // recomputar el snapshot en cada fecha) es lo que permite medir rendimiento.
+  const serie = useMemo(() => {
+    if (!days.length) return [];
+    const liqOf = (m) => m.fecha_liquidacion || m.fecha_ejecucion;
+    const ejecOf = (m) => m.fecha_ejecucion || m.fecha_liquidacion;
+    const porLiq = rows.filter((m) => liqOf(m)).slice().sort((a, b) => liqOf(a).localeCompare(liqOf(b)));
+    const porEjec = rows.filter((m) => ejecOf(m)).slice().sort((a, b) => ejecOf(a).localeCompare(ejecOf(b)));
+    let iL = 0, iE = 0;
+    let cashARS = opening.ARS, cashUSD = opening.USD;
+    // Acumulado por fecha de EJECUCIÓN. La resta contra el acumulado por
+    // liquidación da lo que está en el aire: vendido pero todavía no cobrado
+    // (o comprado y no pagado). Sin esto el patrimonio se desploma el día de
+    // una venta y rebota al siguiente, porque la tenencia sale por ejecución y
+    // la plata entra por liquidación — el 25/08 eran $28,3M de agujero, y el
+    // rendimiento diario quedaba dominado por ese vaivén contable.
+    let ejecARS = opening.ARS;
     const pos = new Map();
-    const asc = [...rows].sort((a, b) => (a.fecha_ejecucion || "").localeCompare(b.fecha_ejecucion || ""));
-    for (const m of asc) {
-      const liqDate = m.fecha_liquidacion || m.fecha_ejecucion;
-      if (liqDate && liqDate <= T) {
-        const cur = m.moneda === "USD" ? "USD" : (m.moneda || "ARS");
-        cash[cur] = (cash[cur] || 0) + (Number(m.total) || 0);
+    const out = [];
+    for (const d of days) {
+      let flowARS = 0;
+      while (iL < porLiq.length && liqOf(porLiq[iL]) <= d) {
+        const m = porLiq[iL++];
+        const v = Number(m.total) || 0;
+        if (m.moneda === "USD") cashUSD += v; else cashARS += v;
+        if (m.moneda !== "USD" && esFlujoExterno(m)) flowARS += v;
       }
-      if (!m.fecha_ejecucion || m.fecha_ejecucion > T) continue;
-      const cat = m.categoria;
-      if (!["trade_cedear", "trade_otro", "trade_bono", "fci"].includes(cat) || !m.ticker) continue;
-      let type = cat === "trade_cedear" ? "cedear" : cat === "trade_otro" ? "stock" : cat === "fci" ? "fci" : "bond";
-      const scale = type === "fci" ? 1 / 1000 : 1;
-      const q = (Number(m.cantidad) || 0) * scale;
-      if (Math.abs(q) < 1e-12) continue;
-      const key = type + "|" + m.ticker;
-      const p = pos.get(key) || { type, ticker: m.ticker, qty: 0, cost: 0, first: m.fecha_ejecucion };
-      if (q > 0) { p.cost += q * (Number(m.precio) || 0); p.qty += q; }
-      else {
-        const avg = p.qty > 1e-12 ? p.cost / p.qty : Number(m.precio) || 0;
-        p.cost += q * avg; p.qty += q;
+      while (iE < porEjec.length && ejecOf(porEjec[iE]) <= d) {
+        const m = porEjec[iE++];
+        if (m.moneda !== "USD") ejecARS += Number(m.total) || 0;
+        const cat = m.categoria;
+        if (!["trade_cedear", "trade_otro", "trade_bono", "fci"].includes(cat) || !m.ticker) continue;
+        const type = cat === "trade_cedear" ? "cedear" : cat === "trade_otro" ? "stock" : cat === "fci" ? "fci" : "bond";
+        // FCI: la cantidad viene ×1000. Bonos: el precio viene por 100 nominales.
+        const q = (Number(m.cantidad) || 0) * (type === "fci" ? 1 / 1000 : 1);
+        const precio = (Number(m.precio) || 0) * (type === "bond" ? 1 / 100 : 1);
+        if (Math.abs(q) < 1e-12) continue;
+        const key = type + "|" + m.ticker;
+        const p = pos.get(key) || { type, ticker: m.ticker, qty: 0, cost: 0 };
+        if (q > 0) { p.cost += q * precio; p.qty += q; }
+        else { const avg = p.qty > 1e-12 ? p.cost / p.qty : precio; p.cost += q * avg; p.qty += q; }
+        pos.set(key, p);
       }
-      pos.set(key, p);
+      const holds = [];
+      for (const p of pos.values()) {
+        if (Math.abs(p.qty) <= 1e-9) continue;
+        // Letra ya vencida a esta fecha: su cobro entró a la caja, la tenencia es fantasma.
+        if (p.type === "bond") { const mat = parseLetraMaturity(p.ticker); if (mat && mat < d) continue; }
+        holds.push({ type: p.type, ticker: p.ticker, qty: p.qty, cost: p.cost });
+      }
+      out.push({ date: d, cashARS, cashUSD, flowARS, pendARS: ejecARS - cashARS, holds });
     }
-    const holds = Array.from(pos.values()).filter((p) => Math.abs(p.qty) > 1e-9)
-      // Letras/bonos ya vencidos a T: su cobro entró a caja, la "tenencia" es fantasma.
-      .filter((p) => { if (p.type !== "bond") return true; const mat = parseLetraMaturity(p.ticker); return !mat || mat >= T; });
-    return { cash, holds };
-  }, [rows, T]);
+    return out;
+  }, [rows, days, opening]);
 
-  // Precios históricos a T (últimos ≤T, ventana de 14 días para cubrir feriados).
-  const [px, setPx] = useState({});
-  const tickersKey = snap.holds.map((h) => h.type + h.ticker).sort().join(",");
+  // Precios de TODA la historia, una sola vez (no por fecha): sin la serie
+  // completa de precios no hay serie de patrimonio y no hay rendimiento.
+  const [px, setPx] = useState(null);
+  const universo = useMemo(() => {
+    const eq = new Set(), bo = new Set(), fc = new Set();
+    for (const m of rows) {
+      if (!m.ticker) continue;
+      if (m.categoria === "trade_cedear" || m.categoria === "trade_otro") eq.add(m.ticker);
+      else if (m.categoria === "trade_bono") bo.add(m.ticker);
+      else if (m.categoria === "fci") fc.add(m.ticker);
+    }
+    return { eq: [...eq], bo: [...bo], fc: [...fc] };
+  }, [rows]);
+  const universoKey = universo.eq.concat(universo.bo, universo.fc).sort().join(",");
+  const desde = days[0] || todayStr;
+
   useEffect(() => {
-    if (!snap.holds.length) { setPx({}); return; }
+    if (!universoKey) { setPx({}); return; }
     let cancel = false;
-    const t0 = new Date(T + "T12:00:00"); t0.setDate(t0.getDate() - 14);
-    const desde = t0.toISOString().slice(0, 10);
-    const tim = setTimeout(async () => {
+    // Supabase corta en 1000 filas por request: hay que paginar o se pierde
+    // historia en silencio (y la serie sale plana justo en los días viejos).
+    const pagina = async (build) => {
+      const acc = [];
+      for (let from = 0; from < 40000; from += 1000) {
+        const { data, error } = await build().range(from, from + 999);
+        if (error || !data) break;
+        acc.push(...data);
+        if (data.length < 1000) break;
+      }
+      return acc;
+    };
+    (async () => {
       const out = {};
-      const eq = snap.holds.filter((h) => h.type === "cedear" || h.type === "stock").map((h) => h.ticker);
-      const bo = snap.holds.filter((h) => h.type === "bond").map((h) => h.ticker);
-      const fc = snap.holds.filter((h) => h.type === "fci");
+      const push = (k, date, price) => {
+        if (!Number.isFinite(price) || price <= 0) return;
+        (out[k] = out[k] || []).push({ date, price });
+      };
       const jobs = [];
-      if (eq.length) jobs.push(supabase.from("equity_daily_close").select("ticker,close,trade_date").in("ticker", eq).lte("trade_date", T).gte("trade_date", desde).then(({ data }) => {
-        for (const r of data || []) { const k = "e|" + r.ticker; if (!out[k] || out[k].date < r.trade_date) out[k] = { price: Number(r.close), date: r.trade_date }; }
-      }));
-      if (bo.length) jobs.push(supabase.from("daily_close_prices").select("ticker,precio_cierre_hoy,precio_ultimo,trade_date").in("ticker", bo).lte("trade_date", T).gte("trade_date", desde).then(({ data }) => {
-        for (const r of data || []) { const k = "b|" + r.ticker; const v = Number(r.precio_cierre_hoy) || Number(r.precio_ultimo); if (v && (!out[k] || out[k].date < r.trade_date)) out[k] = { price: v, date: r.trade_date }; }
-      }));
-      if (fc.length) jobs.push(supabase.from("fci_quotes").select("fondo,vcp,fecha").lte("fecha", T).gte("fecha", desde).then(({ data }) => {
-        for (const h of fc) {
-          const fondo = (FCI_LEDGER_MAP[h.ticker] || h.ticker).split("|")[0];
-          for (const r of data || []) {
-            if ((r.fondo || "").toLowerCase().startsWith(fondo.toLowerCase().slice(0, 12))) {
-              const k = "f|" + h.ticker;
-              if (!out[k] || out[k].date < r.fecha) out[k] = { price: Number(r.vcp) * 1000, date: r.fecha };
+      if (universo.eq.length) jobs.push(pagina(() => supabase.from("equity_daily_close").select("ticker,close,trade_date")
+        .in("ticker", universo.eq).gte("trade_date", desde).order("trade_date")).then((d) => {
+          for (const r of d) push("e|" + r.ticker, r.trade_date, Number(r.close));
+        }));
+      if (universo.bo.length) jobs.push(pagina(() => supabase.from("daily_close_prices").select("ticker,precio_cierre_hoy,precio_ultimo,trade_date,segmento_codigo")
+        .in("ticker", universo.bo).gte("trade_date", desde).order("trade_date")).then((d) => {
+          // Preferir segmento 2 (concurrencia); el 8 es otro mercado y difiere
+          // hasta 12%. Solo se usa el 8 si ese día no hubo fila del 2.
+          const best = {};
+          for (const r of d) {
+            const v = Number(r.precio_cierre_hoy) || Number(r.precio_ultimo);
+            if (!Number.isFinite(v) || v <= 0) continue;
+            const kk = r.ticker + "|" + r.trade_date;
+            const pref = String(r.segmento_codigo) === "2" ? 2 : 1;
+            if (!best[kk] || best[kk].pref < pref) best[kk] = { pref, v, ticker: r.ticker, date: r.trade_date };
+          }
+          for (const b of Object.values(best)) push("b|" + b.ticker, b.date, b.v);
+        }));
+      if (universo.fc.length) jobs.push(pagina(() => supabase.from("fci_quotes").select("fondo,vcp,fecha")
+        .gte("fecha", desde).order("fecha")).then((d) => {
+          for (const t of universo.fc) {
+            const fondo = (FCI_LEDGER_MAP[t] || t).split("|")[0].toLowerCase().slice(0, 12);
+            for (const r of d) {
+              if ((r.fondo || "").toLowerCase().startsWith(fondo)) push("f|" + t, r.fecha, Number(r.vcp) * 1000);
             }
           }
-        }
-      }));
+        }));
       await Promise.all(jobs).catch(() => {});
+      for (const k of Object.keys(out)) out[k].sort((a, b) => a.date.localeCompare(b.date));
       if (!cancel) setPx(out);
-    }, 250); // debounce: el slider dispara muchos cambios seguidos
-    return () => { cancel = true; clearTimeout(tim); };
-  }, [T, tickersKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    })();
+    return () => { cancel = true; };
+  }, [universoKey, desde]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Último precio ≤ d, con ventana de 14 días para no arrastrar un cierre viejo
+  // como si fuera de hoy (feriados largos, papeles que dejaron de operar).
+  const priceAt = useCallback((key, d) => {
+    const arr = px && px[key];
+    if (!arr || !arr.length) return null;
+    let lo = 0, hi = arr.length - 1, res = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (arr[mid].date <= d) { res = mid; lo = mid + 1; } else hi = mid - 1; }
+    if (res < 0) return null;
+    const hit = arr[res];
+    const gap = (new Date(d + "T12:00:00") - new Date(hit.date + "T12:00:00")) / 86400000;
+    return gap > 14 ? null : hit;
+  }, [px]);
+
+  const valuar = useCallback((h, d) => {
+    const hit = priceAt((h.type === "fci" ? "f|" : h.type === "bond" ? "b|" : "e|") + h.ticker, d);
+    let mkt = hit ? h.qty * hit.price : null;
+    // Red de seguridad: si el mercado difiere >5× del costo quedó una escala sin
+    // normalizar, y es preferible mostrar el costo antes que un número inventado.
+    if (mkt != null && h.cost > 0 && (mkt > h.cost * 5 || mkt < h.cost / 5)) mkt = null;
+    return { ...h, value: mkt ?? h.cost, atMarket: mkt != null, priceDate: mkt != null ? hit.date : null, res: mkt != null ? mkt - h.cost : 0 };
+  }, [priceAt]);
+
+  // Serie de patrimonio: efectivo ARS + cartera valuada, día por día.
+  const equity = useMemo(() => {
+    if (!serie.length || px == null) return null;
+    return serie.map((s) => {
+      let cartera = 0;
+      for (const h of s.holds) cartera += valuar(h, s.date).value;
+      return { date: s.date, v: s.cashARS + s.pendARS + cartera, flow: s.flowARS, cartera };
+    });
+  }, [serie, px, valuar]);
+
+  const perf = useMemo(() => {
+    if (!equity || iSel < 1) return null;
+    const r = new Array(equity.length).fill(null);
+    for (let i = 1; i < equity.length; i++) {
+      if (equity[i - 1].v > 0) r[i] = (equity[i].v - equity[i].flow) / equity[i - 1].v - 1;
+    }
+    // Encadena desde `from` hasta `to`. Se saltean los días sin base al
+    // principio (la cuenta arranca vacía), pero un corte en el medio invalida
+    // el período entero: encadenar por arriba de un patrimonio negativo daría
+    // un número sin significado.
+    const chain = (from, to) => {
+      let acc = 1, empezo = false, desdeIdx = null;
+      for (let i = from + 1; i <= to; i++) {
+        if (r[i] == null) { if (empezo) return null; continue; }
+        if (!empezo) { empezo = true; desdeIdx = i - 1; }
+        acc *= 1 + r[i];
+      }
+      return empezo ? { pct: acc - 1, desdeIdx } : null;
+    };
+    const delta = (from, to) => {
+      let f = 0;
+      for (let i = from + 1; i <= to; i++) f += equity[i].flow;
+      return equity[to].v - equity[from].v - f;
+    };
+    const atras = (n) => Math.max(0, iSel - n);
+    const perms = [["Día", atras(1)], ["Semana", atras(7)], ["Mes", atras(30)], ["Desde el inicio", 0]];
+    return perms.map(([label, from]) => {
+      const c = chain(from, iSel);
+      return {
+        label,
+        pct: c ? c.pct : null,
+        delta: delta(from, iSel),
+        desde: equity[from].date,
+        real: c && c.desdeIdx != null ? equity[c.desdeIdx].date : null,
+      };
+    });
+  }, [equity, iSel]);
+
+  const snapT = serie[iSel] || { cashARS: 0, cashUSD: 0, pendARS: 0, holds: [] };
+  const valued = useMemo(() => snapT.holds.map((h) => valuar(h, T)).sort((a, b) => b.value - a.value), [snapT, T, valuar]);
+  const carteraVal = valued.reduce((s, h) => s + h.value, 0);
+  const totalARS = snapT.cashARS + snapT.pendARS + carteraVal;
 
   const fmt$ = (n, cur = "ARS") => `${n < 0 ? "−" : ""}${cur === "USD" ? "US$" : "$"}${Math.abs(n).toLocaleString("es-AR", { maximumFractionDigits: cur === "USD" ? 2 : 0 })}`;
-  const valued = useMemo(() => snap.holds.map((h) => {
-    const k = (h.type === "fci" ? "f|" : h.type === "bond" ? "b|" : "e|") + h.ticker;
-    const hit = px[k];
-    let mkt = hit ? h.qty * hit.price : null;
-    let src = hit ? hit.date : null;
-    // Guard de escala: si mercado difiere >5× del costo, es mismatch de
-    // convención (bono por 100 VN, FCI ×1000) → mostrar costo.
-    if (mkt != null && h.cost > 0 && (mkt > h.cost * 5 || mkt < h.cost / 5)) { mkt = null; src = null; }
-    return { ...h, value: mkt ?? h.cost, atMarket: mkt != null, priceDate: src, res: mkt != null ? mkt - h.cost : 0 };
-  }).sort((a, b) => b.value - a.value), [snap.holds, px]);
-
-  const carteraVal = valued.reduce((s, h) => s + h.value, 0);
-  const totalARS = (snap.cash.ARS || 0) + carteraVal;
+  const fmtPct = (x) => `${x >= 0 ? "+" : "−"}${(Math.abs(x) * 100).toFixed(2)}%`;
   const fmtFecha = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "");
   const move = (d) => setIdx(Math.max(0, Math.min(days.length - 1, iSel + d)));
+  const cargandoPx = px == null;
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Caja en el tiempo</h1>
       <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 16px 0", maxWidth: 860 }}>
-        Tu cuenta de Cocos reconstruida a cualquier fecha desde el libro de movimientos: efectivo acumulado y tenencias valuadas al cierre de ese día. Mové el cursor o usá las flechas.
+        Tu cuenta de Cocos reconstruida a cualquier fecha desde el libro de movimientos: efectivo acumulado, tenencias valuadas al cierre de ese día y el rendimiento del período. Mové el cursor o usá las flechas.
       </p>
       {loading ? (
         <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando libro…</div>
@@ -32668,11 +32845,30 @@ function CajaTiempoModule() {
           <input type="range" min={0} max={days.length - 1} value={iSel} onChange={(e) => setIdx(Number(e.target.value))}
             style={{ width: "100%", marginBottom: 16, accentColor: C.accent }} />
 
-          <div className="flex" style={{ gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-            {[["Efectivo ARS", fmt$(snap.cash.ARS || 0)], ["Efectivo USD", fmt$(snap.cash.USD || 0, "USD")], ["Cartera (contado)", fmt$(carteraVal)], ["Total ARS + cartera", fmt$(totalARS)]].map(([l, v]) => (
+          <div className="flex" style={{ gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            {[["Efectivo ARS", fmt$(snapT.cashARS)], ["Efectivo USD", fmt$(snapT.cashUSD, "USD")],
+              ...(Math.abs(snapT.pendARS) > 1 ? [["A liquidar", fmt$(snapT.pendARS)]] : []),
+              ["Cartera (contado)", fmt$(carteraVal)], ["Total", fmt$(totalARS)]].map(([l, v]) => (
               <div key={l} style={{ flex: "1 1 180px", border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "12px 14px" }}>
                 <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>{l}</div>
                 <div style={{ fontSize: 19, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex" style={{ gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+            {cargandoPx ? (
+              <div style={{ flex: 1, border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: 14, fontSize: 12, color: C.muted }}>Calculando el rendimiento…</div>
+            ) : !perf ? null : perf.map((p) => (
+              <div key={p.label} style={{ flex: "1 1 180px", border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "12px 14px" }}>
+                <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>{p.label}</div>
+                <div style={{ fontSize: 19, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: p.pct == null ? C.dim : p.pct > 0 ? C.green : p.pct < 0 ? C.red : C.text }}>
+                  {p.pct == null ? "—" : fmtPct(p.pct)}
+                </div>
+                <div style={{ fontSize: 11, fontVariantNumeric: "tabular-nums", marginTop: 2, color: p.delta > 0 ? C.green : p.delta < 0 ? C.red : C.dim }}>{fmt$(p.delta)}</div>
+                {p.label === "Desde el inicio" && p.real && p.real !== p.desde ? (
+                  <div style={{ fontSize: 9.5, color: C.dim, marginTop: 3 }}>medido desde {fmtFecha(p.real)}</div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -32707,7 +32903,8 @@ function CajaTiempoModule() {
             </table>
           </div>
           <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>
-            El efectivo suma todos los movimientos liquidados hasta la fecha (aportes, ventas, compras, ajustes de futuros, cauciones). Futuros no aparecen como tenencia: liquidan diario por caja. "(costo)" = sin cierre histórico confiable para ese papel en esa fecha. Las letras ya vencidas se excluyen (su cobro está en el efectivo).
+            El efectivo arranca del saldo de apertura del broker y suma todos los movimientos liquidados hasta la fecha (aportes, ventas, compras, ajustes de futuros, cauciones). "A liquidar" es lo operado que todavía no se acreditó o debitó: sin eso el total se hunde el día de una venta y rebota al siguiente. Los bonos vienen cotizados por 100 nominales en el libro y acá se muestran por unidad. Futuros no aparecen como tenencia: liquidan diario por caja. "(costo)" = sin cierre confiable para ese papel en esa fecha. Las letras ya vencidas se excluyen (su cobro está en el efectivo).
+            {" "}El rendimiento es time-weighted: descuenta aportes y retiros, así que mide cómo trabajó la plata y no cuánta entró.
           </p>
         </>
       )}
