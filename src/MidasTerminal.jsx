@@ -9126,6 +9126,42 @@ function useStockPrices() {
               console.info(`[useStockPrices] ${repuestos} ticker(s) completados con el ultimo cierre de iol_quotes`);
             }
           }
+
+          // ULTIMO ESLABON: equity_daily_close. iol_quotes se arma con el
+          // distinct de `positions` y corre a las 17:30 (edge function
+          // iol-quotes-close, cron 30 20 * * 1-5), asi que un ticker comprado
+          // DESPUES de esa hora no esta hasta el cierre siguiente. Caso KO el
+          // 27/08: comprado 18:04, sin precio en data912 (trae 142 de ~250
+          // CEDEARs) ni en iol_quotes -> se valuaba a costo y quedaba clavado.
+          // equity_daily_close si lo tenia, y cubre los 22 CEDEARs de la
+          // cartera. Sin esto, el primer CEDEAR que compra un usuario nuevo se
+          // ve a costo hasta el dia siguiente, que es justo lo que se reporta
+          // como bug aunque no lo sea.
+          {
+            const faltan = Object.keys(map).filter((t) => !(map[t]?.price > 0));
+            const { data: eq } = await supabase
+              .from("equity_daily_close")
+              .select("ticker, close, trade_date")
+              .order("trade_date", { ascending: false })
+              .limit(4000);
+            const mejor = {};
+            for (const r of eq || []) {
+              const tk = (r.ticker || "").toUpperCase().trim();
+              if (!tk || mejor[tk]) continue;   // viene ordenado desc: el primero es el mas nuevo
+              mejor[tk] = r;
+            }
+            let rep2 = 0;
+            for (const [tk, r] of Object.entries(mejor)) {
+              if (map[tk]?.price > 0) continue;
+              const px = Number(r.close);
+              if (!(px > 0)) continue;
+              map[tk] = { price: px, previousClose: null, changePct: null, source: "close", closeDate: r.trade_date || null };
+              rep2++;
+            }
+            if (rep2 > 0) {
+              console.info(`[useStockPrices] ${rep2} ticker(s) completados con equity_daily_close (faltaban ${faltan.length})`);
+            }
+          }
         } catch (e) {
           console.warn("[useStockPrices] no se pudo completar con cierres:", e?.message || e);
         }
