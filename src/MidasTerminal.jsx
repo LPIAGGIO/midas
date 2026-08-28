@@ -4272,7 +4272,13 @@ const _categoriaMov = (tipo, instr) => {
   if (/ret\.imp|retencion|imp\.gcias/.test(t)) return "impuesto";
   if (/fci/.test(t)) return "fci";
   if (/renta y amort/.test(t)) return "renta";
-  if (/cambio/.test(t)) return "futuro_liq";
+  /* "Credito/Debito Cambio" NO son futuros. Vivian en futuro_liq y ensuciaban
+   * el resultado de futuros en $7.041.211. Auditado el 28/08 sobre el CSV real
+   * de 749 movimientos: los futuros de LP son TODOS DLR, y su P&L cierra exacto
+   * contra el neto de Credito/Debito Indice (-17.441.023 medido contra
+   * -17.441.053 devengado). Estos 13 movimientos son otra cosa —operaciones de
+   * cambio de moneda— y van a su propia categoria. */
+  if (/cambio/.test(t)) return "cambio";
   if (/indice/.test(t)) return "futuro";
   /* "Venta Prima" / "Compra Prima" son OPCIONES, y hay que atajarlas ANTES del
    * chequeo de compra/venta (ambas contienen la palabra) o caen como acción.
@@ -4300,7 +4306,7 @@ const _categoriaMov = (tipo, instr) => {
 };
 const CAT_LABEL = {
   trade_cedear: "CEDEAR", trade_bono: "Bono", trade_otro: "Acción", futuro: "Futuro",
-  futuro_liq: "Fut. cambio", fci: "FCI", caucion: "Caución", arancel: "Arancel",
+  cambio: "Cambio de moneda", fci: "FCI", caucion: "Caución", arancel: "Arancel",
   impuesto: "Impuesto", renta: "Renta", cash: "Caja",
   // La prima entra a la caja pero NO genera posición: este CSV no trae la serie
   // de la opción. La posición viene del ReporteOperaciones.
@@ -13800,6 +13806,21 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
     const marketRes = positionValueAtMarket(p, bondPrices, futurePrices, stockPrices, fciPrices);
     const cost = positionValueAtCost(p);
 
+    // Una posicion VENDIDA es un pasivo y vale NEGATIVO. positionValueAtMarket
+    // y positionValueAtCost calculan sobre p.quantity, que se guarda siempre
+    // positiva: el sentido lo lleva operation_type. Los tipos del split ya lo
+    // resuelven via consolidatePositions, pero aca cada operacion se valua
+    // suelta, asi que hay que aplicarlo a mano.
+    //
+    // Sin esto, un lanzamiento cubierto entraba al patrimonio como ACTIVO: el
+    // 28/08, con la cartera recien vaciada y solo el call de GGAL cargado, el
+    // total mostraba +$190.188 en vez de -$190.188, y el resultado -$10.818
+    // cuando la posicion estaba GANANDO $10.818 (se lanzo la prima a 335,01 y
+    // habia bajado a 316,98: en un lanzamiento, que la prima baje es ganancia).
+    // Es el mismo bug que se corrigio para bonos en mayo (T30J6) y para FCI en
+    // julio; las opciones eran el tipo que faltaba.
+    const signo = p.operation_type === "sell" ? -1 : 1;
+
     // Si no hay precio de mercado, caemos a costo — la posición sigue
     // siendo parte de la cartera y tiene que sumar al TOTAL, no quedarse
     // "unvalued". consolidatePositions hace el mismo fallback (cuando
@@ -13808,10 +13829,10 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
     // quedaba incoherente con los totales que ves en la tabla consolidada.
     let positionValue, positionSource;
     if (marketRes != null) {
-      positionValue = marketRes.value;
+      positionValue = signo * marketRes.value;
       positionSource = marketRes.source;
     } else if (cost != null) {
-      positionValue = cost;
+      positionValue = signo * cost;
       positionSource = "cost";
     } else {
       unvalued++;
@@ -13830,7 +13851,7 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
 
     if (cost != null) {
       const convertedCost = convertValue(
-        cost, p.entry_currency || "ARS", valuationCurrency, fx
+        signo * cost, p.entry_currency || "ARS", valuationCurrency, fx
       );
       if (convertedCost != null) totalCost += convertedCost;
     }
@@ -32676,12 +32697,10 @@ function CajaTiempoModule() {
         const m = porEjec[iE++];
         if (m.moneda !== "USD") ejecARS += Number(m.total) || 0;
         const cat = m.categoria;
-        if (cat === "futuro" || cat === "futuro_liq") {
-          // OJO: futuro_liq NO son futuros. Son "Credito/Debito Cambio", o sea
-          // compraventa de divisas que el importador mete en esta categoría.
-          // Sumarlos al resultado de futuros lo ensucia en $7M: el neto de
-          // Credito/Debito Indice cierra contra el devengado, el otro no.
-          if (cat === "futuro" && !/Gtia/i.test(m.tipo_operacion || "")) futCaja += Number(m.total) || 0;
+        if (cat === "futuro") {
+          // Las garantias ("Ent/Dev Gtia Indice Pesos") no son resultado: se
+          // entregan y se devuelven por el mismo monto y se cancelan entre si.
+          if (!/Gtia/i.test(m.tipo_operacion || "")) futCaja += Number(m.total) || 0;
           const qf = Number(m.cantidad) || 0;
           if (cat === "futuro" && m.ticker && Math.abs(qf) > 1e-12) {
             // Con el neto y Σ(cantidad × precio) alcanza: el resultado del
@@ -32732,7 +32751,7 @@ function CajaTiempoModule() {
       if (m.categoria === "trade_cedear" || m.categoria === "trade_otro") eq.add(m.ticker);
       else if (m.categoria === "trade_bono") bo.add(m.ticker);
       else if (m.categoria === "fci") fc.add(m.ticker);
-      else if (m.categoria === "futuro" || m.categoria === "futuro_liq") fu.add(m.ticker);
+      else if (m.categoria === "futuro") fu.add(m.ticker);
     }
     return { eq: [...eq], bo: [...bo], fc: [...fc], fu: [...fu] };
   }, [rows]);
