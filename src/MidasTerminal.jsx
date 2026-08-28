@@ -11067,14 +11067,32 @@ function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxSt
     () => (showIolCash ? iolCashByCurrency : { "ARS": 0, "USD-MEP": 0, "USD-CCL": 0 }),
     [showIolCash, iolCashByCurrency]
   );
-  const effectiveManualBalance = useMemo(
-    () => (showEfectivo ? balanceByCurrency : { "ARS": 0, "USD-MEP": 0, "USD-CCL": 0 }),
-    [showEfectivo, balanceByCurrency]
-  );
-  const effectiveMovements = useMemo(
-    () => (showEfectivo ? movements : []),
-    [showEfectivo, movements]
-  );
+  // La caja sigue al chip de SU broker. Antes colgaba de un chip "efectivo"
+  // que no existe en la UI (los chips son IOL y COC), asi que apagar COC le
+  // sacaba las posiciones pero le dejaba la caja: con los dos chips apagados
+  // la pantalla mostraba 0 posiciones, tenencia $0 y un TOTAL de -$18,2M que
+  // no es el patrimonio de nadie. Los cash_movements ya traen el broker.
+  const effectiveMovements = useMemo(() => {
+    if (!showEfectivo) return [];
+    if (!excludedBrokers || excludedBrokers.size === 0) return movements;
+    return movements.filter((m) => !excludedBrokers.has(m.broker || "manual"));
+  }, [showEfectivo, movements, excludedBrokers]);
+  // Con algun broker excluido hay que rehacer el balance desde los movimientos
+  // que quedaron; sin exclusiones se usa el que ya viene armado.
+  const effectiveManualBalance = useMemo(() => {
+    if (!showEfectivo) return { "ARS": 0, "USD-MEP": 0, "USD-CCL": 0 };
+    if (!excludedBrokers || excludedBrokers.size === 0) return balanceByCurrency;
+    const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const acc = { "ARS": 0, "USD-MEP": 0, "USD-CCL": 0 };
+    for (const m of effectiveMovements) {
+      if (m.movement_date && m.movement_date > hoy) continue;   // todavia no liquido
+      const cur = m.currency || "ARS";
+      if (!(cur in acc)) continue;
+      const signo = (m.movement_type === "deposit" || m.movement_type === "sale_proceeds") ? 1 : -1;
+      acc[cur] += signo * (Number(m.amount) || 0);
+    }
+    return acc;
+  }, [showEfectivo, balanceByCurrency, excludedBrokers, effectiveMovements]);
 
   // Efectivo total = manual (cash_movements) + IOL (disponible), ambos ya
   // gateados por el filtro. Es lo que consumen TotalCard y DistributionCard
