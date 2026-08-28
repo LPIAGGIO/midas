@@ -310,6 +310,19 @@ async function main() {
   const usdPx = {}, arsPx = {};
   for (const it of usaRes || []) if (it?.symbol && Number(it.c) > 0) usdPx[it.symbol.toUpperCase()] = Number(it.c);
   for (const it of cedRes || []) if (it?.symbol && Number(it.c) > 0) arsPx[it.symbol.toUpperCase()] = Number(it.c);
+  const iolArs2 = {};
+  try {
+    const { data: iq2 } = await supabase.from("iol_quotes").select("ticker,last");
+    for (const r of iq2 || []) if (Number(r.last) > 0) iolArs2[String(r.ticker).toUpperCase()] = Number(r.last);
+  } catch { /* sin respaldo */ }
+  // Respaldo del feed de CEDEARs: arg_cedears responde VACIO a ratos (el 28/08
+  // a las 11:09 fallaron MU, SNDK y UBER con "sin ratio" y a las 11:24 andaban).
+  // iol_quotes tiene el ultimo cierre y no se cae.
+  const iolArs = {};
+  try {
+    const { data: iq } = await supabase.from("iol_quotes").select("ticker,last");
+    for (const r of iq || []) if (Number(r.last) > 0) iolArs[String(r.ticker).toUpperCase()] = Number(r.last);
+  } catch (e) { log("[iol_quotes respaldo]", e.message); }
 
   // Cola manual pendiente, colapsando duplicados por usuario+ticker.
   const { data: queue } = await supabase.from("tv_analysis_queue").select("*").eq("status", "pending").limit(20);
@@ -420,8 +433,15 @@ async function main() {
       // Conversión a ARS según el modo.
       let toArs, usdShown;
       if (modo === "usa") {
-        const ratio = arsPx[tk] > 0 && usdPx[tk] > 0 ? Math.max(1, Math.round((usdPx[tk] * ccl) / arsPx[tk])) : null;
-        if (!ratio) throw new Error("sin ratio (no está el CEDEAR en el feed)");
+        // usdPx sale de data912/usa_stocks, que NO lista ETFs: GLD (SPDR Gold
+        // Trust) no esta ahi y el ratio quedaba null SIEMPRE — no era
+        // intermitente, GLD nunca se pudo analizar. `spot` ya cae al ultimo
+        // cierre de Yahoo, que si trae ETFs, asi que sirve igual para derivar
+        // el ratio. Y si el feed de CEDEARs vino vacio, se usa el cierre de IOL.
+        const usdRef = usdPx[tk] > 0 ? usdPx[tk] : spot;
+        const arsRef = arsPx[tk] > 0 ? arsPx[tk] : (iolArs[tk] || 0);
+        const ratio = arsRef > 0 && usdRef > 0 ? Math.max(1, Math.round((usdRef * ccl) / arsRef)) : null;
+        if (!ratio) throw new Error("sin ratio (ni feed de CEDEARs ni cierre de IOL)");
         toArs = (usd) => Math.round((usd * ccl) / ratio);
         usdShown = (x) => Math.round(x * 100) / 100;
       } else if (modo === "adr") {
@@ -776,7 +796,11 @@ async function ratchetPass() {
       if (!daily) { daily = await yahooCandles(tk + ".BA", "1d", "1y"); modo = "local_ars"; if (!daily) continue; }
       let toArs, entryLvl, unit;
       if (modo === "usa") {
-        const ratio = arsPx[tk] > 0 && usdPx[tk] > 0 && ccl ? Math.max(1, Math.round((usdPx[tk] * ccl) / arsPx[tk])) : null;
+        // Mismo respaldo que en el analisis: ETFs no estan en usa_stocks y el
+        // feed de CEDEARs se cae a ratos. Sin esto el ratchet de GLD no existia.
+        const usdRef = usdPx[tk] > 0 ? usdPx[tk] : (Number(daily?.[daily.length - 1]?.c) || 0);
+        const arsRef = arsPx[tk] > 0 ? arsPx[tk] : (iolArs2[tk] || 0);
+        const ratio = arsRef > 0 && usdRef > 0 && ccl ? Math.max(1, Math.round((usdRef * ccl) / arsRef)) : null;
         if (!ratio) continue;
         toArs = (usd) => Math.round((usd * ccl) / ratio);
         entryLvl = (avgArs * ratio) / ccl; unit = "US$";
@@ -814,9 +838,16 @@ async function ratchetPass() {
       // usuario borró la disparada, tampoco lo perseguimos al mismo nivel.
       const fired = mine.filter((r) => r.triggered_at);
       if (fired.some((r) => lvlOf(r) >= newLvl - 0.005)) continue;
-      const prev = mine.find((r) => !r.triggered_at);
+      // Se borran TODAS las vivas, no la primera. `.find()` devolvia una sola:
+      // si por lo que fuera quedaban dos sin disparar, cada corrida borraba una
+      // e insertaba otra, asi que el sobrante quedaba para siempre. LP vio tres
+      // ratchets de GGAL a 43,38 / 43,35 / 43,34, de tres corridas distintas.
+      const vivas = mine.filter((r) => !r.triggered_at);
+      const prev = vivas.length
+        ? vivas.reduce((a, b) => (lvlOf(b) > lvlOf(a) ? b : a))   // la mas alta manda
+        : null;
       if (prev && lvlOf(prev) != null && newLvl <= lvlOf(prev) + 0.005) continue; // nunca baja ni repite
-      if (prev) await supabase.from("price_alerts").delete().eq("id", prev.id);
+      for (const v of vivas) await supabase.from("price_alerts").delete().eq("id", v.id);
       await supabase.from("price_alerts").insert({
         user_id: userId, ticker: tk, price: toArs(stop), dir: "down", nota,
         usd_ref: modo === "local_ars" ? null : Math.round(stop * 100) / 100, canal: "screen", origen: "tv",
