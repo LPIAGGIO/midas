@@ -16258,7 +16258,8 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
           <button onClick={onClose} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 16 }}>×</button>
         </div>
         <div style={{ fontSize: 10.5, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
-          Reporte de operaciones de Cocos/Matriz. Importa en una sola pasada <b>futuros DLR, CEDEARs, acciones y bonos</b>: agrupa los fills parciales por orden (saltea los cancelados) y toma la cantidad y el precio promedio finales — así una venta grande que salió en fills de a 100 entra como una sola operación por su neto. Los <b>soberanos hard-dollar</b> (AL/GD/AE/GE) se toman como <b>canje</b> (conversión de moneda, no deja posición → sin shorts fantasma). Las <b>cauciones</b> se ignoran (se cargan a mano). <b style={{ color: C.text }}>Dedup por orden: subí el archivo completo o de a poco, las veces que quieras — solo agrega lo nuevo, nunca duplica.</b>
+          Reporte de operaciones de Cocos/Matriz: futuros, CEDEARs, acciones y bonos.
+          {" "}<b style={{ color: C.text }}>Podés subirlo las veces que quieras — dedupea por orden y solo agrega lo nuevo.</b>
         </div>
 
         <label style={{
