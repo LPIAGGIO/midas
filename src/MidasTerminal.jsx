@@ -11756,7 +11756,14 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
   // mercado), mostramos el badge "A costo" porque el total no refleja
   // mercado real. Si al menos UNA tiene precio, mostramos "A mercado".
   const allAtCost = totals.pricesFromMarket === 0 && totals.pricesFromCost > 0;
-  const valuationLabel = allAtCost ? "A costo" : "A mercado";
+  // Toda la cartera valuada con el cierre anterior (tipico fuera de rueda o el
+  // dia despues de comprar algo que las fuentes en vivo todavia no listan).
+  const allAtClose = totals.pricesFromMarket > 0 &&
+    totals.pricesFromClose === totals.pricesFromMarket && totals.pricesFromCost === 0;
+  // El badge de arriba del TOTAL. "Al cierre" es una tercera opcion real: no es
+  // costo (hay precio) pero tampoco es vivo, y llamarlo "A mercado" es lo que
+  // hace pensar que la cartera no se actualiza.
+  const valuationLabel = allAtCost ? "A costo" : allAtClose ? "Al cierre" : "A mercado";
 
   // P&L visible cuando hay al menos una posición valuada a mercado real
   const showPnl = totals.pnl != null && totals.pricesFromMarket > 0;
@@ -11918,7 +11925,15 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
             fontFamily: "'Roboto', sans-serif",
           }}
         >
-          <span>{totals.pricesFromCost} {totals.pricesFromCost === 1 ? "posición" : "posiciones"} a costo · {totals.pricesFromMarket} a mercado</span>
+          {/* "a mercado" incluia los precios de CIERRE, asi que una cartera
+              valuada con el cierre de ayer parecia estar en vivo. Se desglosa:
+              lo que esta al cierre se dice, no se disimula. */}
+          <span>
+            {totals.pricesFromCost} {totals.pricesFromCost === 1 ? "posición" : "posiciones"} a costo
+            {" · "}
+            {totals.pricesFromMarket - (totals.pricesFromClose || 0)} a mercado
+            {totals.pricesFromClose > 0 ? ` · ${totals.pricesFromClose} al cierre anterior` : ""}
+          </span>
         </div>
       )}
 
@@ -13669,6 +13684,12 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
   let valuedAny = false;
   let pricesFromMarket = 0; // posiciones con precio data912 / manual
   let pricesFromCost = 0;   // posiciones que cayeron al fallback
+  // De las "a mercado", cuantas son en realidad el CIERRE ANTERIOR y no un
+  // precio vivo. La UI las mostraba a todas como "a mercado", asi que una
+  // cartera valuada al cierre de ayer parecia estar en vivo — y eso se reporta
+  // como bug. Se cuenta aparte, sin sacarlas de pricesFromMarket, para no
+  // romper allAtCost ni showPnl.
+  let pricesFromClose = 0;
   // P&L de futuros que YA se acreditó como cash (suma de actual_amount
   // de adjustments confirmed). Lo separamos de totalMarket porque ese
   // monto ya está sumado en balanceByCurrency (cash) y duplicaríamos si
@@ -13753,6 +13774,7 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
           g.priceSource === "close" || g.priceSource === "primary" ||
           g.priceSource === "mae") {
         pricesFromMarket++;
+        if (g.priceSource === "close") pricesFromClose++;
       } else {
         pricesFromCost++;
       }
@@ -13831,6 +13853,7 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
         src === "close";
       if (fromMarket) {
         pricesFromMarket++;
+        if (src === "close") pricesFromClose++;
       } else {
         pricesFromCost++;
       }
@@ -13901,9 +13924,11 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
       positionSource === "mae" ||
       positionSource === "fci" ||
       positionSource === "market" || // legacy
-      positionSource === "manual";
+      positionSource === "manual" ||
+      positionSource === "close";    // faltaba: caia como "a costo"
     if (fromMarket) {
       pricesFromMarket++;
+      if (positionSource === "close") pricesFromClose++;
     } else {
       pricesFromCost++;
     }
@@ -13928,6 +13953,7 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
     realizedClosedPnL,
     unvalued,
     pricesFromMarket,
+    pricesFromClose,
     pricesFromCost,
   };
 }
