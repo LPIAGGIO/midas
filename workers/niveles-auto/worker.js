@@ -1076,7 +1076,15 @@ async function volumeProfilePass() {
  * en el VPS. Si aparece una sola de las dos, el worker no adivina: o se queda
  * en paper avisando, o se mata. Es la regla que escribió LP en su pre-mortem.
  */
-const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL")
+// Universo del bot paper. Eran 3 y dos NUNCA calificaban (GGAL score 2/10,
+// SNDK 4/10 contra un minimo de 7), asi que en 25 dias junto 5 operaciones y 4
+// fueron MU: en los hechos era un bot de un solo papel. Se amplia a 15
+// diversificando sectores — semis, big tech, consumo, salud, energia, LatAm —
+// para que las senales no esten todas correlacionadas y la muestra crezca.
+// Todos verificados con precio en data912 (arg_cedears + usa_stocks), que es lo
+// que el bot necesita para derivar el ratio. El sizing no cambia: sigue siendo
+// 1,5% del capital por trade, y CAP_ARS limita cuantas van simultaneas.
+const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL,NVDA,AMD,AAPL,MSFT,GOOGL,META,AMZN,KO,JNJ,XOM,MELI,NU")
   .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 const BOT_UNIVERSO = new Set(BOT_TICKERS);
 const BOT_USER = process.env.IOL_BOT_USER || "cafc5a8c-1cee-4d57-a765-6aacf1acc661";
