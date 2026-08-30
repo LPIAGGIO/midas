@@ -3393,6 +3393,8 @@ const NOTIF_CATALOG = [
     desc: "Cuando un mes se despega del resto: avisa si quedo caro o barato contra la mediana de la curva y cuantos pesos tendria que moverse para alinearse. Mira los 3 contratos mas cercanos, salta al pasar 0,25% de desvio y solo en la transicion, no en cada tick. En horario de rueda." },
   { key: "desarbitrajes", label: "Desarbitrajes MEP", ready: true,
     desc: "Cuando el spread del canje de soberanos supera el umbral. Indicativo (sin puntas)." },
+  { key: "morning_brief", label: "Brief de la manana (9AM)", ready: true,
+    desc: "Antes de que abra BYMA: como viene cada papel de tu cartera (cierre y pre-market del subyacente en USA, proximos balances), el cierre de Asia y los futuros de USA. Solo dias habiles." },
   { key: "eod_summary", label: "Resumen de fin de dia", ready: true,
     desc: "Al cierre (18hs por defecto): P&L del dia de futuros (firme) + variacion del dia de tus tenencias. Probalo cuando quieras con /pnl en el bot." },
   { key: "futures_adjustments", label: "Ajustes de futuros", ready: true,

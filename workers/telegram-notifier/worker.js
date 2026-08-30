@@ -849,8 +849,112 @@ async function alertLoop() {
     }
     await evalEodScheduled(users);
     await evalFuturesCloseScheduled(users);
+    await evalMorningBrief(users);
   } catch (e) {
     console.error("[alertLoop]", e.message);
+  }
+}
+
+/* ─────────────── Brief matinal (9AM, dias habiles) ───────────────
+ *
+ * Panorama pre-BYMA: Asia ya cerro, los futuros de USA operan, Argentina abre
+ * 10:30. Tres bloques: (1) los papeles en cartera con el pre-market o el
+ * cierre anterior del SUBYACENTE en USA, mas su proximo balance si cae en 7
+ * dias; (2) cierre de Asia; (3) futuros de USA + VIX.
+ *
+ * Los precios salen de Yahoo (chart v8). El % del dia se calcula contra la
+ * serie DIARIA (ultimos dos cierres), no contra meta.chartPreviousClose, que
+ * viene desfasado en varios simbolos (el KOSPI llego a mostrar +3,02% cuando
+ * el movimiento real era +2,08%). */
+const YA_UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" };
+// Acciones argentinas -> su ADR (los CEDEARs ya usan el mismo ticker que USA).
+const BRIEF_ADR = { GGAL: "GGAL", YPFD: "YPF", PAMP: "PAM", TXAR: "TX", BMA: "BMA", CEPU: "CEPU", EDN: "EDN", LOMA: "LOMA", SUPV: "SUPV" };
+
+async function yahooBrief(sym) {
+  try {
+    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=8d`, { headers: YA_UA });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const res = j?.chart?.result?.[0];
+    const meta = res?.meta || {};
+    const ts = res?.timestamp || [];
+    const c = res?.indicators?.quote?.[0]?.close || [];
+    const pts = ts.map((t, i) => Number(c[i])).filter((v) => Number.isFinite(v) && v > 0);
+    if (pts.length < 2) return null;
+    const last = pts[pts.length - 1], prev = pts[pts.length - 2];
+    const pre = Number(meta.preMarketPrice) || null;
+    return {
+      px: last, pct: (last / prev - 1) * 100,
+      pre, prePct: pre ? (pre / last - 1) * 100 : null,
+    };
+  } catch { return null; }
+}
+
+function briefPct(x) { return `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(1)}%`; }
+
+async function buildMorningBrief(userId) {
+  // (1) cartera: contado con neto > 0, colapsando brokers
+  const { data: pos } = await supabase.from("positions")
+    .select("ticker,instrument_type,operation_type,quantity")
+    .eq("user_id", userId).in("instrument_type", ["cedear", "stock"]);
+  const net = new Map();
+  for (const p of pos || []) {
+    const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+    net.set(p.ticker, (net.get(p.ticker) || 0) + q);
+  }
+  const tks = [...net.entries()].filter(([, q]) => q > 1e-9).map(([t]) => t).sort();
+  if (!tks.length) return null;
+
+  // proximos balances (7 dias) de esos papeles
+  const hoy = artParts().dateStr;
+  const en7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const { data: earn } = await supabase.from("earnings_calendar")
+    .select("ticker,earnings_date").in("ticker", tks.map((t) => BRIEF_ADR[t] || t))
+    .gte("earnings_date", hoy).lte("earnings_date", en7);
+  const earnBy = {};
+  for (const e of earn || []) earnBy[e.ticker] = e.earnings_date;
+
+  const filas = [];
+  for (const tk of tks) {
+    const q = await yahooBrief(BRIEF_ADR[tk] || tk);
+    if (!q) { filas.push(`• ${tk}: s/d`); continue; }
+    let l = `• <b>${tk}</b> ${briefPct(q.pct)}`;
+    if (q.prePct != null && Math.abs(q.prePct) >= 0.05) l += ` · pre ${briefPct(q.prePct)}`;
+    const ed = earnBy[BRIEF_ADR[tk] || tk];
+    if (ed) l += ` · balance ${ed.slice(8, 10)}/${ed.slice(5, 7)}`;
+    filas.push(l);
+  }
+
+  // (2) Asia (cerrada a esta hora) y (3) futuros USA
+  const ASIA = [["^N225", "Nikkei"], ["^KS11", "KOSPI"], ["^HSI", "HangSeng"], ["000001.SS", "Shanghai"]];
+  const USA = [["ES=F", "S&P fut"], ["NQ=F", "Nasdaq fut"], ["^VIX", "VIX"], ["GC=F", "Oro"]];
+  const asia = [], usa = [];
+  for (const [sym, nom] of ASIA) { const q = await yahooBrief(sym); if (q) asia.push(`${nom} ${briefPct(q.pct)}`); }
+  for (const [sym, nom] of USA) { const q = await yahooBrief(sym); if (q) usa.push(`${nom} ${briefPct(q.pct)}`); }
+
+  return `<b>Brief 9AM</b> — panorama pre-apertura\n\n` +
+    `<b>Tu cartera (subyacente USA, cierre de ayer${filas.some((f) => f.includes("pre ")) ? " y pre-market" : ""})</b>\n${filas.join("\n")}\n\n` +
+    (asia.length ? `<b>Asia (cerrado)</b>\n${asia.join(" · ")}\n\n` : "") +
+    (usa.length ? `<b>USA (futuros ahora)</b>\n${usa.join(" · ")}\n\n` : "") +
+    `BYMA abre 10:30.`;
+}
+
+async function evalMorningBrief(users) {
+  const p = artParts();
+  if (!isBizDay(p.dow) || p.hour !== 9) return;
+  for (const u of users) {
+    // Opt-in, como el resto del catalogo: la UI de Notificaciones muestra el
+    // toggle apagado por defecto y el worker tiene que coincidir, o el usuario
+    // recibiria un brief que su pantalla dice que esta desactivado.
+    if (!prefOn(u.prefs, "morning_brief", false)) continue;
+    if (await recentlySent(u.userId, "morning", p.dateStr, 20 * 60 * 60 * 1000)) continue;
+    try {
+      const txt = await buildMorningBrief(u.userId);
+      if (!txt) continue;   // sin cartera de contado: no hay brief que armar
+      await sendMessage(u.chatId, txt);
+      await logSent(u.userId, "morning", p.dateStr, "brief 9am", "panorama pre-apertura");
+      console.log(`[morning] ${u.userId} ${p.dateStr}`);
+    } catch (e) { console.error("[morning]", e.message); }
   }
 }
 
