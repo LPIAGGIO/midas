@@ -1089,6 +1089,28 @@ const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL,NVDA,AMD
 const BOT_UNIVERSO = new Set(BOT_TICKERS);
 const BOT_USER = process.env.IOL_BOT_USER || "cafc5a8c-1cee-4d57-a765-6aacf1acc661";
 const CAP_ARS = Number(process.env.IOL_BOT_CAP_ARS || 3000000);
+
+/* Aviso por Telegram al duenio del bot, para ESPEJAR la operacion en Cocos.
+ * El mismo bot de @midas_ar_BOT (token compartido via .env). Fire-and-forget:
+ * un fallo de Telegram JAMAS debe frenar el ciclo de trading — se loguea y
+ * sigue. Sin token configurado, no hace nada (comportamiento previo). */
+const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+let _tgChatCache = null;
+async function tgEspejo(texto) {
+  if (!TG_TOKEN) return;
+  try {
+    if (!_tgChatCache) {
+      const { data } = await supabase.from("telegram_links")
+        .select("chat_id").eq("user_id", BOT_USER).eq("enabled", true).maybeSingle();
+      _tgChatCache = data?.chat_id || null;
+    }
+    if (!_tgChatCache) return;
+    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: _tgChatCache, text: texto, parse_mode: "HTML" }),
+    });
+  } catch (e) { log("[tgEspejo]", e.message); }
+}
 const BOT_RISK = 0.015;      // riesgo por trade: 1,5% del capital
 const BOT_VENTANA_H = 48;    // la orden límite vive 48hs y se cae sola
 const IVA = 1.21;
@@ -1375,6 +1397,14 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
       status: "cancelled", exit_reason: "reemplazada por señal nueva", veredicto: "sin_fill",
       nota_sim: "reemplazada por una señal más fresca antes de llegar a ejecutarse",
     }).in("id", pend.map((t) => t.id));
+    // El espejo en Cocos tiene que enterarse: su orden vieja quedaria colgada
+    // mientras el bot ya esta mirando otro nivel.
+    for (const p of pend) {
+      await tgEspejo(
+        `<b>BOT · CANCELADA ${tk}</b>\n` +
+        `La orden a US$${Number(p.entry_limit).toFixed(2)} se reemplaza por una señal nueva (viene otro aviso con el nivel fresco).\n\n` +
+        `Si la espejaste en Cocos, CANCELALA antes de poner la nueva.`);
+    }
   }
 
   const f = await botFeeds();
@@ -1413,6 +1443,12 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
   const { error } = await supabase.from("paper_iol_trades").insert(fila);
   if (error) throw new Error(error.message);
   log(`[bot ${tk}] ${MODO_REAL ? "ORDEN REAL" : "orden simulada"}: ${qty} × ${pesos(precioUnidad)} (US${entry.toFixed(2)}) · stop ${stop.toFixed(2)} · target ${target.toFixed(2)} · compromete ${pesos(qty * precioUnidad)}`);
+  await tgEspejo(
+    `<b>BOT · orden colocada</b> (${MODO_REAL ? "IOL real" : "simulada"})\n` +
+    `<b>COMPRA ${qty} × ${tk}</b> limite ${pesos(precioUnidad)} (US${entry.toFixed(2)})\n` +
+    `Stop ${pesos(stop * rArs)} · Target ${pesos(target * rArs)}\n` +
+    `score ${score}/10 · R:R ${Number(rr).toFixed(1)}\n\n` +
+    `Para espejar en Cocos: limite ${pesos(precioUnidad)}, misma cantidad o proporcional. Te aviso si entra, si cierra o si se cancela.`);
 }
 
 async function paperPass() {
@@ -1426,6 +1462,10 @@ async function paperPass() {
       nota_sim: `El papel nunca bajó a US$${Number(t.entry_limit).toFixed(2)} en ${BOT_VENTANA_H}hs: la orden se cayó sola, sin costo. No hubo decisión que juzgar.`,
     }).eq("id", t.id);
     log(`[bot ${t.ticker}] orden expirada sin ejecutarse (el precio no llegó al nivel)`);
+    await tgEspejo(
+      `<b>BOT · CANCELADA ${t.ticker}</b>\n` +
+      `La orden de compra a ${pesos(Number(t.px_ars_orden) || Number(t.entry_limit) * Number(t.ratio || 0))} expiro sin ejecutarse.\n\n` +
+      `Si la espejaste en Cocos, CANCELALA — el bot ya no la sigue.`);
   }
   if (!inUsMarketWindow()) return;
 
@@ -1489,6 +1529,11 @@ async function paperPass() {
         nota_sim: `LLEGÓ al nivel. Entró ${t.qty} × ${pesos(pxArs)} (US$${pxUsd.toFixed(2)}), total ${pesos(pxArs * t.qty)}. Vende en el target US$${Number(t.target).toFixed(2)} ≈ ${pesos(Number(t.target) * rArs)}; corta en el stop US$${Number(t.stop).toFixed(2)} ≈ ${pesos(Number(t.stop) * rArs)}.`,
       }).eq("id", t.id);
       log(`[bot ${t.ticker}] LLEGÓ AL NIVEL → ${MODO_REAL ? "compra ejecutada" : "fill simulado"} ${t.qty} × ${pesos(pxArs)} · vendería en ${pesos(Number(t.target) * rArs)} / corta en ${pesos(Number(t.stop) * rArs)}`);
+      await tgEspejo(
+        `<b>BOT · ENTRO ${t.ticker}</b>\n` +
+        `Fill ${t.qty} × ${pesos(pxArs)} (US${pxUsd.toFixed(2)}) · total ${pesos(pxArs * t.qty)}\n` +
+        `Target ${pesos(Number(t.target) * rArs)} · Stop ${pesos(Number(t.stop) * rArs)}\n\n` +
+        `Si espejaste en Cocos, ya deberias estar comprado. Guarda estos niveles.`);
       continue;
     }
 
@@ -1599,6 +1644,11 @@ async function paperPass() {
       nota_sim: `Cerró por ${reason}${intradia ? " el mismo día (IOL bonifica la comisión de la segunda pata)" : ""}. Vendió ${t.qty} × ${pesos(pxArsSal)} contra ${pesos(pxArsEnt)} de entrada. Comisiones ${pesos(fees)}. Resultado ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} → la decisión fue ${veredicto === "acierto" ? "CORRECTA" : "EQUIVOCADA"}.`,
     }).eq("id", t.id);
     log(`[bot ${t.ticker}] CIERRE ${reason}${intradia ? " (intradía)" : ""}: ${pesos(pxArsSal)} · comisiones ${pesos(fees)} · P&L ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} · ${veredicto.toUpperCase()}`);
+    await tgEspejo(
+      `<b>BOT · SALIDA ${t.ticker}</b> por <b>${reason}</b>\n` +
+      `<b>VENDE ${t.qty} × ${t.ticker}</b> a ~${pesos(pxArsSal)} (US${exitUsd.toFixed(2)})\n` +
+      `P&L simulado: ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))}\n\n` +
+      `Si espejaste en Cocos: VENDER ahora al mercado o con limite cerca de ${pesos(pxArsSal)}.`);
     log(`[bot ${t.ticker}]   la misma en Cocos: comisiones ${pesos(feesAlt)} · P&L ${pnlAlt >= 0 ? "+" : "-"}${pesos(Math.abs(pnlAlt))}`);
   }
 }
