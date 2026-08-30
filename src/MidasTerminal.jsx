@@ -18351,6 +18351,59 @@ const COCOS_CATEGORIES = [
  * Las acciones (editar, borrar, cambiar precio) operan sobre las ops
  * individuales y delegan al callback del padre.
  */
+/* ───────── Metricas de renta fija (glosario BYMA, docs/formulas-byma.md) ─────────
+ *
+ * Para LECAPs y BONCAPs (cero cupon capitalizable) todo sale de tres datos de
+ * bond_emissions: TEM, vencimiento y pago al vencimiento por 100 VN. Con eso:
+ *   TIR TEA  = (pago/precio)^(365/dias) − 1        (precio sucio por 100 VN)
+ *   TEM eq.  = (1+TEA)^(1/12) − 1
+ *   MD       = τ/(1+TEA)   con τ = dias/365        (cero cupon: D_Mac = τ)
+ *   CX       = τ(τ+1)/(1+TEA)²
+ *   ΔV(Δy)   = −V·MD·Δy + ½·V·CX·Δy²               (sensibilidad 2do orden)
+ *   VT       = 100·(1+TEM)^meses_30/360 transcurridos → paridad = precio/VT
+ *
+ * VALIDACION: si la TEA sale fuera de (−50%, +300%) devolvemos null antes que
+ * mostrar un numero absurdo — un pago mal cargado en bond_emissions se ve como
+ * "sin metricas", no como una TIR del 900%. Los duales (TXMJ9) llevan
+ * tem/pago en 0 = "no aplica": su TIR requiere proyectar CER y TAMAR (Fase B),
+ * y aca solo se muestra la estructura. */
+function _mesesTranscurridos30360(desdeISO, hastaISO) {
+  const [y1, m1, d1] = desdeISO.split("-").map(Number);
+  const [y2, m2, d2] = hastaISO.split("-").map(Number);
+  return (y2 - y1) * 12 + (m2 - m1) + (Math.min(d2, 30) - Math.min(d1, 30)) / 30;
+}
+function bondCapMetrics(emi, precioPor100) {
+  if (!emi || !(precioPor100 > 0)) return null;
+  const tem = Number(emi.tem_capitalizacion), pago = Number(emi.pago_vencimiento);
+  if (!(tem > 0) || !(pago > 0)) return null;   // dual u otro: no aplica
+  const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const dias = Math.round((new Date(emi.fecha_vencimiento + "T12:00:00") - new Date(hoy + "T12:00:00")) / 86400000);
+  if (dias <= 0) return null;                   // vencido: la tenencia es fantasma
+  const tau = dias / 365;
+  const tea = Math.pow(pago / precioPor100, 1 / tau) - 1;
+  if (!(tea > -0.5 && tea < 3)) return null;    // numero absurdo = datos malos
+  const temEq = Math.pow(1 + tea, 1 / 12) - 1;
+  const md = tau / (1 + tea);
+  const cx = (tau * (tau + 1)) / Math.pow(1 + tea, 2);
+  // VT solo si conocemos la emision (first_auction_date + 2 dias ≈ liquidacion);
+  // guardamos la fecha exacta en la nota, pero para la paridad alcanza el
+  // arranque de capitalizacion que este cargado.
+  let paridad = null;
+  if (emi.fecha_emision) {
+    const meses = _mesesTranscurridos30360(emi.fecha_emision, hoy);
+    if (meses > 0) paridad = (precioPor100 / (100 * Math.pow(1 + tem, meses))) * 100;
+  }
+  const sens = (dy) => (V) => -V * md * dy + 0.5 * V * cx * dy * dy;
+  return { dias, tea, temEq, md, cx, paridad, pago, vto: emi.fecha_vencimiento, sube100: sens(-0.01), baja100: sens(0.01) };
+}
+
+// Fechas de emision verificadas contra la resolucion oficial (no inferidas).
+// Solo alimentan la PARIDAD; la TIR no las necesita.
+const EMISION_EXACTA = {
+  T30J7: "2026-01-16",   // RC 3/2026: "Fecha de emision: 16 de enero de 2026"
+  TXMJ9: "2026-04-30",   // RC 23/2026
+};
+
 function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices, fciPrices, futureAdjLookup, onEdit, onDelete, onUpdatePrice, variant = "open" }) {
   const [expanded, setExpanded] = useState(new Set());
   const isClosed = variant === "closed";
@@ -18615,6 +18668,22 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
 // tabla de cerradas-hoy con el costo base de los pares cerrados HOY, para que
 // la celda cuadre con el P&L de la fila). null = usar group.ppp como siempre.
 function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPrices, futureAdjLookup, expanded, onToggle, onEdit, onDelete, onUpdatePrice, readOnlyPrice = false, pppOverride = null }) {
+  // Metricas de renta fija para la fila expandida (solo bonos con emision
+  // catalogada en bond_emissions). Reusa el hook que ya existia para el
+  // Sintetico Dolar — un solo fetch, mismo Map para toda la app.
+  const { emissions: _rfEmisMap } = useBondEmissions();
+  const _rfEmiRaw = (group.instrument_type === "bond_ars" || group.instrument_type === "bond_usd")
+    ? _rfEmisMap?.get(String(group.ticker || "").toUpperCase()) : null;
+  const rfEmi = _rfEmiRaw ? {
+    type: _rfEmiRaw.type,
+    fecha_vencimiento: _rfEmiRaw.maturityDate,
+    tem_capitalizacion: _rfEmiRaw.temCapitalizacion,
+    pago_vencimiento: _rfEmiRaw.pagoVencimiento,
+    fecha_emision: EMISION_EXACTA[String(group.ticker || "").toUpperCase()] || null,
+  } : null;
+  const rfMx = rfEmi ? bondCapMetrics(rfEmi, Number(group.currentPrice)) : null;
+  const rfValorPos = rfMx ? (Number(group.netQty) || 0) * Number(group.currentPrice) / 100 : 0;
+
   // Broker(s) del grupo: "iol"/"cocos"/"manual" si es uno solo, "mixed"
   // si la fila consolida operaciones de distintos brokers.
   const rowBroker = groupBroker(group);
@@ -19000,6 +19069,28 @@ function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPric
                 que la columna OP del sub-table arranque alineada con TICKER
                 del header padre. */}
             <div style={{ padding: "6px 14px 8px 110px" }}>
+              {rfMx && (
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 9, letterSpacing: "0.18em", color: C.dim, textTransform: "uppercase", fontWeight: 600, fontFamily: "'Roboto', sans-serif" }}>Renta fija</span>
+                  <span style={{ fontSize: 11.5, color: C.text, fontFamily: "'JetBrains Mono', monospace" }}>
+                    TIR <b style={{ color: C.green }}>{(rfMx.tea * 100).toFixed(1)}% TEA</b>
+                    {" "}(TEM {(rfMx.temEq * 100).toFixed(2)}%)
+                    {" · "}MD {rfMx.md.toFixed(2)}a
+                    {" · "}±100bps ≈ <span style={{ color: C.green }}>+{"$" + Math.round(rfMx.sube100(rfValorPos)).toLocaleString("es-AR")}</span>
+                    {" / "}<span style={{ color: C.red }}>−{"$" + Math.abs(Math.round(rfMx.baja100(rfValorPos))).toLocaleString("es-AR")}</span>
+                    {rfMx.paridad != null ? ` · paridad ${rfMx.paridad.toFixed(1)}` : ""}
+                    {" · "}paga {rfMx.pago.toFixed(2)} el {rfMx.vto.slice(8, 10)}/{rfMx.vto.slice(5, 7)}/{rfMx.vto.slice(2, 4)} ({rfMx.dias}d)
+                  </span>
+                </div>
+              )}
+              {rfEmi && !rfMx && rfEmi.type === "dual_cer_tamar" && (
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 9, letterSpacing: "0.18em", color: C.dim, textTransform: "uppercase", fontWeight: 600, fontFamily: "'Roboto', sans-serif" }}>Renta fija</span>
+                  <span style={{ fontSize: 11.5, color: C.muted, fontFamily: "'JetBrains Mono', monospace" }}>
+                    Dual CER/TAMAR · paga el máx entre capital ajustado por CER y TAMAR TEM + 3% capitalizable, al {rfEmi.fecha_vencimiento.slice(8, 10)}/{rfEmi.fecha_vencimiento.slice(5, 7)}/{rfEmi.fecha_vencimiento.slice(2, 4)} · la TIR requiere proyectar CER y TAMAR (próximamente)
+                  </span>
+                </div>
+              )}
               {/* Bloque "Histórico del ticker" en línea compacta — sin
                   línea divisoria ni texto explicativo, el label ya describe.
                   En posiciones fully open sin ventas, lifetimePnl === pnl
