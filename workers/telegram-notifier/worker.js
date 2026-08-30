@@ -851,6 +851,7 @@ async function alertLoop() {
     await evalFuturesCloseScheduled(users);
     await evalMorningBrief(users);
     await evalAperturaByma(users);
+    await evalCampanasTarde(users);
   } catch (e) {
     console.error("[alertLoop]", e.message);
   }
@@ -1019,6 +1020,82 @@ async function evalAperturaByma(users) {
       await sendMessage(u.chatId, `<b>10:30 — abrio BYMA</b>\nRueda continua hasta las 17:00.`);
       await logSent(u.userId, "byma_open", p.dateStr, "apertura", "10:30");
     }
+  }
+}
+
+/* ─────────────── Campanas de la tarde (14:50 / 15 / 16 / 17) ───────────────
+ *
+ * El ritmo de la tarde en cuatro toques, un toggle (campanas_tarde, opt-in):
+ *   14:50  faltan 10 min para el cierre de futuros — con el front DLR al
+ *          momento, que es lo que se mira para decidir un ajuste de ultima
+ *   15:00  cerraron los futuros (el settle oficial sale mas tarde; el aviso
+ *          con P&L firme es el de "cierre de futuros" de siempre)
+ *   16:00  recordatorio de caucion, con la tasa a 1 dia si esta en el feed
+ *   17:00  cerro BYMA
+ * Cada uno con su kind de dedup. Ventanas acotadas: el "faltan 10 minutos"
+ * despues de las 15 es mentira, no se manda tarde. */
+async function evalCampanasTarde(users) {
+  const p = artParts();
+  if (!isBizDay(p.dow)) return;
+  const subs = users.filter((u) => prefOn(u.prefs, "campanas_tarde", false));
+  if (!subs.length) return;
+
+  const manda = async (kind, hastaHora, texto) => {
+    for (const u of subs) {
+      if (await recentlySent(u.userId, kind, p.dateStr, 20 * 60 * 60 * 1000)) continue;
+      await sendMessage(u.chatId, texto);
+      await logSent(u.userId, kind, p.dateStr, kind, p.dateStr);
+    }
+  };
+
+  // 14:50-14:59 — la ventana es estricta: pasadas las 15 el mensaje es falso.
+  if (p.hour === 14 && p.minute >= 50) {
+    let extra = "";
+    try {
+      const fut = await loadFutures();
+      const partes = [];
+      // Los TRES DEL FRENTE por vencimiento real. Un sort alfabetico daria
+      // AGO26/DIC26/ENE27 — contratos vencidos o lejanos, no lo que se opera.
+      const MES = { ENE: 1, FEB: 2, MAR: 3, ABR: 4, MAY: 5, JUN: 6, JUL: 7, AGO: 8, SEP: 9, OCT: 10, NOV: 11, DIC: 12 };
+      const venc = (tk) => {
+        const m = tk.match(/^DLR([A-Z]{3})(\d{2})$/);
+        return m && MES[m[1]] ? Number("20" + m[2]) * 100 + MES[m[1]] : 999999;
+      };
+      const hoyYm = (() => { const q = artParts().dateStr; return Number(q.slice(0, 4)) * 100 + Number(q.slice(5, 7)); })();
+      const frente = Object.keys(fut.price || {})
+        .filter((tk) => venc(tk) >= hoyYm)
+        .sort((a, b) => venc(a) - venc(b))
+        .slice(0, 3);
+      for (const tk of frente) {
+        const last = fut.price[tk], ref = fut.reference?.[tk];
+        if (!(last > 0)) continue;
+        const varPct = ref > 0 ? ` (${last >= ref ? "+" : "−"}${Math.abs((last / ref - 1) * 100).toFixed(2)}%)` : "";
+        partes.push(`${tk} ${last.toLocaleString("es-AR")}${varPct}`);
+      }
+      if (partes.length) extra = `\n${partes.join(" · ")}`;
+    } catch { /* sin feed */ }
+    await manda("t1450", 15, `<b>14:50 — faltan 10 min para el cierre de futuros</b>\nUltima ventana para ajustar posiciones DLR. Cierran 15:00.${extra}`);
+  }
+
+  // 15:00-15:59
+  if (p.hour === 15) {
+    await manda("t1500", 16, `<b>15:00 — cerraron los futuros</b>\nEl settle oficial se publica mas tarde; cuando este, llega el aviso de cierre con el P&L firme.`);
+  }
+
+  // 16:00-16:59 — la caucion se toma con la rueda todavia abierta.
+  if (p.hour === 16) {
+    let tasa = "";
+    try {
+      const { data } = await supabase.from("mtr_market_data")
+        .select("reference").eq("symbol", "CAARS/1D").maybeSingle();
+      if (Number(data?.reference) > 0) tasa = ` Tasa a 1 dia ahora: ${Number(data.reference).toFixed(1)}% TNA.`;
+    } catch { /* sin tasa */ }
+    await manda("t1600", 17, `<b>16:00 — ventana de caucion</b>\nSi hay que tomar caucion para cubrir saldos de hoy, este es el momento.${tasa}`);
+  }
+
+  // 17:00-17:59
+  if (p.hour === 17) {
+    await manda("t1700", 18, `<b>17:00 — cerro BYMA</b>\nFin de la rueda continua. Resumen del dia: /pnl cuando quieras; el de las 18 llega solo si lo tenes activado.`);
   }
 }
 

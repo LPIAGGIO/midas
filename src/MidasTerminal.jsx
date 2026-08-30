@@ -3397,6 +3397,8 @@ const NOTIF_CATALOG = [
     desc: "Antes de que abra BYMA: como viene cada papel de tu cartera (cierre y pre-market del subyacente en USA, proximos balances), el cierre de Asia y los futuros de USA. Solo dias habiles." },
   { key: "byma_open", label: "Apertura BYMA (10:00 y 10:30)", ready: true,
     desc: "Dos avisos: a las 10:00 arranca el pre-market (con futuros de USA y dolar del momento) y a las 10:30 la apertura de la rueda continua. Solo dias habiles." },
+  { key: "campanas_tarde", label: "Campanas de la tarde (14:50 a 17:00)", ready: true,
+    desc: "Cuatro avisos: 14:50 faltan 10 minutos para el cierre de futuros (con el front DLR al momento), 15:00 cerraron los futuros, 16:00 ventana para tomar caucion (con la tasa a 1 dia), 17:00 cierre de mercado. Solo dias habiles." },
   { key: "eod_summary", label: "Resumen de fin de dia", ready: true,
     desc: "Al cierre (18hs por defecto): P&L del dia de futuros (firme) + variacion del dia de tus tenencias. Probalo cuando quieras con /pnl en el bot." },
   { key: "futures_adjustments", label: "Ajustes de futuros", ready: true,
