@@ -55,6 +55,29 @@ const DESARB_SPREAD_PCT = 1.5;  // umbral spread del canje (alto: el cross-bond 
 const VENC_DAYS = 7;            // avisar si vence en <= N dias
 const EOD_DEFAULT_HOUR = 18;    // hora ART del resumen de cierre
 const EOD_WAIT_HOURS = 3;       // horas que el resumen espera el settle oficial de A3
+const EOD_WAIT_IMPORT_H = 1;    // horas que espera el import del dia del usuario
+
+// Ultimo import del usuario: el mas nuevo entre el libro y el ReporteOperaciones
+// (csv_matriz). Devuelve { ts, esDeHoy } o null si nunca importo — a quien no
+// usa importacion no se lo hace esperar.
+async function lastImportInfo(userId, dateStr) {
+  const [a, b] = await Promise.all([
+    supabase.from("libro_movimientos").select("created_at").eq("user_id", userId)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("positions").select("created_at").eq("user_id", userId)
+      .filter("extra->>source", "eq", "csv_matriz")
+      .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const ts = [a.data?.created_at, b.data?.created_at].filter(Boolean).sort().pop();
+  if (!ts) return null;
+  const art = new Date(new Date(ts).toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const y = art.getFullYear(), m = String(art.getMonth() + 1).padStart(2, "0"), d = String(art.getDate()).padStart(2, "0");
+  return {
+    esDeHoy: `${y}-${m}-${d}` === dateStr,
+    hhmm: `${String(art.getHours()).padStart(2, "0")}:${String(art.getMinutes()).padStart(2, "0")}`,
+    ddmm: `${d}/${m}`,
+  };
+}
 
 // Cooldowns (ms) para no repetir la misma senal.
 const CD = {
@@ -748,8 +771,23 @@ async function evalEodScheduled(users) {
         provisorio = true;
       }
     }
+    // Espera del IMPORT del dia: el resumen tiene que salir sobre lo que el
+    // usuario cargo, no sobre la foto de ayer. LP sube el CSV "tipo 17 y pico";
+    // si el resumen salia 18:00 clavadas y el import llegaba 18:20, iba viejo.
+    // Se espera hasta una hora; despues sale igual, diciendo de cuando son los
+    // datos. Quien nunca importo no espera nada.
+    const imp = await lastImportInfo(u.userId, p.dateStr);
+    if (imp && !imp.esDeHoy && p.hour < hour + EOD_WAIT_IMPORT_H) {
+      console.log(`[eod] ${u.userId} espera import del dia (ultimo: ${imp.ddmm} ${imp.hhmm})`);
+      continue;
+    }
     let txt = await buildEodSummary(u.userId, positionsBy, fut);
     if (provisorio) txt += "\n\n<i>A3 todavia no publico el ajuste del dia: el P&L de futuros es provisorio.</i>";
+    if (imp) {
+      txt += imp.esDeHoy
+        ? `\n<i>Datos: tu import de hoy ${imp.hhmm}.</i>`
+        : `\n<i>Ojo: sin import de hoy — datos hasta el del ${imp.ddmm} ${imp.hhmm}.</i>`;
+    }
     await sendMessage(u.chatId, txt);
     await logSent(u.userId, "eod", p.dateStr, "cierre", "resumen diario");
     console.log(`[eod] ${u.userId} ${p.dateStr}`);
