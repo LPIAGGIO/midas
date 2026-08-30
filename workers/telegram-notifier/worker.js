@@ -850,6 +850,7 @@ async function alertLoop() {
     await evalEodScheduled(users);
     await evalFuturesCloseScheduled(users);
     await evalMorningBrief(users);
+    await evalAperturaByma(users);
   } catch (e) {
     console.error("[alertLoop]", e.message);
   }
@@ -955,6 +956,69 @@ async function evalMorningBrief(users) {
       await logSent(u.userId, "morning", p.dateStr, "brief 9am", "panorama pre-apertura");
       console.log(`[morning] ${u.userId} ${p.dateStr}`);
     } catch (e) { console.error("[morning]", e.message); }
+  }
+}
+
+/* ─────────────── Avisos de apertura BYMA (10:00 y 10:30) ───────────────
+ *
+ * Dos toques del mismo ritual, un solo toggle (byma_open, opt-in):
+ *   10:00 — arranca el pre-market/subasta. Va con los futuros de USA del
+ *           momento y el dolar, que es lo que se mira antes de operar.
+ *   10:30 — abrio la rueda continua.
+ * Dedup por kind distinto (byma_pre / byma_open) para que cada uno salga una
+ * sola vez por dia. */
+async function snapshotAperturaExtra() {
+  const partes = [];
+  try {
+    const fut = [];
+    for (const [sym, nom] of [["ES=F", "S&P"], ["NQ=F", "Nasdaq"]]) {
+      const q = await yahooBrief(sym);
+      if (q) fut.push(`${nom} ${briefPct(q.pct)}`);
+    }
+    if (fut.length) partes.push(`Futuros USA: ${fut.join(" · ")}`);
+  } catch { /* sin futuros */ }
+  try {
+    const r = await fetch("https://dolarapi.com/v1/dolares");
+    if (r.ok) {
+      const data = await r.json();
+      const by = {}; for (const d of data) by[d.casa] = d;
+      const fInt = (x) => (x == null ? "—" : Math.round(Number(x)).toLocaleString("es-AR"));
+      const linea = ["oficial", "bolsa", "contadoconliqui"].map((k) => {
+        const d = by[k]; if (!d) return null;
+        const nom = k === "oficial" ? "Oficial" : k === "bolsa" ? "MEP" : "CCL";
+        return `${nom} ${fInt(d.venta)}`;
+      }).filter(Boolean).join(" · ");
+      if (linea) partes.push(`Dolar: ${linea}`);
+    }
+  } catch { /* sin dolar */ }
+  return partes.length ? "\n" + partes.join("\n") : "";
+}
+
+async function evalAperturaByma(users) {
+  const p = artParts();
+  if (!isBizDay(p.dow)) return;
+  const subs = users.filter((u) => prefOn(u.prefs, "byma_open", false));
+  if (!subs.length) return;
+
+  // 10:00 — pre-market. Ventana de una hora entera (hour==10) con dedup, pero
+  // el texto solo corresponde ANTES de las 10:30; despues de la apertura ya no
+  // tiene sentido mandar "arranca la subasta".
+  if (p.hour === 10 && p.minute < 30) {
+    const extra = await snapshotAperturaExtra();
+    for (const u of subs) {
+      if (await recentlySent(u.userId, "byma_pre", p.dateStr, 20 * 60 * 60 * 1000)) continue;
+      await sendMessage(u.chatId, `<b>10:00 — pre-market BYMA</b>\nArranca la subasta de apertura. La rueda continua abre 10:30.${extra}`);
+      await logSent(u.userId, "byma_pre", p.dateStr, "pre-market", "10:00");
+    }
+  }
+
+  // 10:30 — apertura de la rueda continua.
+  if ((p.hour === 10 && p.minute >= 30) || p.hour === 11) {
+    for (const u of subs) {
+      if (await recentlySent(u.userId, "byma_open", p.dateStr, 20 * 60 * 60 * 1000)) continue;
+      await sendMessage(u.chatId, `<b>10:30 — abrio BYMA</b>\nRueda continua hasta las 17:00.`);
+      await logSent(u.userId, "byma_open", p.dateStr, "apertura", "10:30");
+    }
   }
 }
 
