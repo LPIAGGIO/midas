@@ -39351,10 +39351,16 @@ function BonosModule() {
       const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
       net.set(p.ticker, (net.get(p.ticker) || 0) + q);
     }
+    const hoyISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
     const out = [];
     for (const [tk, q] of net.entries()) {
       if (q <= 1e-9) continue;
       const emiRaw = emisMap?.get(String(tk).toUpperCase());
+      // Letras ya vencidas: tenencia FANTASMA — el cobro entro a la caja como
+      // renta/amortizacion y el papel no existe mas. Misma regla que Caja en
+      // el tiempo (parseLetraMaturity): aca no hay nada que analizar.
+      if (emiRaw?.maturityDate && emiRaw.maturityDate < hoyISO) continue;
+      { const mat = parseLetraMaturity(tk); if (mat && mat < hoyISO) continue; }
       const px = Number(bondPrices?.[tk]?.price) || null;
       const emi = emiRaw ? {
         type: emiRaw.type, fecha_vencimiento: emiRaw.maturityDate,
