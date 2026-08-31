@@ -210,6 +210,7 @@ const NAV = [
       { id: "sintetico-dlr", label: "Sintético DLR", icon: Layers },
       { id: "mapa-posiciones", label: "Mapa de Posiciones", icon: Layers, type: "single", requiresAuth: true },
       { id: "opciones", label: "Opciones", icon: Sigma },
+      { id: "bonos-riesgo", label: "Bonos", icon: Landmark, requiresAuth: true },
       { id: "curva-tasas", label: "Curva de Tasas", icon: Spline },
       { id: "spread-cer-fija", label: "Spread CER / Fija", icon: Diff },
       { id: "desarbitrajes", label: "Desarbitrajes MEP", icon: Repeat },
@@ -1711,6 +1712,8 @@ function MidasApp({ allowedModules = null }) {
               <MapaPosicionesModule />
             ) : active === "opciones" ? (
               <OpcionesModule key={active} />
+            ) : active === "bonos-riesgo" ? (
+              <BonosModule key={active} />
             ) : active === "portfolio-ia" ? (
               <PortfolioIAModule onNavigate={setActive} />
             ) : active === "importaciones" ? (
@@ -39271,6 +39274,270 @@ TIR_USD    = USD_factor^(365/T) − 1`}
           />
         );
       })()}
+    </div>
+  );
+}
+
+
+/* ───────────────────── BonosModule (Fase B del simulador) ─────────────────────
+ *
+ * Los numeros de renta fija de la cartera en una pantalla:
+ *  1. Mis bonos: metricas de Fase A (bondCapMetrics) por posicion.
+ *  2. Sensibilidad: ΔV de la cartera de capitalizables ante -300..+300 bps,
+ *     con la formula de 2do orden del glosario BYMA. El dual queda AFUERA de
+ *     esta tabla a proposito: su sensibilidad a tasa depende de que pata gane.
+ *  3. Proyeccion del dual TXMJ9: pata CER = factor observado (BCRA var 30,
+ *     CER base 10 dias habiles antes de la emision 30/04/2026) por inflacion
+ *     proyectada (REM hasta donde llega, despues un supuesto editable); pata
+ *     TAMAR = factor devengado (BCRA var 44, promedios mensuales, TEM =
+ *     (TNA+3)·30/365 como margen nominal) por TAMAR futura editable. El bono
+ *     paga el MAXIMO al 29/06/2029; TIR contra el precio actual.
+ *
+ * HONESTIDAD DEL MODELO, dicho en pantalla: la pata TAMAR usa margen NOMINAL
+ * (+3 TNA antes de mensualizar) y promedios mensuales — es aproximacion, no
+ * el prospecto exacto. Los supuestos editables estan a la vista siempre. */
+const TXMJ9_CER_BASE = 746.38092265237;   // BCRA var 30 al 16/04/2026 (10 hd antes de la emision)
+const TXMJ9_VTO_PAGO = "2029-06-15";      // ~10 hd antes del 29/06/2029 (fecha del CER que paga)
+
+function BonosModule() {
+  const { positions } = useUserPositions();
+  const { emissions: emisMap } = useBondEmissions();
+  const bondPrices = useBondPrices()?.prices || {};
+
+  // BCRA: CER (var 30) mas nuevo publicado + TAMAR (var 44) desde la emision.
+  const [bcra, setBcra] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const [rc, rt] = await Promise.all([
+          fetch("/api/bcra?var=30&desde=2026-08-01&hasta=2030-01-01").then((r) => r.json()),
+          fetch("/api/bcra?var=44&desde=2026-04-30&hasta=2030-01-01").then((r) => r.json()),
+        ]);
+        const cerDet = (rc?.results?.[0]?.detalle || []).sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+        const tamDet = rt?.results?.[0]?.detalle || [];
+        const porMes = {};
+        for (const x of tamDet) { const m = x.fecha.slice(0, 7); (porMes[m] = porMes[m] || []).push(Number(x.valor)); }
+        const tamarMeses = Object.entries(porMes).sort()
+          .map(([m, vs]) => ({ mes: m, tna: vs.reduce((s2, v) => s2 + v, 0) / vs.length, dias: vs.length }));
+        if (vivo) setBcra({
+          cerUlt: cerDet[0] ? { fecha: cerDet[0].fecha, valor: Number(cerDet[0].valor) } : null,
+          tamarMeses,
+          tamarHoy: tamDet.length ? Number(tamDet[tamDet.length - 1].valor) : null,
+        });
+      } catch { if (vivo) setBcra({ cerUlt: null, tamarMeses: [], tamarHoy: null }); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+
+  // REM: mediana de IPC mensual, para sembrar la inflacion proyectada.
+  const [rem, setRem] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    supabase.from("rem_forecasts").select("period_date,mediana").eq("variable", "ipc").order("period_date")
+      .then(({ data }) => { if (vivo) setRem(data || []); });
+    return () => { vivo = false; };
+  }, []);
+
+  // Supuestos editables de la proyeccion del dual.
+  const [inflLp, setInflLp] = useState(1.6);    // % mensual despues de que se acaba el REM
+  const [tamarFut, setTamarFut] = useState(22); // TNA % promedio de aca al vencimiento
+
+  // Bonos en cartera (neto > 0) con emision catalogada.
+  const misBonos = useMemo(() => {
+    const net = new Map();
+    for (const p of positions || []) {
+      if (p.instrument_type !== "bond_ars" && p.instrument_type !== "bond_usd") continue;
+      const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+      net.set(p.ticker, (net.get(p.ticker) || 0) + q);
+    }
+    const out = [];
+    for (const [tk, q] of net.entries()) {
+      if (q <= 1e-9) continue;
+      const emiRaw = emisMap?.get(String(tk).toUpperCase());
+      const px = Number(bondPrices?.[tk]?.price) || null;
+      const emi = emiRaw ? {
+        type: emiRaw.type, fecha_vencimiento: emiRaw.maturityDate,
+        tem_capitalizacion: emiRaw.temCapitalizacion, pago_vencimiento: emiRaw.pagoVencimiento,
+        fecha_emision: EMISION_EXACTA[String(tk).toUpperCase()] || null,
+      } : null;
+      out.push({ ticker: tk, qty: q, px, emi, mx: emi && px ? bondCapMetrics(emi, px) : null, valor: px ? q * px / 100 : null });
+    }
+    return out.sort((a, b) => (b.valor || 0) - (a.valor || 0));
+  }, [positions, emisMap, bondPrices]);
+
+  // Proyeccion del dual (si esta en cartera).
+  const dual = useMemo(() => {
+    const pos = misBonos.find((b) => b.emi?.type === "dual_cer_tamar");
+    if (!pos || !pos.px || !bcra?.cerUlt) return null;
+    const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const dias = Math.round((new Date("2029-06-29T12:00:00") - new Date(hoy + "T12:00:00")) / 86400000);
+    // PATA CER: factor observado hasta el ultimo CER publicado, inflacion
+    // proyectada de ahi al CER que paga (10 hd antes del vencimiento).
+    const factorObs = bcra.cerUlt.valor / TXMJ9_CER_BASE;
+    const mesesRestantes = Math.max(0, _mesesTranscurridos30360(bcra.cerUlt.fecha, TXMJ9_VTO_PAGO));
+    const remBy = {}; for (const r of rem || []) remBy[r.period_date.slice(0, 7)] = Number(r.mediana);
+    let fCer = factorObs;
+    const d0 = new Date(bcra.cerUlt.fecha + "T12:00:00");
+    for (let i = 0; i < Math.floor(mesesRestantes); i++) {
+      const d = new Date(d0); d.setMonth(d.getMonth() + i + 1);
+      const clave = d.toISOString().slice(0, 7);
+      const pi = remBy[clave] != null ? remBy[clave] : inflLp;
+      fCer *= 1 + pi / 100;
+    }
+    fCer *= 1 + (inflLp / 100) * (mesesRestantes - Math.floor(mesesRestantes));
+    // PATA TAMAR: devengado con promedios mensuales observados + futura editable.
+    let fTam = 1;
+    for (const m of bcra.tamarMeses) {
+      const tem = ((m.tna + 3) * 30 / 365) / 100;
+      fTam *= 1 + tem * Math.min(1, m.dias / 20); // prorratea meses parciales (dias habiles ~20)
+    }
+    const mesesTamRest = dias / 30.44;
+    const temFut = ((Number(tamarFut) + 3) * 30 / 365) / 100;
+    fTam *= Math.pow(1 + temFut, mesesTamRest);
+    const pagoCer = 100 * fCer, pagoTam = 100 * fTam;
+    const pago = Math.max(pagoCer, pagoTam);
+    const tea = Math.pow(pago / pos.px, 365 / dias) - 1;
+    // TAMAR de breakeven: la TNA futura constante que iguala las dos patas.
+    let beTna = null;
+    if (mesesTamRest > 0 && fTam > 0) {
+      const fTamObs = fTam / Math.pow(1 + temFut, mesesTamRest);
+      const temBe = Math.pow(pagoCer / (100 * fTamObs), 1 / mesesTamRest) - 1;
+      beTna = (temBe * 100) * 365 / 30 - 3;
+    }
+    return { pos, dias, pagoCer, pagoTam, pago, tea, gana: pagoCer >= pagoTam ? "CER" : "TAMAR", beTna, factorObs, cerFecha: bcra.cerUlt.fecha };
+  }, [misBonos, bcra, rem, inflLp, tamarFut]);
+
+  const f$ = (x) => (x < 0 ? "−$" : "$") + Math.abs(Math.round(x)).toLocaleString("es-AR");
+  const SHOCKS = [-300, -200, -100, 100, 200, 300];
+  const capitalizables = misBonos.filter((b) => b.mx);
+  const th = { textAlign: "right", padding: "7px 10px", fontSize: 9.5, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em" };
+  const td = { textAlign: "right", padding: "7px 10px", fontVariantNumeric: "tabular-nums", fontFamily: "'JetBrains Mono', monospace", fontSize: 12 };
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1050, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, margin: 0 }}>Bonos</h1>
+      <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 18px 0", maxWidth: 840 }}>
+        Riesgo de tasa de tu renta fija con las convenciones del glosario BYMA. La sensibilidad usa la
+        aproximación de segundo orden (duration + convexity); el dual se proyecta con el CER y la TAMAR
+        del BCRA más los supuestos editables de abajo.
+      </p>
+
+      <div style={{ fontSize: 10, letterSpacing: "0.14em", color: C.dim, textTransform: "uppercase", fontWeight: 600, marginBottom: 8 }}>Mis bonos</div>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden", marginBottom: 22 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr style={{ background: "rgba(255,255,255,0.02)" }}>
+            <th style={{ ...th, textAlign: "left" }}>Bono</th><th style={th}>Nominales</th><th style={th}>Precio</th>
+            <th style={th}>Valor</th><th style={th}>TIR TEA</th><th style={th}>TEM eq</th><th style={th}>MD</th><th style={th}>Paga</th>
+          </tr></thead>
+          <tbody>
+            {misBonos.map((b) => (
+              <tr key={b.ticker} style={{ borderTop: `1px solid ${C.border}` }}>
+                <td style={{ ...td, textAlign: "left" }}>
+                  <b style={{ color: C.text }}>{b.ticker}</b>
+                  <span style={{ fontSize: 9.5, color: C.dim }}> {b.emi?.type === "dual_cer_tamar" ? "dual CER/TAMAR" : b.emi?.type || "sin emisión catalogada"}</span>
+                </td>
+                <td style={{ ...td, color: C.muted }}>{b.qty.toLocaleString("es-AR")}</td>
+                <td style={{ ...td, color: C.muted }}>{b.px != null ? b.px.toFixed(2) : "—"}</td>
+                <td style={{ ...td, color: C.text }}>{b.valor != null ? f$(b.valor) : "—"}</td>
+                <td style={{ ...td, color: b.mx ? C.green : C.dim }}>{b.mx ? (b.mx.tea * 100).toFixed(1) + "%" : (b.emi?.type === "dual_cer_tamar" ? "↓ proy." : "—")}</td>
+                <td style={{ ...td, color: C.muted }}>{b.mx ? (b.mx.temEq * 100).toFixed(2) + "%" : "—"}</td>
+                <td style={{ ...td, color: C.muted }}>{b.mx ? b.mx.md.toFixed(2) + "a" : "—"}</td>
+                <td style={{ ...td, color: C.muted }}>{b.mx ? `${b.mx.pago.toFixed(2)} (${b.mx.dias}d)` : b.emi ? b.emi.fecha_vencimiento : "—"}</td>
+              </tr>
+            ))}
+            {!misBonos.length && <tr><td colSpan={8} style={{ padding: 22, textAlign: "center", color: C.muted, fontSize: 12 }}>Sin bonos en cartera.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ fontSize: 10, letterSpacing: "0.14em", color: C.dim, textTransform: "uppercase", fontWeight: 600, marginBottom: 8 }}>
+        Sensibilidad a la tasa (capitalizables)
+      </div>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden", marginBottom: 6 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr style={{ background: "rgba(255,255,255,0.02)" }}>
+            <th style={{ ...th, textAlign: "left" }}>Δ tasa</th>
+            {capitalizables.map((b) => <th key={b.ticker} style={th}>{b.ticker}</th>)}
+            <th style={th}>Total</th>
+          </tr></thead>
+          <tbody>
+            {SHOCKS.map((bps) => {
+              const dy = bps / 10000;
+              let tot = 0;
+              const celdas = capitalizables.map((b) => {
+                const V = b.valor || 0;
+                const dV = -V * b.mx.md * dy + 0.5 * V * b.mx.cx * dy * dy;
+                tot += dV;
+                return <td key={b.ticker} style={{ ...td, color: dV >= 0 ? C.green : C.red }}>{f$(dV)}</td>;
+              });
+              return (
+                <tr key={bps} style={{ borderTop: `1px solid ${C.border}` }}>
+                  <td style={{ ...td, textAlign: "left", color: C.text }}>{bps > 0 ? "+" : ""}{bps} bps</td>
+                  {celdas}
+                  <td style={{ ...td, fontWeight: 700, color: tot >= 0 ? C.green : C.red }}>{f$(tot)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ fontSize: 10.5, color: C.dim, margin: "0 0 22px 0", lineHeight: 1.5 }}>
+        ΔV ≈ −V·MD·Δy + ½·V·CX·Δy². El dual queda afuera de esta tabla a propósito: su sensibilidad
+        a la tasa depende de qué pata termine ganando, y meterlo con la duration de una pata sería inventar.
+      </p>
+
+      {dual && (
+        <>
+          <div style={{ fontSize: 10, letterSpacing: "0.14em", color: C.dim, textTransform: "uppercase", fontWeight: 600, marginBottom: 8 }}>
+            Proyección del dual · {dual.pos.ticker}
+          </div>
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "14px 16px", marginBottom: 6 }}>
+            <div style={{ display: "flex", gap: 26, flexWrap: "wrap", marginBottom: 12 }}>
+              <label style={{ fontSize: 11, color: C.muted }}>
+                Inflación mensual después del REM{" "}
+                <input type="number" step="0.1" value={inflLp} onChange={(e) => setInflLp(Number(e.target.value))}
+                  style={{ width: 62, background: C.deep, border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: "3px 6px", fontFamily: "'JetBrains Mono', monospace" }} />%
+              </label>
+              <label style={{ fontSize: 11, color: C.muted }}>
+                TAMAR TNA promedio hasta el vencimiento{" "}
+                <input type="number" step="0.5" value={tamarFut} onChange={(e) => setTamarFut(Number(e.target.value))}
+                  style={{ width: 62, background: C.deep, border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: "3px 6px", fontFamily: "'JetBrains Mono', monospace" }} />%
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 30, flexWrap: "wrap", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5 }}>
+              <div>
+                <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase" }}>Pata CER</div>
+                <div style={{ color: dual.gana === "CER" ? C.green : C.muted, fontWeight: dual.gana === "CER" ? 700 : 400 }}>{dual.pagoCer.toFixed(1)} por 100 VN</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase" }}>Pata TAMAR +3%</div>
+                <div style={{ color: dual.gana === "TAMAR" ? C.green : C.muted, fontWeight: dual.gana === "TAMAR" ? 700 : 400 }}>{dual.pagoTam.toFixed(1)} por 100 VN</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase" }}>TIR proyectada</div>
+                <div style={{ color: C.green, fontWeight: 700 }}>{(dual.tea * 100).toFixed(1)}% TEA</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase" }}>Gana</div>
+                <div style={{ color: C.text }}>{dual.gana}</div>
+              </div>
+              {dual.beTna != null && (
+                <div>
+                  <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase" }}>Breakeven TAMAR</div>
+                  <div style={{ color: C.text }}>{dual.beTna.toFixed(1)}% TNA</div>
+                </div>
+              )}
+            </div>
+          </div>
+          <p style={{ fontSize: 10.5, color: C.dim, margin: 0, lineHeight: 1.5 }}>
+            CER observado {dual.factorObs >= 1 ? "+" : ""}{((dual.factorObs - 1) * 100).toFixed(1)}% desde la base (BCRA al {dual.cerFecha});
+            de ahí en adelante REM hasta donde llega y el supuesto editable. La pata TAMAR usa promedios mensuales del BCRA
+            con margen +3 TNA mensualizado 30/365 — aproximación del prospecto, no cálculo exacto. Con TAMAR futura debajo del
+            breakeven gana la pata CER.
+          </p>
+        </>
+      )}
     </div>
   );
 }
