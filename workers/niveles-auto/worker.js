@@ -310,11 +310,6 @@ async function main() {
   const usdPx = {}, arsPx = {};
   for (const it of usaRes || []) if (it?.symbol && Number(it.c) > 0) usdPx[it.symbol.toUpperCase()] = Number(it.c);
   for (const it of cedRes || []) if (it?.symbol && Number(it.c) > 0) arsPx[it.symbol.toUpperCase()] = Number(it.c);
-  const iolArs2 = {};
-  try {
-    const { data: iq2 } = await supabase.from("iol_quotes").select("ticker,last");
-    for (const r of iq2 || []) if (Number(r.last) > 0) iolArs2[String(r.ticker).toUpperCase()] = Number(r.last);
-  } catch { /* sin respaldo */ }
   // Respaldo del feed de CEDEARs: arg_cedears responde VACIO a ratos (el 28/08
   // a las 11:09 fallaron MU, SNDK y UBER con "sin ratio" y a las 11:24 andaban).
   // iol_quotes tiene el ultimo cierre y no se cae.
@@ -761,6 +756,15 @@ async function ratchetPass() {
   const usdPx = {}, arsPx = {};
   for (const it of usaRes || []) if (it?.symbol && Number(it.c) > 0) usdPx[it.symbol.toUpperCase()] = Number(it.c);
   for (const it of cedRes || []) if (it?.symbol && Number(it.c) > 0) arsPx[it.symbol.toUpperCase()] = Number(it.c);
+  // Respaldo ARS cuando arg_cedears no trae el papel (mismo criterio que el
+  // kit): iol_quotes tiene el ultimo cierre y no se cae. Definido ACA porque
+  // ratchetPass es otro scope que main() — el 01/09 un sync local→VPS perdio
+  // esta definicion y todos los ratchets murieron con "iolArs2 is not defined".
+  const iolArs2 = {};
+  try {
+    const { data: iq2 } = await supabase.from("iol_quotes").select("ticker,last");
+    for (const r of iq2 || []) if (Number(r.last) > 0) iolArs2[String(r.ticker).toUpperCase()] = Number(r.last);
+  } catch { /* sin respaldo */ }
 
   const liveKeys = new Set();
   for (const [key, ops] of groups) {
