@@ -1470,6 +1470,8 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
     `Para espejar en Cocos: limite ${pesos(tickPiso(precioUnidad))} (redondeado al tick, para ABAJO: quedarse afuera es mejor que pagar de mas), misma cantidad o proporcional. Te aviso si entra, si cierra o si se cancela.`);
 }
 
+// Candidatos a fill/salida esperando su segunda lectura (anti-fantasma).
+const fillCand = new Map();
 async function paperPass() {
   await resolverModo();
   const { data: trades } = await supabase.from("paper_iol_trades").select("*").in("status", ["pending", "open"]);
@@ -1530,7 +1532,21 @@ async function paperPass() {
       // TOCADO el nivel en algún momento de la rueda, no que esté ahí ahora.
       const lim = Number(t.entry_limit);
       const bajo = p <= lim ? p : await minRueda(symU);
-      if (!(bajo <= lim)) continue;
+      if (!(bajo <= lim)) { fillCand.delete(t.id); continue; }
+      /* CONFIRMACIÓN ANTI-FANTASMA (01/09/2026): un tick basura del feed llenó
+       * AMZN a US$226,88 cuando el mínimo real del día fue 251,93 — posición
+       * fantasma, aviso de espejo incluido. Un glitch no sobrevive dos lecturas
+       * separadas ≥150s (el cache de minRueda dura 120s, así que la segunda
+       * lectura es fresca); un flush real sí, porque queda en el low del día.
+       * Costo: el fill simulado se confirma ~2,5 min tarde. Aceptable. */
+      const cand = fillCand.get(t.id);
+      if (!cand) {
+        fillCand.set(t.id, Date.now());
+        log(`[bot ${t.ticker}] nivel tocado (US$${Number(bajo).toFixed(2)} <= ${lim}) — espero confirmación antes de dar el fill`);
+        continue;
+      }
+      if (Date.now() - cand < 150000) continue;
+      fillCand.delete(t.id);
       // Fill: la CONDICIÓN se evalúa en dólares (la tesis es sobre el papel),
       // el PRECIO se toma en pesos del papel local pagando la punta vendedora,
       // que es lo que cuesta de verdad cruzarse contra el book.
@@ -1634,7 +1650,18 @@ async function paperPass() {
     let exitUsd = null, reason = null;
     if (p <= stop) { exitUsd = Math.min(stop, p); reason = stop > Number(t.stop_inicial) ? "trailing" : "stop"; }
     else if (p >= Number(t.target)) { exitUsd = Math.max(Number(t.target), p); reason = "target"; }
-    if (exitUsd == null) continue;
+    if (exitUsd == null) { fillCand.delete("exit_" + t.id); continue; }
+    // Misma confirmación anti-fantasma que el fill: un tick basura acá manda
+    // un aviso de SALIDA que LP ejecuta con plata real en Cocos — peor que la
+    // posición fantasma. Dos lecturas separadas >=150s antes de cerrar.
+    const candSal = fillCand.get("exit_" + t.id);
+    if (!candSal) {
+      fillCand.set("exit_" + t.id, Date.now());
+      log(`[bot ${t.ticker}] ${reason} tocado (US$${Number(p).toFixed(2)}) — espero confirmación antes de cerrar`);
+      continue;
+    }
+    if (Date.now() - candSal < 150000) continue;
+    fillCand.delete("exit_" + t.id);
 
     // Salida en pesos contra la punta compradora (se vende al bid).
     // La salida por target es una orden límite descansando arriba: se ejecuta
