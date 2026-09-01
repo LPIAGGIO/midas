@@ -1104,12 +1104,27 @@ async function tgEspejo(texto) {
         .select("chat_id").eq("user_id", BOT_USER).eq("enabled", true).maybeSingle();
       _tgChatCache = data?.chat_id || null;
     }
-    if (!_tgChatCache) return;
-    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+    if (!_tgChatCache) { log("[tgEspejo] sin chat_id vinculado, no se envia"); return; }
+    const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: _tgChatCache, text: texto, parse_mode: "HTML" }),
     });
+    const j = await r.json().catch(() => null);
+    if (!j?.ok) log("[tgEspejo] Telegram rechazo el mensaje:", JSON.stringify(j || r.status));
+    else log("[tgEspejo] enviado ok, msg", j.result?.message_id);
   } catch (e) { log("[tgEspejo]", e.message); }
+}
+/* Cocos no acepta cualquier precio: la pantalla exige multiplos "redondos"
+ * (SNDK a ~$13.712 rechazo el limite exacto, acepto 13.720). Para una COMPRA
+ * el redondeo va siempre para ABAJO: una orden espejo que queda por encima
+ * del limite del bot puede llenarse sola en un rebote y dejar una posicion
+ * huerfana sin bot que la maneje (31/08: se llevo el susto pero salio bien).
+ * Escala observada, no documental — si Cocos rechaza un multiplo de estos,
+ * el que corrige es este piso. */
+function tickPiso(pxArs) {
+  const px = Number(pxArs) || 0;
+  const tick = px >= 50000 ? 50 : px >= 10000 ? 10 : px >= 1000 ? 5 : 1;
+  return Math.floor(px / tick) * tick;
 }
 const BOT_RISK = 0.015;      // riesgo por trade: 1,5% del capital
 const BOT_VENTANA_H = 48;    // la orden límite vive 48hs y se cae sola
@@ -1448,7 +1463,7 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
     `<b>COMPRA ${qty} × ${tk}</b> limite ${pesos(precioUnidad)} (US${entry.toFixed(2)})\n` +
     `Stop ${pesos(stop * rArs)} · Target ${pesos(target * rArs)}\n` +
     `score ${score}/10 · R:R ${Number(rr).toFixed(1)}\n\n` +
-    `Para espejar en Cocos: limite ${pesos(precioUnidad)}, misma cantidad o proporcional. Te aviso si entra, si cierra o si se cancela.`);
+    `Para espejar en Cocos: limite ${pesos(tickPiso(precioUnidad))} (redondeado al tick, para ABAJO: quedarse afuera es mejor que pagar de mas), misma cantidad o proporcional. Te aviso si entra, si cierra o si se cancela.`);
 }
 
 async function paperPass() {
