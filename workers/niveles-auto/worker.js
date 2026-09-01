@@ -1084,7 +1084,7 @@ async function volumeProfilePass() {
 // Todos verificados con precio en data912 (arg_cedears + usa_stocks), que es lo
 // que el bot necesita para derivar el ratio. El sizing no cambia: sigue siendo
 // 1,5% del capital por trade, y CAP_ARS limita cuantas van simultaneas.
-const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL,NVDA,AMD,AAPL,MSFT,GOOGL,META,AMZN,KO,JNJ,XOM,MELI,NU")
+const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL,NVDA,AMD,AAPL,MSFT,GOOGL,META,AMZN,KO,JNJ,XOM,MELI,NU,INTC,SPCX")
   .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 const BOT_UNIVERSO = new Set(BOT_TICKERS);
 const BOT_USER = process.env.IOL_BOT_USER || "cafc5a8c-1cee-4d57-a765-6aacf1acc661";
@@ -1544,11 +1544,19 @@ async function paperPass() {
         nota_sim: `LLEGÓ al nivel. Entró ${t.qty} × ${pesos(pxArs)} (US$${pxUsd.toFixed(2)}), total ${pesos(pxArs * t.qty)}. Vende en el target US$${Number(t.target).toFixed(2)} ≈ ${pesos(Number(t.target) * rArs)}; corta en el stop US$${Number(t.stop).toFixed(2)} ≈ ${pesos(Number(t.stop) * rArs)}.`,
       }).eq("id", t.id);
       log(`[bot ${t.ticker}] LLEGÓ AL NIVEL → ${MODO_REAL ? "compra ejecutada" : "fill simulado"} ${t.qty} × ${pesos(pxArs)} · vendería en ${pesos(Number(t.target) * rArs)} / corta en ${pesos(Number(t.stop) * rArs)}`);
+      /* La venta del espejo se deja PUESTA junto con la entrada (pedido de LP
+       * 01/09: "asi si entra ya pongo la venta tambien y no tengo que estar
+       * pendiente"). El limite de venta va redondeado al tick para ABAJO por
+       * la misma logica que la compra: si el bot vende en el target y tu
+       * limite quedo un tick arriba, te quedas comprado solo. El stop no se
+       * puede dejar puesto como limite — si toca, llega el aviso de SALIDA:
+       * ahi se cancela la venta y se vende a mercado. */
       await tgEspejo(
         `<b>BOT · ENTRO ${t.ticker}</b>\n` +
         `Fill ${t.qty} × ${pesos(pxArs)} (US${pxUsd.toFixed(2)}) · total ${pesos(pxArs * t.qty)}\n` +
         `Target ${pesos(Number(t.target) * rArs)} · Stop ${pesos(Number(t.stop) * rArs)}\n\n` +
-        `Si espejaste en Cocos, ya deberias estar comprado. Guarda estos niveles.`);
+        `<b>Deja puesta la VENTA limite en ${pesos(tickPiso(Number(t.target) * rArs))}</b> (target al tick, para abajo) por la misma cantidad. Con eso no necesitas mirar la pantalla: si toca el target, salis con el bot.\n` +
+        `Si en cambio llega el aviso de SALIDA (stop o trailing), cancela esa venta y vende a mercado.`);
       continue;
     }
 
