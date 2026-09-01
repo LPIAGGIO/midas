@@ -196,16 +196,21 @@ function futurePrice(row, nowMs) {
 // un día por feed atrasado, como pasó el 14-15/07/2026 → daba ajustes fantasma).
 async function loadFutures() {
   const { data, error } = await supabase.from("mtr_market_data").select("*");
-  if (error) { console.error("[futures]", error.message); return { price: {}, settle: {}, reference: {} }; }
-  const nowMs = Date.now(), price = {}, settle = {}, reference = {};
+  if (error) { console.error("[futures]", error.message); return { price: {}, settle: {}, reference: {}, vivo: {} }; }
+  const nowMs = Date.now(), price = {}, settle = {}, reference = {}, vivo = {};
   for (const row of data || []) {
     const app = symbolToApp(row.symbol);
     const p = futurePrice(row, nowMs);
     if (p != null) price[app] = p;
     if (row.settlement != null) settle[app] = Number(row.settlement);
     if (row.reference != null) reference[app] = Number(row.reference);
+    // "vivo" = hay puntas reales AHORA (bid y ask). A las 10:00 el pre-market
+    // abre sin puntas y los precios son los settles de ayer: cualquier señal
+    // calculada ahí es ruido (queja de LP del 01/09: le llegaban los spreads
+    // todas las mañanas "y no hay ni puntas").
+    vivo[app] = row.bid != null && row.ask != null && Number(row.bid) > 0 && Number(row.ask) > 0;
   }
-  return { price, settle, reference };
+  return { price, settle, reference, vivo };
 }
 
 // { symbol: { c, pct } } desde data912 (bonos/letras/acciones/cedears).
@@ -395,8 +400,14 @@ function frontDlr(fut, n = 3) {
 // Var% diaria (último vs settlement previo, = la Var de Matriz) de cada contrato
 // DLR de la curva + la mediana de la curva. La curva entera da el "consenso" del día;
 // el contrato que más se aparta de esa mediana es el desalineado (caro/barato).
-function curveVar(fut) {
+function curveVar(fut, soloConPuntas = false) {
+  // soloConPuntas (camino de SEÑALES): la Var% de un contrato sin operar es la
+  // de ayer (~0%) y meterla en la mediana la ancla en cero — el "vs 0.00% de
+  // mediana" que le llegaba a LP a las 10:00 era exactamente eso. Los comandos
+  // on-demand (/dlr, /futuros) siguen viendo la curva completa, incluso a
+  // mercado cerrado con valores de settlement.
   const all = Object.keys(fut.price).map(parseDlr).filter(Boolean)
+    .filter((c) => !soloConPuntas || fut.vivo?.[c.ticker])
     .map((c) => { const p = fut.price[c.ticker], s = fut.settle[c.ticker]; return (p != null && s != null && s > 0) ? { ...c, p, s, varPct: ((p - s) / s) * 100 } : null; })
     .filter(Boolean).sort((a, b) => a.ord - b.ord);
   let median = null;
@@ -424,6 +435,7 @@ function buildScalpingSignals(fut) {
     const near = fronts[i], far = fronts[i + 1];
     const pn = fut.price[near.ticker], pf = fut.price[far.ticker];
     if (pn == null || pf == null) continue;
+    if (!fut.vivo?.[near.ticker] || !fut.vivo?.[far.ticker]) continue; // sin puntas en ambos, no hay spread que medir
     const cal = pf - pn;
     const key = far.ticker, prev = calState[key] || "mid";
     let cur = prev;
@@ -446,6 +458,7 @@ function buildScalpingSignals(fut) {
   for (const c of fronts) {
     const px = fut.price[c.ticker];
     if (px == null) continue;
+    if (!fut.vivo?.[c.ticker]) continue; // precio sin puntas = settle viejo, no alimenta el z ni avisa
     const buf = (zbufs[c.ticker] || (zbufs[c.ticker] = []));
     buf.push(px);
     while (buf.length > Z_BUF_MAX) buf.shift();
@@ -463,11 +476,12 @@ function buildScalpingSignals(fut) {
   //     Var% de TODA la curva DLR. El que más se aparta es el caro/barato. PUSH solo
   //     en la transición a desalineado con umbral OUTLIER_PCT (sino el ruido de ~1 peso
   //     —dentro de la punta— spamea); los desvíos chicos se ven on-demand con /dlr.
-  const cv = curveVar(fut);
+  const cv = curveVar(fut, true);
   if (cv.median != null && cv.all.length >= 3) {
     const frontSet = new Set(fronts.map((c) => c.ticker));
     for (const c of cv.all) {
       if (!frontSet.has(c.ticker)) continue;
+      if (!fut.vivo?.[c.ticker]) continue; // sin puntas su Var% es la de ayer: no es un desalineado de hoy
       const dev = c.varPct - cv.median;
       const prev = outlierState[c.ticker] || "align";
       let cur = prev;
