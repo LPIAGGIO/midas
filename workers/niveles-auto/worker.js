@@ -530,11 +530,22 @@ async function main() {
           if (sc.score < 7) faltas.push(`score ${sc.score}/10, hace falta 7`);
           if (rr == null || rr < 2) faltas.push(`R:R ${rr ?? "sin calcular"}, hace falta 2`);
           if (contraTendencia) faltas.push("va contra la tendencia");
+          if (regime !== "risk_on") faltas.push(`regimen ${regime}, hace falta risk_on`);
           if (!(stopLvl > 0 && stopLvl < buyZone.hi)) faltas.push("sin stop válido");
           if (!sellZone) faltas.push("sin zona de salida");
           if (faltas.length) botDescarte(tk, buyZone.hi, faltas);
         }
-        if (BOT_UNIVERSO.has(tk.toUpperCase()) && modo !== "local_ars" && sc.score >= 7 && rr != null && rr >= 2 && !contraTendencia && stopLvl && stopLvl > 0 && stopLvl < buyZone.hi && sellZone) {
+        /* REGIMEN risk_on OBLIGATORIO (01/09/2026, del analisis de nivel_track):
+         * los soportes tocados en risk_on rindieron +235 bps a 5 ruedas (n=163,
+         * t=4,0 — la unica senal del proyecto que sobrevive deflacion); en mixto
+         * dieron -32 (n=58) y en risk_off -41 (n=62). El bot venia aceptando
+         * mixto (AMZN y MU del 01/09 eran mixto) y eso era regalar la ventaja.
+         * EARNINGS: no se abre posicion si el papel reporta en <=3 dias — el
+         * gap de un balance no lo ve ningun score (ticker_context.earnings_date,
+         * refrescado a diario; sin dato = no bloquea). */
+        if (BOT_UNIVERSO.has(tk.toUpperCase()) && modo !== "local_ars" && sc.score >= 7 && rr != null && rr >= 2 && !contraTendencia && regime === "risk_on" && stopLvl && stopLvl > 0 && stopLvl < buyZone.hi && sellZone) {
+          if (await earningsCerca(tk)) { botDescarte(tk, buyZone.hi, ["earnings en 3 dias o menos"]); }
+          else
           await paperSignal(symUsa, tk, buyZone.hi, stopLvl, sellZone.lo, sc.score, rr, `score ${sc.score}/10 · R:R ${fmt1(rr)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}`).catch((e) => log(`[paper ${tk}] ${e.message}`));
         }
         // 2b. Entrada swing (zona diaria más abajo) — para trade, no scalp.
@@ -1091,6 +1102,24 @@ async function volumeProfilePass() {
 const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL,NVDA,AMD,AAPL,MSFT,GOOGL,META,AMZN,KO,JNJ,XOM,MELI,NU,INTC,SPCX")
   .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 const BOT_UNIVERSO = new Set(BOT_TICKERS);
+
+// Reporta en <=3 dias? (cache 6h; sin dato o error = false: no bloquea)
+const _earnCache = new Map();
+async function earningsCerca(tk) {
+  const key = tk.toUpperCase();
+  const hit = _earnCache.get(key);
+  if (hit && Date.now() - hit.t < 6 * 3600 * 1000) return hit.v;
+  let v = false;
+  try {
+    const { data } = await supabase.from("ticker_context").select("earnings_date").eq("ticker", key).maybeSingle();
+    if (data?.earnings_date) {
+      const dias = (new Date(data.earnings_date + "T12:00:00") - Date.now()) / 86400000;
+      v = dias >= -0.5 && dias <= 3;
+    }
+  } catch { /* sin dato no bloquea */ }
+  _earnCache.set(key, { v, t: Date.now() });
+  return v;
+}
 const BOT_USER = process.env.IOL_BOT_USER || "cafc5a8c-1cee-4d57-a765-6aacf1acc661";
 const CAP_ARS = Number(process.env.IOL_BOT_CAP_ARS || 3000000);
 
