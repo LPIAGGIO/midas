@@ -62,7 +62,16 @@ function caucionMontoAlVencer(p) {
   if (!Number.isFinite(capital) || capital === 0 || !Number.isFinite(tna) || !Number.isFinite(termDays)) {
     return null;
   }
-  return capital * (1 + (tna / 100) * (termDays / 365));
+  // TOMADORA: el debito real de Cocos no es la tasa pura — lleva 3% TNA de
+  // comision + 0,365% TNA de derechos BYMA, todo +21% IVA = +4,0717 puntos
+  // sobre la tasa (validado contra boleto real, ver memoria midas-cocos-costos;
+  // en una caucion de 62,7M a 1 dia son ~$7.000 de gastos sobre ~$29.200 de
+  // interes: no es despreciable y LP lo pidio explicito el 02/09/2026).
+  // COLOCADORA: se mantiene tasa pura (los gastos del colocador son otros y
+  // no estan medidos; el libro los trae exactos al dia siguiente).
+  const side = caucionSide(p);
+  const tnaEfectiva = side === 'tomadora' ? tna + (3 + 0.365) * 1.21 : tna;
+  return capital * (1 + (tnaEfectiva / 100) * (termDays / 365));
 }
 
 /**

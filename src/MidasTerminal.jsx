@@ -16120,25 +16120,52 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
     }
 
     // Cauciones: el símbolo BYMA es "MERV - XMEV - PESOS - 1D" (o DOLARES) →
-    // matchea el patrón de bono y parsea ticker "PESOS"/"DOLARES". NO es un
-    // bono. El CSV de operaciones no trae el lado (tomadora/colocadora) ni
-    // distingue tasa de precio de forma confiable, así que se IGNORAN y se
-    // cargan a mano (instrument_type 'caucion', capital NEGATIVO si es
-    // tomadora = pasivo). Evita que entren como bono basura "PESOS".
+    // matchea el patrón de bono pero NO es un bono. Desde el 02/09/2026 se
+    // IMPORTAN (antes se ignoraban): el boleto real de LP de ese día validó el
+    // mapeo — side BUY de PESOS-XD = TOMADORA (recibís los pesos hoy),
+    // SELL = colocadora; el "precio" es la TASA TNA; la cantidad es el CAPITAL;
+    // el plazo sale del sufijo del símbolo ("1D" → 1 día). La posición se carga
+    // con capital FIRMADO (negativo = tomadora, pasivo que devenga deuda) y
+    // operation_type siempre "buy" — el signo vive en quantity, como las
+    // cargadas a mano. La caja del día la crea el trigger trg_cash_from_import
+    // (deposit del capital para tomadora / withdrawal para colocadora) y la
+    // liquidación al vencimiento la hace el worker caucion-acreditacion con el
+    // costo all-in de Cocos (tasa + 3% comisión + 0,365% BYMA, todo +IVA).
     const esCaucion = isBond && /^(PESOS|D[OÓ]LAR)/i.test(ticker || "");
+    if (esCaucion) {
+      const esDolares = /^D/i.test(ticker || "");
+      const termDays = Math.max(1, parseInt(String(plazo || "1").replace(/[^0-9]/g, ""), 10) || 1);
+      const lado = side === "buy" ? "tomadora" : "colocadora";
+      instrumentType = "caucion";
+      ticker = esDolares ? "CAUCION-DOLARES" : "CAUCION-PESOS";
+      entryCurrency = esDolares ? "USD-MEP" : "ARS";
+      settlement = "CI";
+      price = 1; // el capital vive en quantity; la tasa va en extra.rate_tna
+      kind = `Caución ${lado} ${termDays}d al ${rawPrice}% TNA`;
+    }
 
     let status, reason = null;
-    if (esCaucion) { status = "ignored"; reason = "caución (cargar a mano)"; }
-    else if (!isFuture && !isBond) { status = "ignored"; reason = `no soportado (${sym || sec})`; }
+    if (!isFuture && !isBond) { status = "ignored"; reason = `no soportado (${sym || sec})`; }
     else if (cum <= 0) { status = "ignored"; reason = "sin ejecución"; }
     else if (!side || price <= 0) { status = "ignored"; reason = "datos incompletos"; }
     else if (existingOrderIds && existingOrderIds.has(oid)) { status = "dup"; }
     else { status = "new"; }
 
+    // Caución: capital firmado (tomadora negativo) y siempre operation_type
+    // "buy" — el signo del pasivo vive en quantity.
+    const esTomadora = esCaucion && side === "buy";
     out.push({
-      orderId: oid, account, ticker, side, qty: cum, price, date, status, reason,
+      orderId: oid, account, ticker,
+      side: esCaucion ? "buy" : side,
+      qty: esCaucion ? (esTomadora ? -cum : cum) : cum,
+      price, date, status, reason,
       instrumentType, entryCurrency, settlement, plazo, kind,
       route, movementType, cashAmount, contractSize,
+      caucion: esCaucion ? {
+        rate_tna: rawPrice,
+        term_days: Math.max(1, parseInt(String(plazo || "1").replace(/[^0-9]/g, ""), 10) || 1),
+        caucion_side: esTomadora ? "tomadora" : "colocadora",
+      } : null,
     });
   }
   return out;
@@ -16246,6 +16273,9 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
               // getFutureMultiplier lee extra.contract_size; sin esto el ORO
               // caeria al default de 1.000 del DLR.
               ...(r.contractSize ? { contract_size: r.contractSize } : {}),
+              // Caución: tasa/plazo/lado para el devengado y para que el worker
+              // caucion-acreditacion la liquide solo al vencimiento.
+              ...(r.caucion ? r.caucion : {}),
             },
           });
           // La operación tambien mueve PLATA, y hasta ahora eso se perdia: la
