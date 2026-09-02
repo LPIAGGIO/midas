@@ -31810,11 +31810,20 @@ function ReporteCarteraModule() {
   const fPct = (n) => (n == null || !Number.isFinite(n) ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}%`);
   const colRend = (n) => (n == null ? C.dim : n >= 0 ? C.green : C.red);
 
+  // Break-even de VENTA (pedido de LP 02/09, para armar la salida sin abrir el
+  // Simulador): precio mínimo para no perder cubriendo derechos+IVA de las DOS
+  // patas. Mismo costo que el Simulador de venta: 0,044% + 21% IVA por pata
+  // (Cocos CEDEARs/acciones, sin comisión). Solo renta variable: bonos y FCI
+  // van sin derechos en Cocos y su B/E es el propio PPC.
+  const BE_COSTO = 0.00044 * 1.21;
+  const breakEven = (r) => (["cedear", "stock"].includes(r.type) && r.ppc > 0)
+    ? r.ppc * (1 + BE_COSTO) / (1 - BE_COSTO) : null;
+
   const downloadCsv = () => {
-    const head = "tipo;ticker;moneda;cantidad;ppc;precio_actual;valor_inicial;valor_actual;rendimiento;rend_pct;dias;tna_pct;pct_cartera";
+    const head = "tipo;ticker;moneda;cantidad;ppc;precio_actual;break_even_venta;valor_inicial;valor_actual;rendimiento;rend_pct;dias;tna_pct;pct_cartera";
     const lines = [];
     for (const g of groups) for (const r of g.items)
-      lines.push([TYPE_LABEL[r.type] || r.type, r.ticker, r.currency, r.cant, r.ppc ?? "", r.precio ?? "", r.vIni.toFixed(2), r.vAct.toFixed(2), r.rend.toFixed(2), r.rendPct != null ? r.rendPct.toFixed(2) : "", r.dias ?? "", r.tna != null ? r.tna.toFixed(2) : "", totActual > 0 ? ((r.vAct / totActual) * 100).toFixed(2) : ""].join(";"));
+      lines.push([TYPE_LABEL[r.type] || r.type, r.ticker, r.currency, r.cant, r.ppc ?? "", r.precio ?? "", breakEven(r) != null ? breakEven(r).toFixed(2) : "", r.vIni.toFixed(2), r.vAct.toFixed(2), r.rend.toFixed(2), r.rendPct != null ? r.rendPct.toFixed(2) : "", r.dias ?? "", r.tna != null ? r.tna.toFixed(2) : "", totActual > 0 ? ((r.vAct / totActual) * 100).toFixed(2) : ""].join(";"));
     const blob = new Blob(["﻿" + [head, ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
     a.download = `midas-reporte-cartera-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
@@ -31869,6 +31878,7 @@ function ReporteCarteraModule() {
                 <th style={{ ...th, textAlign: "right" }}>Cant.</th>
                 <th style={{ ...th, textAlign: "right" }}>PPC</th>
                 <th style={{ ...th, textAlign: "right" }}>P. actual</th>
+                <th style={{ ...th, textAlign: "right" }} title="Precio mínimo de venta para no perder, con derechos+IVA de compra y venta">B/E venta</th>
                 <th style={{ ...th, textAlign: "right" }}>V. inicial</th>
                 <th style={{ ...th, textAlign: "right" }}>V. actual</th>
                 <th style={{ ...th, textAlign: "right" }}>Rdo.</th>
@@ -31881,7 +31891,7 @@ function ReporteCarteraModule() {
             <tbody>
               {groups.flatMap((g) => [
                 <tr key={g.type + "_hdr"} style={{ background: C.deep }}>
-                  <td colSpan={11} style={{ ...td, fontFamily: "inherit", fontWeight: 700, color: C.text }}>{g.label} <span style={{ color: C.dim, fontWeight: 400 }}>({g.items.length})</span></td>
+                  <td colSpan={12} style={{ ...td, fontFamily: "inherit", fontWeight: 700, color: C.text }}>{g.label} <span style={{ color: C.dim, fontWeight: 400 }}>({g.items.length})</span></td>
                 </tr>,
                 ...g.items.map((r) => (
                   <tr key={r.type + "|" + r.ticker}>
@@ -31889,6 +31899,9 @@ function ReporteCarteraModule() {
                     <td style={num}>{fQ(r.cant)}</td>
                     <td style={num}>{fP(r.ppc)}</td>
                     <td style={num}>{fP(r.precio)}</td>
+                    <td style={{ ...num, color: breakEven(r) == null ? C.dim : (r.precio >= breakEven(r) ? C.green : C.red), fontWeight: breakEven(r) != null ? 600 : 400 }}>
+                      {breakEven(r) == null ? "—" : fP(breakEven(r))}
+                    </td>
                     <td style={num}>{fM(r.vIni)}</td>
                     <td style={num}>{fM(r.vAct)}</td>
                     <td style={{ ...num, color: colRend(r.rend) }}>{fM(r.rend)}</td>
@@ -31899,7 +31912,7 @@ function ReporteCarteraModule() {
                   </tr>
                 )),
                 <tr key={g.type + "_sub"} style={{ background: "rgba(255,255,255,0.02)" }}>
-                  <td colSpan={4} style={{ ...td, fontFamily: "inherit", fontWeight: 600, color: C.muted }}>Subtotal · {g.label}</td>
+                  <td colSpan={5} style={{ ...td, fontFamily: "inherit", fontWeight: 600, color: C.muted }}>Subtotal · {g.label}</td>
                   <td style={{ ...num, fontWeight: 700 }}>{fM(g.subIni)}</td>
                   <td style={{ ...num, fontWeight: 700 }}>{fM(g.subAct)}</td>
                   <td style={{ ...num, fontWeight: 700, color: colRend(g.subRend) }}>{fM(g.subRend)}</td>
@@ -31909,7 +31922,7 @@ function ReporteCarteraModule() {
                 </tr>,
               ])}
               <tr style={{ background: C.deep, borderTop: `2px solid ${C.border}` }}>
-                <td colSpan={4} style={{ ...td, fontFamily: "inherit", fontWeight: 700 }}>TOTAL</td>
+                <td colSpan={5} style={{ ...td, fontFamily: "inherit", fontWeight: 700 }}>TOTAL</td>
                 <td style={{ ...num, fontWeight: 700 }}>{fM(totInicial)}</td>
                 <td style={{ ...num, fontWeight: 700 }}>{fM(totActual)}</td>
                 <td style={{ ...num, fontWeight: 700, color: colRend(totRend) }}>{fM(totRend)}</td>
@@ -31921,7 +31934,7 @@ function ReporteCarteraModule() {
         </div>
       )}
       <p style={{ fontSize: 10.5, color: C.dim, marginTop: 10, maxWidth: 900 }}>
-        Solo posiciones de contado abiertas (bonos, ONs, acciones, CEDEARs, FCI); futuros y cauciones están en P&L por Instrumento. En «Todos» un ticker que tenés en Cocos + IOL se muestra combinado; filtrá por broker para verlo separado. DPT = días desde la primera compra; TNA = rendimiento total anualizado (% R. × 365 / DPT), se muestra solo con ≥30 días de tenencia (anualizar pocos días no tiene sentido); % Cart. sobre el valor a mercado total del filtro.
+        Solo posiciones de contado abiertas (bonos, ONs, acciones, CEDEARs, FCI); futuros y cauciones están en P&L por Instrumento. En «Todos» un ticker que tenés en Cocos + IOL se muestra combinado; filtrá por broker para verlo separado. DPT = días desde la primera compra; TNA = rendimiento total anualizado (% R. × 365 / DPT), se muestra solo con ≥30 días de tenencia (anualizar pocos días no tiene sentido); % Cart. sobre el valor a mercado total del filtro. B/E venta = precio mínimo para salir sin perder, cubriendo derechos+IVA de compra y venta (0,044%+IVA por pata, CEDEARs y acciones; verde = el precio actual ya lo supera). Bonos y FCI van sin derechos: su B/E es el propio PPC.
       </p>
     </div>
   );
