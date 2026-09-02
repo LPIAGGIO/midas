@@ -1037,7 +1037,10 @@ function MidasApp({ allowedModules = null }) {
     if (cedearPip && cedearPip.win && !cedearPip.win.closed) { setCedearPip((p) => ({ ...p, view })); try { cedearPip.win.focus(); } catch {} return; }
     if (!("documentPictureInPicture" in window)) { fallback(); return; }
     try {
-      const w = await window.documentPictureInPicture.requestWindow({ width: 515, height: 705 });
+      // El reporte es una tabla ancha: ventana apaisada; las herramientas CEDEAR
+      // siguen con su formato vertical de siempre.
+      const size = view === "reporte" ? { width: 1150, height: 700 } : { width: 515, height: 705 };
+      const w = await window.documentPictureInPicture.requestWindow(size);
       // Copiar los estilos: cssRules inline para los same-origin (incluye Tailwind);
       // los cross-origin (que tiran SecurityError) se enganchan como <link>.
       for (const ss of Array.from(document.styleSheets)) {
@@ -1777,7 +1780,7 @@ function MidasApp({ allowedModules = null }) {
             ) : active === "pnl-instrumento" ? (
               <PnlPorInstrumentoModule key={active} />
             ) : active === "reporte-cartera" ? (
-              <ReporteCarteraModule key={active} />
+              <ReporteCarteraModule key={active} onPopOut={() => openCedearPip("reporte")} pipActive={cedearPip?.view === "reporte"} />
             ) : active === "cedear-usa" ? (
               <CedearUsaLiveModule key={active} />
             ) : active === "dividendos" ? (
@@ -1878,7 +1881,7 @@ function MidasApp({ allowedModules = null }) {
         persiste aunque cambies de pantalla. Renderiza según cedearPip.view. */}
     {cedearPip && cedearPip.container && createPortal(
       <div style={{ minHeight: "100vh", background: "#0F1B2B" }}>
-        {cedearPip.view === "venta" ? <SimuladorVentaCedearModule compact /> : <CedearValuacionModule compact />}
+        {cedearPip.view === "venta" ? <SimuladorVentaCedearModule compact /> : cedearPip.view === "reporte" ? <ReporteCarteraModule compact /> : <CedearValuacionModule compact />}
       </div>,
       cedearPip.container
     )}
@@ -31744,12 +31747,14 @@ function CedearUsaLiveModule() {
   );
 }
 
-function ReporteCarteraModule() {
+function ReporteCarteraModule({ compact = false, onPopOut, pipActive } = {}) {
   const { positions, loading } = useUserPositions();
   const { fx } = useDashboardFx();
   const cclMid = fx?.ccl?.mid ?? null; // CCL de referencia (mismo que "Dólar Hoy" del Portfolio)
-  const bondPrices = useBondPrices()?.prices || {};
-  const stockPrices = useStockPrices()?.prices || {};
+  const bondHook = useBondPrices();
+  const stockHook = useStockPrices();
+  const bondPrices = bondHook?.prices || {};
+  const stockPrices = stockHook?.prices || {};
   const fciPrices = useFciPrices(positions)?.prices || {};
   const futureTickers = useMemo(
     () => Array.from(new Set((positions || []).filter((p) => p.instrument_type === "future").map((p) => (p.ticker || "").toUpperCase().trim()))),
@@ -31836,14 +31841,22 @@ function ReporteCarteraModule() {
   const td = { padding: "5px 8px", fontSize: 11.5, color: C.text, borderBottom: `1px solid ${C.border}`, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
   const num = { ...td, textAlign: "right" };
 
+  // Refresh manual: refetch directo de los hooks de precios que lo exponen +
+  // el evento global (mismo mecanismo que el boton del TopBar) para el resto.
+  const refreshAll = () => {
+    try { stockHook?.refresh?.(); } catch { /* sin refresh expuesto */ }
+    try { bondHook?.refresh?.(); } catch { /* idem */ }
+    window.dispatchEvent(new Event("midas:refresh-all"));
+  };
+
   return (
-    <div style={{ padding: "24px 32px", maxWidth: 1280, margin: "0 auto" }}>
+    <div style={{ padding: compact ? "14px 16px" : "24px 32px", maxWidth: 1280, margin: "0 auto" }}>
       <div className="flex items-start justify-between" style={{ marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Reporte de cartera</h1>
-          <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
+          <h1 style={{ fontSize: compact ? 16 : 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Reporte de cartera</h1>
+          {!compact && <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 0 0", maxWidth: 760 }}>
             Tu cartera abierta de contado agrupada por tipo, estilo Balanz: costo (V. inicial), valor a mercado, rendimiento, días de tenencia (DPT) y anualizado (TNA). Precios en vivo.
-          </p>
+          </p>}
         </div>
         <div className="flex items-center" style={{ gap: 14 }}>
           <div style={{ textAlign: "right" }}>
@@ -31852,7 +31865,14 @@ function ReporteCarteraModule() {
               {cclMid != null ? `$${Math.round(cclMid).toLocaleString("es-AR")}` : "—"}
             </div>
           </div>
-          <button onClick={downloadCsv} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>↓ Exportar CSV</button>
+          <button onClick={refreshAll} title="Refrescar precios ahora" style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>↻ Actualizar</button>
+          {!compact && onPopOut && (
+            <button onClick={onPopOut} title="Ventana flotante siempre visible, en paralelo con Matriz (Chrome/Edge)"
+              style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${pipActive ? C.accent : C.border}`, background: pipActive ? "rgba(124,156,255,0.12)" : "transparent", color: pipActive ? C.accent : C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>
+              📌 {pipActive ? "Ventana fijada" : "Ventana flotante"}
+            </button>
+          )}
+          {!compact && <button onClick={downloadCsv} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 6, whiteSpace: "nowrap" }}>↓ Exportar CSV</button>}
         </div>
       </div>
 
