@@ -31818,12 +31818,15 @@ function ReporteCarteraModule() {
   const BE_COSTO = 0.00044 * 1.21;
   const breakEven = (r) => (["cedear", "stock"].includes(r.type) && r.ppc > 0)
     ? r.ppc * (1 + BE_COSTO) / (1 - BE_COSTO) : null;
+  // Distancia del precio actual al B/E: + = ya lo superó (margen de ganancia
+  // real al vender), − = lo que falta subir para empatar.
+  const beDist = (r) => { const be = breakEven(r); return (be != null && r.precio > 0) ? (r.precio / be - 1) * 100 : null; };
 
   const downloadCsv = () => {
-    const head = "tipo;ticker;moneda;cantidad;ppc;precio_actual;break_even_venta;valor_inicial;valor_actual;rendimiento;rend_pct;dias;tna_pct;pct_cartera";
+    const head = "tipo;ticker;moneda;cantidad;ppc;precio_actual;break_even_venta;dist_be_pct;valor_inicial;valor_actual;rendimiento;rend_pct;dias;tna_pct;pct_cartera";
     const lines = [];
     for (const g of groups) for (const r of g.items)
-      lines.push([TYPE_LABEL[r.type] || r.type, r.ticker, r.currency, r.cant, r.ppc ?? "", r.precio ?? "", breakEven(r) != null ? breakEven(r).toFixed(2) : "", r.vIni.toFixed(2), r.vAct.toFixed(2), r.rend.toFixed(2), r.rendPct != null ? r.rendPct.toFixed(2) : "", r.dias ?? "", r.tna != null ? r.tna.toFixed(2) : "", totActual > 0 ? ((r.vAct / totActual) * 100).toFixed(2) : ""].join(";"));
+      lines.push([TYPE_LABEL[r.type] || r.type, r.ticker, r.currency, r.cant, r.ppc ?? "", r.precio ?? "", breakEven(r) != null ? breakEven(r).toFixed(2) : "", beDist(r) != null ? beDist(r).toFixed(2) : "", r.vIni.toFixed(2), r.vAct.toFixed(2), r.rend.toFixed(2), r.rendPct != null ? r.rendPct.toFixed(2) : "", r.dias ?? "", r.tna != null ? r.tna.toFixed(2) : "", totActual > 0 ? ((r.vAct / totActual) * 100).toFixed(2) : ""].join(";"));
     const blob = new Blob(["﻿" + [head, ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
     a.download = `midas-reporte-cartera-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
@@ -31879,6 +31882,7 @@ function ReporteCarteraModule() {
                 <th style={{ ...th, textAlign: "right" }}>PPC</th>
                 <th style={{ ...th, textAlign: "right" }}>P. actual</th>
                 <th style={{ ...th, textAlign: "right" }} title="Precio mínimo de venta para no perder, con derechos+IVA de compra y venta">B/E venta</th>
+                <th style={{ ...th, textAlign: "right" }} title="Distancia del precio actual al break-even: + ya lo superó, − lo que falta">± B/E</th>
                 <th style={{ ...th, textAlign: "right" }}>V. inicial</th>
                 <th style={{ ...th, textAlign: "right" }}>V. actual</th>
                 <th style={{ ...th, textAlign: "right" }}>Rdo.</th>
@@ -31891,7 +31895,7 @@ function ReporteCarteraModule() {
             <tbody>
               {groups.flatMap((g) => [
                 <tr key={g.type + "_hdr"} style={{ background: C.deep }}>
-                  <td colSpan={12} style={{ ...td, fontFamily: "inherit", fontWeight: 700, color: C.text }}>{g.label} <span style={{ color: C.dim, fontWeight: 400 }}>({g.items.length})</span></td>
+                  <td colSpan={13} style={{ ...td, fontFamily: "inherit", fontWeight: 700, color: C.text }}>{g.label} <span style={{ color: C.dim, fontWeight: 400 }}>({g.items.length})</span></td>
                 </tr>,
                 ...g.items.map((r) => (
                   <tr key={r.type + "|" + r.ticker}>
@@ -31901,6 +31905,9 @@ function ReporteCarteraModule() {
                     <td style={num}>{fP(r.precio)}</td>
                     <td style={{ ...num, color: breakEven(r) == null ? C.dim : (r.precio >= breakEven(r) ? C.green : C.red), fontWeight: breakEven(r) != null ? 600 : 400 }}>
                       {breakEven(r) == null ? "—" : fP(breakEven(r))}
+                    </td>
+                    <td style={{ ...num, color: beDist(r) == null ? C.dim : (beDist(r) >= 0 ? C.green : C.red), fontWeight: beDist(r) != null ? 600 : 400 }}>
+                      {beDist(r) == null ? "—" : fPct(beDist(r))}
                     </td>
                     <td style={num}>{fM(r.vIni)}</td>
                     <td style={num}>{fM(r.vAct)}</td>
@@ -31912,7 +31919,7 @@ function ReporteCarteraModule() {
                   </tr>
                 )),
                 <tr key={g.type + "_sub"} style={{ background: "rgba(255,255,255,0.02)" }}>
-                  <td colSpan={5} style={{ ...td, fontFamily: "inherit", fontWeight: 600, color: C.muted }}>Subtotal · {g.label}</td>
+                  <td colSpan={6} style={{ ...td, fontFamily: "inherit", fontWeight: 600, color: C.muted }}>Subtotal · {g.label}</td>
                   <td style={{ ...num, fontWeight: 700 }}>{fM(g.subIni)}</td>
                   <td style={{ ...num, fontWeight: 700 }}>{fM(g.subAct)}</td>
                   <td style={{ ...num, fontWeight: 700, color: colRend(g.subRend) }}>{fM(g.subRend)}</td>
@@ -31922,7 +31929,7 @@ function ReporteCarteraModule() {
                 </tr>,
               ])}
               <tr style={{ background: C.deep, borderTop: `2px solid ${C.border}` }}>
-                <td colSpan={5} style={{ ...td, fontFamily: "inherit", fontWeight: 700 }}>TOTAL</td>
+                <td colSpan={6} style={{ ...td, fontFamily: "inherit", fontWeight: 700 }}>TOTAL</td>
                 <td style={{ ...num, fontWeight: 700 }}>{fM(totInicial)}</td>
                 <td style={{ ...num, fontWeight: 700 }}>{fM(totActual)}</td>
                 <td style={{ ...num, fontWeight: 700, color: colRend(totRend) }}>{fM(totRend)}</td>
