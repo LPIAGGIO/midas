@@ -15969,31 +15969,52 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
   const ix = (name) => header.indexOf(name);
   const iOrder = ix("order_id"), iAcct = ix("account"), iSec = ix("security_id"),
     iSym = ix("symbol"), iTime = ix("transact_time"), iSide = ix("side"),
-    iAvg = ix("avg_price"), iCum = ix("cum_qty"), iEvent = ix("event_subtype");
+    iAvg = ix("avg_price"), iCum = ix("cum_qty"), iEvent = ix("event_subtype"),
+    iExec = ix("exec_type"), iLastQty = ix("last_qty");
   if (iOrder < 0 || iSym < 0 || iCum < 0) return []; // formato no reconocido
   // Agrupar por order_id, quedarse con la fila de mayor cum_qty (estado final).
   // Cada orden puede venir en varios fills parciales (una fila por fill, con el
   // cum_qty acumulándose) y a veces una fila final event_subtype="cancel" que
   // repite el cum del último fill (lo NO ejecutado se cancela). Salteamos esas
-  // filas cancel: no aportan cantidad y solo confunden. El cum_qty final de la
-  // orden = el mayor de sus fills ejecutados = lo realmente operado.
+  // filas cancel: no aportan cantidad y solo confunden.
+  //
+  // CADENAS DE REEMPLAZO (bug NU 02/09/2026): cuando el usuario CORRIGE el
+  // precio de una orden, Matriz crea un order_id NUEVO cuyo cum_qty ARRASTRA
+  // lo ya ejecutado por los anteriores (venta de 2.000 corregida 3 veces =
+  // 4 ordenes con cum 15/329/638/2000 → el importador cargaba 2.982). La
+  // primera fila de la orden nueva es el acuse del reemplazo: exec_type=5,
+  // last_qty=0 y cum>0 con el avg de lo heredado. Lo ejecutado POR ESTA orden
+  // = cum_final − cum_heredado, y su precio sale de restar los notionales
+  // (avg_final×cum_final − avg_heredado×cum_heredado) / cantidad propia.
   const byOrder = new Map();
   for (let li = 1; li < lines.length; li++) {
     const c = lines[li].split(",");
     const oid = (c[iOrder] || "").trim();
     if (!oid) continue;
-    if (iEvent >= 0 && (c[iEvent] || "").trim().toLowerCase() === "cancel") continue;
+    const evt = iEvent >= 0 ? (c[iEvent] || "").trim().toLowerCase() : "";
+    if (evt === "cancel" || evt === "replace") continue; // ecos sin cantidad nueva
     const cum = Number(c[iCum]) || 0;
-    const prev = byOrder.get(oid);
-    if (!prev || cum >= prev.cum) byOrder.set(oid, { cols: c, cum });
+    const lastQty = iLastQty >= 0 ? Number(c[iLastQty]) || 0 : null;
+    const esAcuse = (iExec >= 0 && (c[iExec] || "").trim() === "5") || (lastQty === 0 && cum > 0);
+    const prev = byOrder.get(oid) || { cols: null, cum: 0, ackCum: 0, ackNotional: 0 };
+    if (esAcuse) {
+      if (cum >= prev.ackCum) { prev.ackCum = cum; prev.ackNotional = (Number(c[iAvg]) || 0) * cum; }
+      if (cum >= prev.cum) { prev.cum = cum; if (!prev.cols) prev.cols = c; }
+    } else if (!prev.cols || cum >= prev.cum) { prev.cols = c; prev.cum = cum; }
+    byOrder.set(oid, prev);
   }
   const out = [];
-  for (const [oid, { cols, cum }] of byOrder) {
+  for (const [oid, { cols, cum: cumFinal, ackCum, ackNotional }] of byOrder) {
+    if (!cols) continue;
+    // Cantidad y precio PROPIOS de la orden (netos de lo heredado por reemplazo).
+    const cum = cumFinal - ackCum;
+    const avgFinal = Number(cols[iAvg]) || 0;
+    const precioPropio = cum > 0 ? (avgFinal * cumFinal - ackNotional) / cum : 0;
     const sec = (cols[iSec] || "").trim();
     const sym = (cols[iSym] || "").trim();
     const sideRaw = (cols[iSide] || "").trim().toUpperCase();
     const side = sideRaw === "BUY" ? "buy" : sideRaw === "SELL" ? "sell" : null;
-    const rawPrice = Number(cols[iAvg]) || 0;
+    const rawPrice = Math.round(precioPropio * 10000) / 10000;
     const time = (cols[iTime] || "").trim();
     let date = time.slice(0, 10);
     const d = new Date(time.replace(" ", "T"));
