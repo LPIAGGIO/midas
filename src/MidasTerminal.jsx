@@ -4310,7 +4310,11 @@ const _categoriaMov = (tipo, instr) => {
   if (/prima/i.test(t)) return "opcion";
   if (/compra|venta/.test(t)) {
     if (/CEDEAR/i.test(instr)) return "trade_cedear";
-    if (/BONO|LETRA|LT |ON /i.test(instr)) return "trade_bono";
+    // "TD PROV. BUENOS AIRES TASA VARIABLE 30/04/27 $ (PBA27)": los títulos
+    // provinciales no dicen "BONO" — dicen "TD" (título de deuda) o "PROV.".
+    // Sin este patrón caían como trade_otro → stock → valuados SIN el /100 de
+    // bonos (03/09/2026: PBA27 43,5M VN aparecía como $4.500 MILLONES).
+    if (/BONO|LETRA|LT |ON |\bTD\b|PROV\.|TIT\.? ?(PUB|DE DEUDA)/i.test(instr)) return "trade_bono";
     return "trade_otro";
   }
   if (/recibo|orden de pago|nota de|dividendos/.test(t)) return "cash";
