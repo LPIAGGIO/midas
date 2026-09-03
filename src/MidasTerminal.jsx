@@ -31803,7 +31803,7 @@ function CedearUsaLiveModule() {
 }
 
 function ReporteCarteraModule({ compact = false, onPopOut, pipActive } = {}) {
-  const { positions, loading } = useUserPositions();
+  const { positions, loading, refresh: refreshPositions } = useUserPositions();
   const { fx } = useDashboardFx();
   const cclMid = fx?.ccl?.mid ?? null; // CCL de referencia (mismo que "Dólar Hoy" del Portfolio)
   const bondHook = useBondPrices();
@@ -31896,10 +31896,13 @@ function ReporteCarteraModule({ compact = false, onPopOut, pipActive } = {}) {
   const td = { padding: "5px 8px", fontSize: 11.5, color: C.text, borderBottom: `1px solid ${C.border}`, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
   const num = { ...td, textAlign: "right" };
 
-  // Refresh manual: refetch directo de los hooks de precios que lo exponen +
-  // el evento global (mismo mecanismo que el boton del TopBar) para el resto.
+  // Refresh manual: POSICIONES (el caso tipico: recien importaste operaciones
+  // y la tabla seguia mostrando la cartera vieja — reporte de LP 03/09) +
+  // refetch directo de los hooks de precios + el evento global (mismo
+  // mecanismo que el boton del TopBar) para el resto.
   const refreshAll = () => {
-    try { stockHook?.refresh?.(); } catch { /* sin refresh expuesto */ }
+    try { refreshPositions?.(); } catch { /* sin refetch expuesto */ }
+    try { stockHook?.refresh?.(); } catch { /* idem */ }
     try { bondHook?.refresh?.(); } catch { /* idem */ }
     window.dispatchEvent(new Event("midas:refresh-all"));
   };
