@@ -525,28 +525,39 @@ async function main() {
         // sin eso, un papel puede pasar semanas sin generar una sola orden y no
         // hay forma de saber si es que nunca hubo setup o si el filtro está
         // demasiado exigente. El nivel en sí ya queda medido en nivel_track.
+        /* REGIMEN (01/09/2026, del analisis de nivel_track): los soportes en
+         * risk_on rindieron +235 bps a 5 ruedas (n=163, t=4,0 — la unica senal
+         * del proyecto que sobrevive deflacion); en mixto -32 (n=58), risk_off
+         * -41 (n=62).
+         * REGLA B (03/09/2026, veredicto de LP tras 3 dias sin senales y un
+         * ganador bloqueado — NU +5,8% contrafactual): mixto se READMITE pero
+         * mas caro — score >=8, R:R >=2,5 y MITAD de riesgo (riskMult 0,5).
+         * El subset historico "mixto score 8+" tiene n=4 (sin evidencia): esto
+         * es una apuesta acotada y medible, los trades quedan etiquetados
+         * "regimen mixto" en la senal para comparar canastas en un mes.
+         * risk_off sigue bloqueado sin excepciones.
+         * EARNINGS: sin entradas si el papel reporta en <=3 dias. */
+        const mixtoOk = regime === "mixto" && sc.score >= 8 && rr != null && rr >= 2.5;
+        const regimenOk = regime === "risk_on" || mixtoOk;
         if (BOT_UNIVERSO.has(tk.toUpperCase()) && modo !== "local_ars") {
           const faltas = [];
           if (sc.score < 7) faltas.push(`score ${sc.score}/10, hace falta 7`);
           if (rr == null || rr < 2) faltas.push(`R:R ${rr ?? "sin calcular"}, hace falta 2`);
           if (contraTendencia) faltas.push("va contra la tendencia");
-          if (regime !== "risk_on") faltas.push(`regimen ${regime}, hace falta risk_on`);
+          if (!regimenOk) faltas.push(regime === "mixto"
+            ? `regimen mixto: exige score 8 y R:R 2,5 (vino ${sc.score}/10 y ${rr == null ? "s/d" : fmt1(rr)})`
+            : `regimen ${regime}, hace falta risk_on`);
           if (!(stopLvl > 0 && stopLvl < buyZone.hi)) faltas.push("sin stop válido");
           if (!sellZone) faltas.push("sin zona de salida");
           if (faltas.length) botDescarte(tk, buyZone.hi, faltas);
         }
-        /* REGIMEN risk_on OBLIGATORIO (01/09/2026, del analisis de nivel_track):
-         * los soportes tocados en risk_on rindieron +235 bps a 5 ruedas (n=163,
-         * t=4,0 — la unica senal del proyecto que sobrevive deflacion); en mixto
-         * dieron -32 (n=58) y en risk_off -41 (n=62). El bot venia aceptando
-         * mixto (AMZN y MU del 01/09 eran mixto) y eso era regalar la ventaja.
-         * EARNINGS: no se abre posicion si el papel reporta en <=3 dias — el
-         * gap de un balance no lo ve ningun score (ticker_context.earnings_date,
-         * refrescado a diario; sin dato = no bloquea). */
-        if (BOT_UNIVERSO.has(tk.toUpperCase()) && modo !== "local_ars" && sc.score >= 7 && rr != null && rr >= 2 && !contraTendencia && regime === "risk_on" && stopLvl && stopLvl > 0 && stopLvl < buyZone.hi && sellZone) {
+        if (BOT_UNIVERSO.has(tk.toUpperCase()) && modo !== "local_ars" && sc.score >= 7 && rr != null && rr >= 2 && !contraTendencia && regimenOk && stopLvl && stopLvl > 0 && stopLvl < buyZone.hi && sellZone) {
           if (await earningsCerca(tk)) { botDescarte(tk, buyZone.hi, ["earnings en 3 dias o menos"]); }
           else
-          await paperSignal(symUsa, tk, buyZone.hi, stopLvl, sellZone.lo, sc.score, rr, `score ${sc.score}/10 · R:R ${fmt1(rr)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}`).catch((e) => log(`[paper ${tk}] ${e.message}`));
+          await paperSignal(symUsa, tk, buyZone.hi, stopLvl, sellZone.lo, sc.score, rr,
+            `score ${sc.score}/10 · R:R ${fmt1(rr)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}` +
+            (regime === "mixto" ? " · regimen mixto (media posicion)" : ""),
+            regime === "mixto" ? 0.5 : 1).catch((e) => log(`[paper ${tk}] ${e.message}`));
         }
         // 2b. Entrada swing (zona diaria más abajo) — para trade, no scalp.
         // La etiqueta CONTRA-TENDENCIA aplica acá también: la swing es la
@@ -1434,7 +1445,7 @@ async function iolCancelar(numero) {
 // 2,5%.
 const DERIVA_MAX = 0.005;
 
-async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
+async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskMult = 1) {
   if (!BOT_UNIVERSO.has(String(tk).toUpperCase())) return;   // opera 3 papeles, no todo el tablero
   const { data: ex } = await supabase.from("paper_iol_trades").select("id,status,entry_limit").eq("sym", sym).in("status", ["pending", "open"]);
   if ((ex || []).some((t) => t.status === "open")) return;          // ya hay posición en el papel
@@ -1462,7 +1473,9 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal) {
   // Sizing por riesgo, EN PESOS sobre el instrumento que se compra de verdad.
   const riesgoUnidad = (entry - stop) * rArs;
   if (!(riesgoUnidad > 0)) return;
-  let qty = Math.floor((CAP_ARS * BOT_RISK) / riesgoUnidad);
+  // riskMult < 1 = señal admitida con reserva (regimen mixto, regla B del
+  // 03/09): mitad de riesgo mientras juntamos muestra para el veredicto final.
+  let qty = Math.floor((CAP_ARS * BOT_RISK * riskMult) / riesgoUnidad);
   // Sin palanca: lo comprometido en órdenes vivas de OTROS papeles limita ésta.
   const { data: vivas } = await supabase.from("paper_iol_trades")
     .select("qty,px_ars_entrada,entry_limit,ratio").in("status", ["pending", "open"]).neq("sym", sym);
