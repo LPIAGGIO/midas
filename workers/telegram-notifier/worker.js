@@ -1446,6 +1446,34 @@ async function cmdRfx(chatId) {
   await sendMessage(chatId, `📈 <b>Futuros en cartera (ROFEX)</b>\n${lines.join("\n")}\n<i>Long = comprado / Short = vendido. Cantidad en contratos.</i>`);
 }
 
+/* /mercados — panorama global on-demand (pedido de LP 03/09/2026: poder ver
+ * "como viene Asia / USA / el post" desde el celular, sin Claude ni PC).
+ * Reusa yahooBrief: variacion contra el cierre diario anterior de la SERIE
+ * (no meta.chartPreviousClose, que viene desfasado — el KOSPI llego a mostrar
+ * -3,75% fantasma por comparar contra la barra equivocada). Con el mercado
+ * de cada plaza cerrado, el numero es el cierre de su ultima rueda. */
+const MERCADOS_GRUPOS = [
+  { titulo: "Asia", items: [["^N225", "Nikkei"], ["^KS11", "KOSPI"], ["^HSI", "Hang Seng"], ["000001.SS", "Shanghai"], ["^TWII", "Taiwan"]] },
+  { titulo: "USA", items: [["SPY", "S&P (SPY)"], ["QQQ", "Nasdaq (QQQ)"], ["ES=F", "Futuro ES"], ["NQ=F", "Futuro NQ"]] },
+  { titulo: "Commodities y cripto", items: [["CL=F", "WTI"], ["GC=F", "Oro"], ["BTC-USD", "BTC"]] },
+];
+async function cmdMercados(chatId) {
+  const partes = [];
+  for (const g of MERCADOS_GRUPOS) {
+    const lineas = [];
+    for (const [sym, nombre] of g.items) {
+      const b = await yahooBrief(sym);
+      lineas.push(b
+        ? `${nombre}: <b>${briefPct(b.pct)}</b> · ${b.px >= 1000 ? Math.round(b.px).toLocaleString("es-AR") : b.px.toFixed(2)}`
+        : `${nombre}: s/d`);
+    }
+    partes.push(`<b>${g.titulo}</b>\n${lineas.join("\n")}`);
+  }
+  await sendMessage(chatId,
+    `<b>Mercados ahora</b>\n\n${partes.join("\n\n")}\n\n` +
+    `<i>Variacion contra el cierre anterior de cada plaza; si esta cerrada, es su ultima rueda.</i>`);
+}
+
 /* ─────────────── Linking + comandos ─────────────── */
 
 let offset = 0;
@@ -1489,9 +1517,10 @@ async function handleUpdate(u) {
   if (text.startsWith("/canje")) { await cmdCanje(chatId); return; }
   if (text.startsWith("/mep")) { await cmdMep(chatId); return; }
   if (text.startsWith("/dolar") || text.startsWith("/dólar")) { await cmdDolar(chatId); return; }
+  if (text.startsWith("/mercados") || text.startsWith("/asia") || text.startsWith("/usa") || text.startsWith("/post")) { await cmdMercados(chatId); return; }
   if (text.startsWith("/ping")) { await sendMessage(chatId, "pong"); return; }
   if (text.startsWith("/help")) {
-    await sendMessage(chatId, "Comandos:\n/pnl — resumen del dia (todo)\n/portfolio — cartera completa por broker con total y % del dia\n/momentum — cartera momentum IOL: valor y resultado\n/futuros — todos los futuros DLR: precio y variacion del dia\n/rfx — tus futuros en cartera (long/short)\n/dolar — cotizaciones de los distintos dolares\n/dlr — dolar futuro del frente + spread\n/mep — mejor bono para comprar/vender USD\n/canje — desarbitrajes MEP\n/stop — pausar\n/start &lt;codigo&gt; — vincular\n\nLa activacion y preferencias se manejan en Midas → Configuracion → Notificaciones.");
+    await sendMessage(chatId, "Comandos:\n/pnl — resumen del dia (todo)\n/portfolio — cartera completa por broker con total y % del dia\n/momentum — cartera momentum IOL: valor y resultado\n/mercados — panorama global: Asia, USA, commodities (alias /asia /usa /post)\n/futuros — todos los futuros DLR: precio y variacion del dia\n/rfx — tus futuros en cartera (long/short)\n/dolar — cotizaciones de los distintos dolares\n/dlr — dolar futuro del frente + spread\n/mep — mejor bono para comprar/vender USD\n/canje — desarbitrajes MEP\n/stop — pausar\n/start &lt;codigo&gt; — vincular\n\nLa activacion y preferencias se manejan en Midas → Configuracion → Notificaciones.");
     return;
   }
 }
