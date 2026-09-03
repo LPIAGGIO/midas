@@ -1457,12 +1457,48 @@ const MERCADOS_GRUPOS = [
   { titulo: "USA", items: [["SPY", "S&P (SPY)"], ["QQQ", "Nasdaq (QQQ)"], ["ES=F", "Futuro ES"], ["NQ=F", "Futuro NQ"]] },
   { titulo: "Commodities y cripto", items: [["CL=F", "WTI"], ["GC=F", "Oro"], ["BTC-USD", "BTC"]] },
 ];
+/* Variacion robusta por RECONSTRUCCION DE SESIONES desde velas intradia.
+ * La serie DIARIA de Yahoo consolida tarde la vela de las plazas asiaticas:
+ * durante su rueda (y horas despues) el "cierre anterior" de la serie es el
+ * de ANTEAYER, y el KOSPI mostro -4,0% cuando el movimiento real era -0,2%
+ * (estreno del comando, 03/09/2026). Las velas de 30m si estan al dia: se
+ * agrupan en sesiones (un hueco >3h entre velas = cambio de rueda), el precio
+ * es la ultima vela y el cierre anterior es la ultima vela de la sesion
+ * previa. */
+async function yahooPctSesiones(sym) {
+  try {
+    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=30m&range=5d`, { headers: YA_UA });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const res = j?.chart?.result?.[0];
+    const ts = res?.timestamp || [];
+    const c = res?.indicators?.quote?.[0]?.close || [];
+    const velas = [];
+    for (let i = 0; i < ts.length; i++) {
+      const v = Number(c[i]);
+      if (Number.isFinite(v) && v > 0) velas.push({ t: ts[i], c: v });
+    }
+    if (velas.length < 2) return null;
+    const sesiones = [[velas[0]]];
+    for (let i = 1; i < velas.length; i++) {
+      if (velas[i].t - velas[i - 1].t > 3 * 3600) sesiones.push([]);
+      sesiones[sesiones.length - 1].push(velas[i]);
+    }
+    if (sesiones.length < 2) return null;
+    const ult = sesiones[sesiones.length - 1];
+    const prev = sesiones[sesiones.length - 2];
+    const px = ult[ult.length - 1].c;
+    const cierrePrevio = prev[prev.length - 1].c;
+    return { px, pct: (px / cierrePrevio - 1) * 100 };
+  } catch { return null; }
+}
+
 async function cmdMercados(chatId) {
   const partes = [];
   for (const g of MERCADOS_GRUPOS) {
     const lineas = [];
     for (const [sym, nombre] of g.items) {
-      const b = await yahooBrief(sym);
+      const b = (await yahooPctSesiones(sym)) || (await yahooBrief(sym));
       lineas.push(b
         ? `${nombre}: <b>${briefPct(b.pct)}</b> · ${b.px >= 1000 ? Math.round(b.px).toLocaleString("es-AR") : b.px.toFixed(2)}`
         : `${nombre}: s/d`);
