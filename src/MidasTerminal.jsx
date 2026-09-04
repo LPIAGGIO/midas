@@ -16621,6 +16621,29 @@ function PortfolioDashboard({ onNavigate }) {
     return ["iol", "cocos", "balanz", "eco", "manual"].filter((b) => set.has(b));
   }, [positions, cashState, iolCashByCurrency]);
 
+  // Conteo por broker para el numerito del chip: POSICIONES ABIERTAS (tickers
+  // con neto distinto de cero), no filas de operaciones. Antes mostraba la
+  // cantidad de boletos historicos ("COC 517") y no coincidia con el "(14)"
+  // de Posiciones consolidadas de abajo (pedido de LP, 04/09/2026).
+  const brokerOpenCounts = useMemo(() => {
+    const porBroker = new Map();
+    for (const p of positions) {
+      const b = p.broker || "manual";
+      const tk = `${p.ticker}|${p.instrument_type}`;
+      if (!porBroker.has(b)) porBroker.set(b, new Map());
+      const m = porBroker.get(b);
+      const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
+      m.set(tk, (m.get(tk) || 0) + q);
+    }
+    const out = {};
+    for (const [b, m] of porBroker) {
+      let n = 0;
+      for (const neto of m.values()) if (Math.abs(neto) > 1e-6) n++;
+      out[b] = n;
+    }
+    return out;
+  }, [positions]);
+
   // Posiciones tras aplicar el filtro de broker. Es la base GLOBAL: la
   // consume el dashboard (cards) y, encima, se le aplica el filtro de tipo.
   const brokerFilteredPositions = useMemo(() => {
@@ -16781,9 +16804,7 @@ function PortfolioDashboard({ onNavigate }) {
               {presentBrokers.map((key) => {
                 const isActive = !excludedBrokers.has(key);
                 const isEfectivo = key === "efectivo";
-                const count = isEfectivo
-                  ? null
-                  : positions.filter((p) => (p.broker || "manual") === key).length;
+                const count = isEfectivo ? null : (brokerOpenCounts[key] || 0);
                 const meta = BROKER_CATALOG[key];
                 const dotColor = isEfectivo ? "#94A3B8" : (meta?.color || "#94A3B8");
                 const label = isEfectivo ? "Efectivo" : (meta?.short || key);
