@@ -1146,6 +1146,24 @@ async function earningsCerca(tk) {
 }
 const BOT_USER = process.env.IOL_BOT_USER || "cafc5a8c-1cee-4d57-a765-6aacf1acc661";
 const CAP_ARS = Number(process.env.IOL_BOT_CAP_ARS || 3000000);
+/* ─── SAFETY RAILS DE PLATA REAL (pre-mortem 15/06/2026, midas-trading-rules;
+ * activados 04/09/2026 con el fondeo de $2M de LP). Solo aplican en MODO REAL
+ * — el libro paper conserva sus reglas para no romper la comparabilidad del
+ * track record, y el gap real-vs-paper que introducen los rails ES parte de
+ * lo que se mide en los primeros meses ("el objetivo no es ganar, es
+ * confirmar que el real se parece al paper").
+ *   - riesgo maximo 1% del capital real por operacion (paper usa 1,5%)
+ *   - maximo ~10% del capital por posicion (concentracion) — OJO: con $2M
+ *     esto deja afuera papeles caros (1 MU ≈ $317k = 16%); es la regla
+ *     escrita y no se relaja por codicia, se revisa con mas capital
+ *   - maximo 5 posiciones simultaneas y 5 entradas por dia
+ *   - guard de dos llaves (IOL_BOT_REAL en el VPS + bot_enabled en la base)
+ *     ya vigente en resolverModo() */
+const CAP_REAL = Number(process.env.IOL_BOT_CAP_REAL || 2000000);
+const RISK_REAL = 0.01;
+const MAX_POS_PCT_REAL = 0.10;
+const MAX_POS_REAL = 5;
+const MAX_ENTRADAS_DIA_REAL = 5;
 
 /* Aviso por Telegram al duenio del bot, para ESPEJAR la operacion en Cocos.
  * El mismo bot de @midas_ar_BOT (token compartido via .env). Fire-and-forget:
@@ -1247,7 +1265,7 @@ async function resolverModo() {
   MODO_REAL = quiereReal && flagDb;
   if (MODO_REAL && avisoModo !== "real") {
     avisoModo = "real";
-    log(`[bot] *** MODO REAL ACTIVO *** cuenta ${data.broker_account_id} · papeles ${BOT_TICKERS.join(", ")} · capital ${pesos(CAP_ARS)} · perfil ${PERFIL}`);
+    log(`[bot] *** MODO REAL ACTIVO *** cuenta ${data.broker_account_id} · papeles ${BOT_TICKERS.join(", ")} · capital REAL ${pesos(CAP_REAL)} (paper sigue en ${pesos(CAP_ARS)}) · riesgo ${RISK_REAL * 100}%/trade · max ${MAX_POS_REAL} posiciones · ${MAX_ENTRADAS_DIA_REAL} entradas/dia · perfil ${PERFIL}`);
   }
 }
 
@@ -1496,17 +1514,48 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
   if (!(riesgoUnidad > 0)) return;
   // riskMult < 1 = señal admitida con reserva (regimen mixto, regla B del
   // 03/09): mitad de riesgo mientras juntamos muestra para el veredicto final.
-  let qty = Math.floor((CAP_ARS * BOT_RISK * riskMult) / riesgoUnidad);
+  const esRealLibro = MODO_REAL && !esShadow;
+  const capLibro = esRealLibro ? CAP_REAL : CAP_ARS;
+  const riskLibro = esRealLibro ? Math.min(BOT_RISK, RISK_REAL) : BOT_RISK;
+  let qty = Math.floor((capLibro * riskLibro * riskMult) / riesgoUnidad);
+
+  if (esRealLibro) {
+    // Rails del pre-mortem (solo plata real):
+    // (1) concentracion: max 10% del capital por posicion, con EXCEPCION DE
+    //     UNIDAD MINIMA hasta 20% (acordada con LP 04/09: sin ella un papel
+    //     caro como MU —1 unidad ≈ 16% de $2M— quedaria afuera del libro real
+    //     que existe justamente para construir volumen hacia Black).
+    const pxU = entry * rArs;
+    const maxNotional = capLibro * MAX_POS_PCT_REAL;
+    qty = Math.min(qty, Math.floor(maxNotional / pxU));
+    if (qty < 1) {
+      if (pxU <= capLibro * 0.20) { qty = 1; log(`[bot ${tk}] excepcion unidad minima: 1 × ${pesos(pxU)} = ${((pxU / capLibro) * 100).toFixed(1)}% del capital (tope normal 10%)`); }
+      else { log(`[bot ${tk}] REAL descartada: 1 unidad (${pesos(pxU)}) excede el 20% del capital`); return; }
+    }
+    // (2) maximo 5 posiciones simultaneas en el libro real
+    const { count: nPos } = await supabase.from("paper_iol_trades")
+      .select("id", { count: "exact", head: true }).eq("modo", "real").in("status", ["pending", "open"]);
+    if ((nPos ?? 0) >= MAX_POS_REAL) { log(`[bot ${tk}] REAL descartada: ya hay ${nPos} posiciones/ordenes vivas (tope ${MAX_POS_REAL})`); return; }
+    // (3) maximo 5 entradas por dia
+    const hoyIni = new Date(); hoyIni.setUTCHours(3, 0, 0, 0); // 00:00 ART
+    const { count: nHoy } = await supabase.from("paper_iol_trades")
+      .select("id", { count: "exact", head: true }).eq("modo", "real").gte("created_at", hoyIni.toISOString());
+    if ((nHoy ?? 0) >= MAX_ENTRADAS_DIA_REAL) { log(`[bot ${tk}] REAL descartada: ya se colocaron ${nHoy} ordenes hoy (tope ${MAX_ENTRADAS_DIA_REAL})`); return; }
+  }
   // Sin palanca: lo comprometido en órdenes vivas de OTROS papeles limita ésta.
   // El SHADOW no consume ni respeta el capital: mide expectancy por trade con
   // sizing fijo de riesgo, sin el ruido de "no habia plata ese dia".
   const precioUnidad = entry * rArs;
   if (!esShadow) {
-    const { data: vivas } = await supabase.from("paper_iol_trades")
-      .select("qty,px_ars_entrada,entry_limit,ratio").in("status", ["pending", "open"]).neq("sym", sym).neq("modo", "shadow");
+    // En modo real solo computan las ordenes/posiciones REALES; en paper, las
+    // del libro paper (el shadow nunca consume capital de nadie).
+    let q = supabase.from("paper_iol_trades")
+      .select("qty,px_ars_entrada,entry_limit,ratio").in("status", ["pending", "open"]).neq("sym", sym);
+    q = esRealLibro ? q.eq("modo", "real") : q.neq("modo", "shadow");
+    const { data: vivas } = await q;
     const comprometido = (vivas || []).reduce(
       (s, t) => s + t.qty * Number(t.px_ars_entrada ?? Number(t.entry_limit) * Number(t.ratio ?? 0)), 0);
-    const disponible = CAP_ARS - comprometido;
+    const disponible = capLibro - comprometido;
     qty = Math.min(qty, Math.floor(disponible / precioUnidad));
     if (qty < 1) {
       log(`[bot ${tk}] señal descartada: quedan ${pesos(disponible)} y cada unidad cuesta ${pesos(precioUnidad)}`);
