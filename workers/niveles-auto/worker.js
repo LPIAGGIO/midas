@@ -1161,7 +1161,12 @@ const CAP_ARS = Number(process.env.IOL_BOT_CAP_ARS || 3000000);
  *     ya vigente en resolverModo() */
 const CAP_REAL = Number(process.env.IOL_BOT_CAP_REAL || 2000000);
 const RISK_REAL = 0.01;
-const MAX_POS_PCT_REAL = 0.10;
+/* Tope de posicion 25% (decision de LP al fondear, 04/09/2026): el bot entra
+ * 1-2 veces por semana — con 10% el capital dormia y el objetivo declarado de
+ * este libro es construir VOLUMEN hacia la comision Black. El freno de
+ * perdidas sigue siendo el riesgo del 1% via stop; el tope de posicion solo
+ * acota el riesgo de gap (25% x gap nocturno de -10% = -2,5% del capital). */
+const MAX_POS_PCT_REAL = 0.25;
 const MAX_POS_REAL = 5;
 const MAX_ENTRADAS_DIA_REAL = 5;
 
@@ -1574,7 +1579,14 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
   };
   if (MODO_REAL && !esShadow) {
     try { fila.broker_order_id = await iolOrden("compra", tk, qty, precioUnidad); }
-    catch (e) { log(`[bot ${tk}] NO se mandó la orden real: ${e.message}`); return; }
+    catch (e) {
+      log(`[bot ${tk}] NO se mandó la orden real: ${e.message}`);
+      await tgEspejo(
+        `<b>BOT · FALLO orden real ${tk}</b>\n` +
+        `IOL rechazo la compra de ${qty} × ${pesos(precioUnidad)}: ${e.message}\n` +
+        `No quedo nada colocado — el bot sigue, pero esta senal se perdio.`);
+      return;
+    }
   }
   const { error } = await supabase.from("paper_iol_trades").insert(fila);
   if (error) throw new Error(error.message);
@@ -1689,7 +1701,7 @@ async function paperPass() {
        * puede dejar puesto como limite — si toca, llega el aviso de SALIDA:
        * ahi se cancela la venta y se vende a mercado. */
       if (t.modo !== "shadow") await tgEspejo(
-        `<b>BOT · ENTRO ${t.ticker}</b>\n` +
+        `<b>BOT · ENTRO ${t.ticker}</b>${MODO_REAL ? " (IOL real: compra ejecutada en tu cuenta)" : ""}\n` +
         `Fill ${t.qty} × ${pesos(pxArs)} (US${pxUsd.toFixed(2)}) · total ${pesos(pxArs * t.qty)}\n` +
         `Target ${pesos(Number(t.target) * rArs)} · Stop ${pesos(Number(t.stop) * rArs)}\n\n` +
         `<b>Deja puesta la VENTA limite en ${pesos(tickPiso(Number(t.target) * rArs))}</b> (target al tick, para abajo) por la misma cantidad. Con eso no necesitas mirar la pantalla: si toca el target, salis con el bot.\n` +
@@ -1802,7 +1814,14 @@ async function paperPass() {
     let ordenSalida = null;
     if (MODO_REAL && t.modo !== "shadow") {
       try { ordenSalida = await iolOrden("venta", t.ticker, t.qty, pxArsSal); }
-      catch (e) { log(`[bot ${t.ticker}] NO se pudo mandar la venta real: ${e.message} — la posición sigue abierta`); continue; }
+      catch (e) {
+        log(`[bot ${t.ticker}] NO se pudo mandar la venta real: ${e.message} — la posición sigue abierta`);
+        await tgEspejo(
+          `<b>BOT · ATENCION: fallo la VENTA real de ${t.ticker}</b>\n` +
+          `IOL rechazo la venta de ${t.qty} × ~${pesos(pxArsSal)} (motivo: ${e.message}).\n` +
+          `<b>La posicion sigue abierta en IOL.</b> El bot reintenta en la proxima pasada; si el aviso se repite, vendela a mano desde la app de IOL.`);
+        continue;
+      }
     }
 
     await supabase.from("paper_iol_trades").update({
@@ -1816,9 +1835,9 @@ async function paperPass() {
     }).eq("id", t.id);
     log(`[${t.modo === "shadow" ? "shadow" : "bot"} ${t.ticker}] CIERRE ${reason}${intradia ? " (intradía)" : ""}: ${pesos(pxArsSal)} · comisiones ${pesos(fees)} · P&L ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} · ${veredicto.toUpperCase()}`);
     if (t.modo !== "shadow") await tgEspejo(
-      `<b>BOT · SALIDA ${t.ticker}</b> por <b>${reason}</b>\n` +
+      `<b>BOT · SALIDA ${t.ticker}</b> por <b>${reason}</b>${MODO_REAL ? " (IOL real: venta enviada a tu cuenta)" : ""}\n` +
       `<b>VENDE ${t.qty} × ${t.ticker}</b> a ~${pesos(pxArsSal)} (US${exitUsd.toFixed(2)})\n` +
-      `P&L simulado: ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))}\n\n` +
+      `P&L ${MODO_REAL ? "real estimado" : "simulado"}: ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))}\n\n` +
       `Si espejaste en Cocos: VENDER ahora al mercado o con limite cerca de ${pesos(pxArsSal)}.`);
     log(`[bot ${t.ticker}]   la misma en Cocos: comisiones ${pesos(feesAlt)} · P&L ${pnlAlt >= 0 ? "+" : "-"}${pesos(Math.abs(pnlAlt))}`);
   }
