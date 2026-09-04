@@ -1774,7 +1774,7 @@ function MidasApp({ allowedModules = null }) {
             ) : active === "research-dia" ? (
               <ResearchDelDiaModule key={active} />
             ) : active === "alertas-tv" ? (
-              <TvAlertasModule key={active} />
+              <TvAlertasModule key={active} alertsSys={globalAlerts} />
             ) : active === "caja-tiempo" ? (
               <CajaTiempoModule key={active} />
             ) : active === "pnl-instrumento" ? (
@@ -25607,7 +25607,7 @@ function ResearchDelDiaModule() {
   );
 }
 
-function TvAlertasModule() {
+function TvAlertasModule({ alertsSys } = {}) {
   const { user } = useAuth();
   const { fx } = useDashboardFx();
   const { prices: livePx } = useStockPrices();
@@ -25768,6 +25768,15 @@ function TvAlertasModule() {
           </p>
         </div>
         <div className="flex items-center" style={{ gap: 14 }}>
+          {alertsSys && (
+            <button
+              onClick={() => alertsSys.togglePopups()}
+              title="Los popups de Chrome tapan las otras pestañas mientras operás. Con popups OFF siguen el beep y el registro en pantalla; solo se callan las ventanitas del navegador."
+              style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: C.panel, color: alertsSys.popupsOff ? C.muted : C.accent, border: `1px solid ${alertsSys.popupsOff ? C.border : C.accentBorder}`, borderRadius: 6, padding: "7px 13px" }}
+            >
+              {alertsSys.popupsOff ? "Popups OFF (solo sonido)" : "Popups ON"}
+            </button>
+          )}
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em" }}>CCL</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums" }}>
