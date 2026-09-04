@@ -16626,10 +16626,21 @@ function PortfolioDashboard({ onNavigate }) {
   // cantidad de boletos historicos ("COC 517") y no coincidia con el "(14)"
   // de Posiciones consolidadas de abajo (pedido de LP, 04/09/2026).
   const brokerOpenCounts = useMemo(() => {
+    // Mismo criterio que los chips de tipo de la tabla (ver el FIX 24/08 de
+    // las letras vencidas): una LETRA VENCIDA no es tenencia — su cobro entra
+    // por caja como "Renta y Amortizacion", no como venta, y el neto queda
+    // distinto de cero para siempre. Sin este filtro el chip decia "COC 16"
+    // con 14 posiciones reales (S29Y6 y S30A6, vencidas, seguian contando).
+    const hoyISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
     const porBroker = new Map();
     for (const p of positions) {
       const b = p.broker || "manual";
-      const tk = `${p.ticker}|${p.instrument_type}`;
+      const tkU = (p.ticker || "").trim().toUpperCase();
+      if (p.instrument_type === "bond_ars" || p.instrument_type === "bond_usd") {
+        const mat = parseLetraMaturity(tkU);
+        if (mat && mat < hoyISO) continue;
+      }
+      const tk = `${tkU}|${p.instrument_type}`;
       if (!porBroker.has(b)) porBroker.set(b, new Map());
       const m = porBroker.get(b);
       const q = (Number(p.quantity) || 0) * (p.operation_type === "sell" ? -1 : 1);
