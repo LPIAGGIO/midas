@@ -559,6 +559,19 @@ async function main() {
             (regime === "mixto" ? " · regimen mixto (media posicion)" : ""),
             regime === "mixto" ? 0.5 : 1).catch((e) => log(`[paper ${tk}] ${e.message}`));
         }
+        /* LIBRO SOMBRA (A/B sin filtro, pedido de LP 04/09/2026): opera TODO
+         * soporte con stop y target validos — sin exigir score, R:R, tendencia,
+         * regimen ni earnings. Misma gestion (fill pesimista, trailing 2R,
+         * stop, target, 48h) y sizing de riesgo fijo, SIN limite de capital y
+         * completamente MUDO. En unas semanas se comparan los dos libros:
+         * expectancy por trade con filtro vs sin filtro — el veredicto final
+         * sobre cuanta selectividad conviene, cortado ademas por score/regimen
+         * (quedan grabados en la senal). */
+        if (BOT_UNIVERSO.has(tk.toUpperCase()) && modo !== "local_ars" && stopLvl && stopLvl > 0 && stopLvl < buyZone.hi && sellZone) {
+          await paperSignal(symUsa, tk, buyZone.hi, stopLvl, sellZone.lo, sc.score, Number(rr ?? 0),
+            `SIN FILTRO · score ${sc.score}/10 · R:R ${rr == null ? "s/d" : fmt1(rr)} · rgm ${regime}${contraTendencia ? " · CONTRA-TENDENCIA" : ""} · tendencia ${estr}`,
+            1, "shadow").catch((e) => log(`[shadow ${tk}] ${e.message}`));
+        }
         // 2b. Entrada swing (zona diaria más abajo) — para trade, no scalp.
         // La etiqueta CONTRA-TENDENCIA aplica acá también: la swing es la
         // tentación clásica de la promediada.
@@ -1445,11 +1458,19 @@ async function iolCancelar(numero) {
 // 2,5%.
 const DERIVA_MAX = 0.005;
 
-async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskMult = 1) {
+/* libro: "paper" (el bot real, con filtros y espejo) o "shadow" (el A/B SIN
+ * FILTRO pedido por LP el 04/09/2026: opera TODO soporte que el kit detecte
+ * —cualquier score, R:R, regimen, hasta contra-tendencia— con la MISMA
+ * gestion de stop/trailing/target, para medir si la selectividad suma o
+ * resta. El shadow es MUDO (cero Telegram, cero ordenes reales) y no consume
+ * el capital del libro paper: mide expectancy por trade, no P&L de cartera). */
+async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskMult = 1, libro = "paper") {
   if (!BOT_UNIVERSO.has(String(tk).toUpperCase())) return;   // opera 3 papeles, no todo el tablero
-  const { data: ex } = await supabase.from("paper_iol_trades").select("id,status,entry_limit").eq("sym", sym).in("status", ["pending", "open"]);
-  if ((ex || []).some((t) => t.status === "open")) return;          // ya hay posición en el papel
-  const pend = (ex || []).filter((t) => t.status === "pending");
+  const esShadow = libro === "shadow";
+  const { data: exAll } = await supabase.from("paper_iol_trades").select("id,status,entry_limit,modo").eq("sym", sym).in("status", ["pending", "open"]);
+  const ex = (exAll || []).filter((t) => (t.modo === "shadow") === esShadow); // cada libro se deduplica solo
+  if (ex.some((t) => t.status === "open")) return;          // ya hay posición en el papel (en este libro)
+  const pend = ex.filter((t) => t.status === "pending");
   if (pend.some((t) => Math.abs(Number(t.entry_limit) - entry) / entry < 0.005)) return; // misma señal (rearme)
   if (pend.length) {
     await supabase.from("paper_iol_trades").update({
@@ -1457,8 +1478,8 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
       nota_sim: "reemplazada por una señal más fresca antes de llegar a ejecutarse",
     }).in("id", pend.map((t) => t.id));
     // El espejo en Cocos tiene que enterarse: su orden vieja quedaria colgada
-    // mientras el bot ya esta mirando otro nivel.
-    for (const p of pend) {
+    // mientras el bot ya esta mirando otro nivel. (El shadow no tiene espejo.)
+    if (!esShadow) for (const p of pend) {
       await tgEspejo(
         `<b>BOT · CANCELADA ${tk}</b>\n` +
         `La orden a US$${Number(p.entry_limit).toFixed(2)} se reemplaza por una señal nueva (viene otro aviso con el nivel fresco).\n\n` +
@@ -1477,34 +1498,39 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
   // 03/09): mitad de riesgo mientras juntamos muestra para el veredicto final.
   let qty = Math.floor((CAP_ARS * BOT_RISK * riskMult) / riesgoUnidad);
   // Sin palanca: lo comprometido en órdenes vivas de OTROS papeles limita ésta.
-  const { data: vivas } = await supabase.from("paper_iol_trades")
-    .select("qty,px_ars_entrada,entry_limit,ratio").in("status", ["pending", "open"]).neq("sym", sym);
-  const comprometido = (vivas || []).reduce(
-    (s, t) => s + t.qty * Number(t.px_ars_entrada ?? Number(t.entry_limit) * Number(t.ratio ?? 0)), 0);
-  const disponible = CAP_ARS - comprometido;
+  // El SHADOW no consume ni respeta el capital: mide expectancy por trade con
+  // sizing fijo de riesgo, sin el ruido de "no habia plata ese dia".
   const precioUnidad = entry * rArs;
-  qty = Math.min(qty, Math.floor(disponible / precioUnidad));
-  if (qty < 1) {
-    log(`[bot ${tk}] señal descartada: quedan ${pesos(disponible)} y cada unidad cuesta ${pesos(precioUnidad)}`);
-    return;
+  if (!esShadow) {
+    const { data: vivas } = await supabase.from("paper_iol_trades")
+      .select("qty,px_ars_entrada,entry_limit,ratio").in("status", ["pending", "open"]).neq("sym", sym).neq("modo", "shadow");
+    const comprometido = (vivas || []).reduce(
+      (s, t) => s + t.qty * Number(t.px_ars_entrada ?? Number(t.entry_limit) * Number(t.ratio ?? 0)), 0);
+    const disponible = CAP_ARS - comprometido;
+    qty = Math.min(qty, Math.floor(disponible / precioUnidad));
+    if (qty < 1) {
+      log(`[bot ${tk}] señal descartada: quedan ${pesos(disponible)} y cada unidad cuesta ${pesos(precioUnidad)}`);
+      return;
+    }
   }
+  if (qty < 1) return;
 
   const fila = {
     ticker: tk, sym, senal, score, rr, status: "pending", qty,
     entry_limit: entry, stop, stop_inicial: stop, target, r_value: entry - stop,
-    modo: MODO_REAL ? "real" : "paper", perfil: PERFIL, ratio: Math.round(rArs * 100) / 100,
+    modo: esShadow ? "shadow" : (MODO_REAL ? "real" : "paper"), perfil: PERFIL, ratio: Math.round(rArs * 100) / 100,
     regla_salida: "trailing_2r",
     px_ars_orden: Math.round(precioUnidad),
     nota_sim: `Nivel de compra US$${entry.toFixed(2)} ≈ ${pesos(precioUnidad)} por unidad. Esperando que el papel baje a buscarlo. Si llega: compra ${qty}, vende en US$${target.toFixed(2)} ≈ ${pesos(target * rArs)}, corta en US$${stop.toFixed(2)} ≈ ${pesos(stop * rArs)}.`,
   };
-  if (MODO_REAL) {
+  if (MODO_REAL && !esShadow) {
     try { fila.broker_order_id = await iolOrden("compra", tk, qty, precioUnidad); }
     catch (e) { log(`[bot ${tk}] NO se mandó la orden real: ${e.message}`); return; }
   }
   const { error } = await supabase.from("paper_iol_trades").insert(fila);
   if (error) throw new Error(error.message);
-  log(`[bot ${tk}] ${MODO_REAL ? "ORDEN REAL" : "orden simulada"}: ${qty} × ${pesos(precioUnidad)} (US${entry.toFixed(2)}) · stop ${stop.toFixed(2)} · target ${target.toFixed(2)} · compromete ${pesos(qty * precioUnidad)}`);
-  await tgEspejo(
+  log(`[${esShadow ? "shadow" : "bot"} ${tk}] ${MODO_REAL && !esShadow ? "ORDEN REAL" : "orden simulada"}: ${qty} × ${pesos(precioUnidad)} (US${entry.toFixed(2)}) · stop ${stop.toFixed(2)} · target ${target.toFixed(2)} · compromete ${pesos(qty * precioUnidad)}`);
+  if (!esShadow) await tgEspejo(
     `<b>BOT · orden colocada</b> (${MODO_REAL ? "IOL real" : "simulada"})\n` +
     `<b>COMPRA ${qty} × ${tk}</b> limite ${pesos(precioUnidad)} (US${entry.toFixed(2)})\n` +
     `Stop ${pesos(stop * rArs)} · Target ${pesos(target * rArs)}\n` +
@@ -1524,8 +1550,8 @@ async function paperPass() {
       status: "cancelled", exit_reason: `expirada ${BOT_VENTANA_H}h sin fill`, veredicto: "sin_fill",
       nota_sim: `El papel nunca bajó a US$${Number(t.entry_limit).toFixed(2)} en ${BOT_VENTANA_H}hs: la orden se cayó sola, sin costo. No hubo decisión que juzgar.`,
     }).eq("id", t.id);
-    log(`[bot ${t.ticker}] orden expirada sin ejecutarse (el precio no llegó al nivel)`);
-    await tgEspejo(
+    log(`[${t.modo === "shadow" ? "shadow" : "bot"} ${t.ticker}] orden expirada sin ejecutarse (el precio no llegó al nivel)`);
+    if (t.modo !== "shadow") await tgEspejo(
       `<b>BOT · CANCELADA ${t.ticker}</b>\n` +
       `La orden de compra a ${pesos(Number(t.px_ars_orden) || Number(t.entry_limit) * Number(t.ratio || 0))} expiro sin ejecutarse.\n\n` +
       `Si la espejaste en Cocos, CANCELALA — el bot ya no la sigue.`);
@@ -1613,7 +1639,7 @@ async function paperPass() {
        * limite quedo un tick arriba, te quedas comprado solo. El stop no se
        * puede dejar puesto como limite — si toca, llega el aviso de SALIDA:
        * ahi se cancela la venta y se vende a mercado. */
-      await tgEspejo(
+      if (t.modo !== "shadow") await tgEspejo(
         `<b>BOT · ENTRO ${t.ticker}</b>\n` +
         `Fill ${t.qty} × ${pesos(pxArs)} (US${pxUsd.toFixed(2)}) · total ${pesos(pxArs * t.qty)}\n` +
         `Target ${pesos(Number(t.target) * rArs)} · Stop ${pesos(Number(t.stop) * rArs)}\n\n` +
@@ -1725,7 +1751,7 @@ async function paperPass() {
     const veredicto = pnlArs > 0 ? "acierto" : "error";
 
     let ordenSalida = null;
-    if (MODO_REAL) {
+    if (MODO_REAL && t.modo !== "shadow") {
       try { ordenSalida = await iolOrden("venta", t.ticker, t.qty, pxArsSal); }
       catch (e) { log(`[bot ${t.ticker}] NO se pudo mandar la venta real: ${e.message} — la posición sigue abierta`); continue; }
     }
@@ -1739,8 +1765,8 @@ async function paperPass() {
       broker_order_id: ordenSalida || t.broker_order_id,
       nota_sim: `Cerró por ${reason}${intradia ? " el mismo día (IOL bonifica la comisión de la segunda pata)" : ""}. Vendió ${t.qty} × ${pesos(pxArsSal)} contra ${pesos(pxArsEnt)} de entrada. Comisiones ${pesos(fees)}. Resultado ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} → la decisión fue ${veredicto === "acierto" ? "CORRECTA" : "EQUIVOCADA"}.`,
     }).eq("id", t.id);
-    log(`[bot ${t.ticker}] CIERRE ${reason}${intradia ? " (intradía)" : ""}: ${pesos(pxArsSal)} · comisiones ${pesos(fees)} · P&L ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} · ${veredicto.toUpperCase()}`);
-    await tgEspejo(
+    log(`[${t.modo === "shadow" ? "shadow" : "bot"} ${t.ticker}] CIERRE ${reason}${intradia ? " (intradía)" : ""}: ${pesos(pxArsSal)} · comisiones ${pesos(fees)} · P&L ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))} · ${veredicto.toUpperCase()}`);
+    if (t.modo !== "shadow") await tgEspejo(
       `<b>BOT · SALIDA ${t.ticker}</b> por <b>${reason}</b>\n` +
       `<b>VENDE ${t.qty} × ${t.ticker}</b> a ~${pesos(pxArsSal)} (US${exitUsd.toFixed(2)})\n` +
       `P&L simulado: ${pnlArs >= 0 ? "+" : "-"}${pesos(Math.abs(pnlArs))}\n\n` +

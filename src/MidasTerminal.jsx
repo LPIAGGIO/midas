@@ -44141,6 +44141,9 @@ function BotIolModule() {
       const { data, error: e } = await supabase
         .from("paper_iol_trades")
         .select("*")
+        // El libro SOMBRA (A/B sin filtro, modo='shadow') no se mezcla con el
+        // track record del bot: vive solo para la comparacion estadistica.
+        .neq("modo", "shadow")
         .order("created_at", { ascending: false })
         .limit(500);
       if (!vivo) return;
