@@ -1421,9 +1421,9 @@ function ratioArs(tk, sym, f) {
  * El worker corre 24/7 en el VPS y no puede usar el MCP de IOL: el MCP es el
  * canal de la sesión interactiva. Usa la API REST con el mismo token que ya
  * mantienen iol-cash-sync e iol-positions-sync.
- * OJO: esta parte todavía NO se probó contra la API en vivo porque la cuenta
- * no está fondeada. Antes de flipear las llaves hay que mandar una orden de
- * prueba chica y verificar la forma de la respuesta. */
+ * Probada en vivo el 04/09/2026: la primera orden (SNDK) fue rechazada por
+ * precio fuera de tick (fix abajo), el 202 con {"ok":false} confirma que el
+ * chequeo de j.ok atrapa los rechazos y el aviso de FALLO llego a Telegram. */
 async function iolToken() {
   const { data } = await supabase.from("linked_brokers")
     .select("access_token,access_expires_at").eq("user_id", BOT_USER).eq("broker", "iol").maybeSingle();
@@ -1436,9 +1436,16 @@ async function iolToken() {
 async function iolOrden(lado, simbolo, cantidad, precio) {
   const token = await iolToken();
   const url = `https://api.invertironline.com/api/v2/operar/${lado === "compra" ? "Comprar" : "Vender"}`;
+  /* BYMA exige precios multiplos del tick ("alteracion minima"): la primera
+   * orden real (SNDK 04/09, $14.352,97) volvio rechazada con "los decimales
+   * indicados no son compatibles con la alteracion minima permitida". Se usa
+   * la misma escala medida en vivo con el espejo de Cocos (tickPiso), y
+   * SIEMPRE piso: en la compra, pagar de menos o quedarse afuera; en la
+   * venta limite el precio es el MINIMO aceptable, asi que el piso garantiza
+   * el cruce — perder un tick es mas barato que quedarse comprado. */
   const body = {
     mercado: "bCBA", simbolo, cantidad,
-    precio: Math.round(precio * 100) / 100,
+    precio: tickPiso(precio),
     plazo: "t1", validez: new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 19),
     tipoOrden: "precioLimite",
   };
