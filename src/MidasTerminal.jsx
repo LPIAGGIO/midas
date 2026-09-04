@@ -26288,11 +26288,19 @@ function useGlobalAlerts() {
   const [notifPerm, setNotifPerm] = useState(typeof Notification !== "undefined" ? Notification.permission : "unsupported");
   const [muted, setMuted] = useState(() => { try { return localStorage.getItem("midas:alerts-muted") === "1"; } catch (e) { return false; } });
   const toggleMute = useCallback(() => setMuted((m) => { const nm = !m; try { localStorage.setItem("midas:alerts-muted", nm ? "1" : "0"); } catch (e) { /* noop */ } return nm; }), []);
+  // Popups del navegador APARTE del mute general (pedido de LP 04/09/2026:
+  // "me salen tantas que no puedo usar otro tab y no me deja operar Cocos").
+  // Con popups OFF siguen el beep y el log en pantalla; solo se callan las
+  // notificaciones de Chrome, que tapan las otras pestañas.
+  const [popupsOff, setPopupsOff] = useState(() => { try { return localStorage.getItem("midas:popups-off") === "1"; } catch (e) { return false; } });
+  const togglePopups = useCallback(() => setPopupsOff((v) => { const nv = !v; try { localStorage.setItem("midas:popups-off", nv ? "1" : "0"); } catch (e) { /* noop */ } return nv; }), []);
+  const popupsOffRef = useRef(popupsOff);
+  useEffect(() => { popupsOffRef.current = popupsOff; }, [popupsOff]);
   const firedRef = useRef(new Set());
   const nearRef = useRef(new Set()); // pre-avisos ya emitidos (uno por alerta)
 
   const fire = useCallback((title, body) => {
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    if (!popupsOffRef.current && typeof Notification !== "undefined" && Notification.permission === "granted") {
       try { new Notification(title, { body }); } catch (e) { /* noop */ }
     }
     flowBeep();
@@ -26333,7 +26341,7 @@ function useGlobalAlerts() {
           nearRef.current.add(a.id);
           if (!muted) {
             softBeep();
-            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+            if (!popupsOffRef.current && typeof Notification !== "undefined" && Notification.permission === "granted") {
               try { new Notification(`⏳ ${a.ticker} se acerca`, { body: `Está ${price} — tu nivel: ${a.price}. Dejá la orden lista.` }); } catch (e) { /* noop */ }
             }
           }
@@ -26377,7 +26385,7 @@ function useGlobalAlerts() {
     return () => { cancelled = true; if (iv) clearInterval(iv); };
   }, [user, fire]);
 
-  return { log, unseen: Math.max(0, log.length - seen), markSeen: () => setSeen(log.length), clearLog: () => { setLog([]); setSeen(0); }, notifPerm, requestPerm, muted, toggleMute };
+  return { log, unseen: Math.max(0, log.length - seen), markSeen: () => setSeen(log.length), clearLog: () => { setLog([]); setSeen(0); }, notifPerm, requestPerm, muted, toggleMute, popupsOff, togglePopups };
 }
 
 function PositionFlowModule({ alertsSys }) {
@@ -26446,13 +26454,22 @@ function PositionFlowModule({ alertsSys }) {
             🔔 Activar avisos + sonido
           </button>
         ) : notifPerm === "granted" ? (
-          <button
-            onClick={() => alertsSys && alertsSys.toggleMute()}
-            title="Pausar / reanudar avisos"
-            style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: C.panel, color: alertsSys && alertsSys.muted ? C.muted : C.green, border: `1px solid ${alertsSys && alertsSys.muted ? C.border : C.green}`, borderRadius: 6, padding: "7px 13px" }}
-          >
-            {alertsSys && alertsSys.muted ? "🔕 Avisos en pausa" : "🔔 Avisos activos"}
-          </button>
+          <>
+            <button
+              onClick={() => alertsSys && alertsSys.toggleMute()}
+              title="Pausar / reanudar avisos"
+              style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: C.panel, color: alertsSys && alertsSys.muted ? C.muted : C.green, border: `1px solid ${alertsSys && alertsSys.muted ? C.border : C.green}`, borderRadius: 6, padding: "7px 13px" }}
+            >
+              {alertsSys && alertsSys.muted ? "🔕 Avisos en pausa" : "🔔 Avisos activos"}
+            </button>
+            <button
+              onClick={() => alertsSys && alertsSys.togglePopups()}
+              title="Los popups de Chrome tapan las otras pestañas mientras operás. Con popups OFF, el beep y el log en pantalla siguen — solo se callan las ventanitas del navegador."
+              style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: C.panel, color: alertsSys && alertsSys.popupsOff ? C.muted : C.accent, border: `1px solid ${alertsSys && alertsSys.popupsOff ? C.border : C.accentBorder}`, borderRadius: 6, padding: "7px 13px" }}
+            >
+              {alertsSys && alertsSys.popupsOff ? "Popups OFF (solo sonido)" : "Popups ON"}
+            </button>
+          </>
         ) : null}
       </div>
 
