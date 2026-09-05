@@ -6,6 +6,7 @@
  *   - BONCAPs (T):    T15E7, T30A7, T30J6, T30J7, T31Y7
  *   - BONCAPs (TT):   TTD26, TTJ26, TTS26
  *   - DUALES (...D):  S2G6D, S2L6D, S2Y6D, SL6D, SS6D
+ *   - TASA VARIABLE:  PBA27, TXMJ9 (sin TIR fija — ver abajo)
  *
  * Excluidos del mapa:
  *   - X tickers (X15Y6, X29Y6, etc.): son el mismo subyacente operado por circuito alternativo
@@ -22,10 +23,11 @@ const MONTH_LETTER = {
 };
 
 // Mapa hardcodeado: ticker -> { type, maturityDate (ISO), finalPayoff, capitalizable }
-//   type: 'lecap' | 'boncap' | 'dual' | 'cer'
+//   type: 'lecap' | 'boncap' | 'dual' | 'cer' | 'floater'
 //   finalPayoff: pesos que paga el bono al vencimiento por cada $100 de VN
 //                (verificado en rendimientos.co — se actualiza con cada licitación nueva)
 //   capitalizable: true para Lecaps/Boncaps a tasa fija
+//   coupons: fechas de pago de renta (solo para los que NO capitalizan al vto)
 export const BOND_REGISTRY = {
   // ─── Lecaps (S) — capitalizan al vencimiento ───
   S15Y6: { type: "lecap", maturityDate: "2026-05-15", finalPayoff: 105.178, capitalizable: true },
@@ -59,6 +61,32 @@ export const BOND_REGISTRY = {
   S2Y6D: { type: "dual", maturityDate: "2026-05-15", capitalizable: true },
   SL6D:  { type: "dual", maturityDate: "2026-07-31", capitalizable: true },
   SS6D:  { type: "dual", maturityDate: "2026-09-30", capitalizable: true },
+
+  // ─── Tasa variable (type "floater") — NO tienen TIR fija ───
+  // La tasa de cada período se fija sobre la marcha (TAMAR, CER), así que
+  // el pago al vencimiento NO se puede saber de antemano: van SIN
+  // finalPayoff a propósito. Entran al registry igual para que el resto
+  // del sistema conozca su vencimiento (Flujos, Liquidez, filtro de
+  // tenencia fantasma, buscador de tickers); las pantallas de carry y
+  // rendimientos los saltean vía isFloatingRate().
+  //
+  // PBA27: TD Prov. de Buenos Aires tasa variable, TAMAR + 7 pp, bullet
+  // al 30/04/2027, renta trimestral. Fechas del aviso de suscripción de
+  // Banco Provincia (10/12/2025).
+  PBA27: {
+    type: "floater",
+    maturityDate: "2027-04-30",
+    capitalizable: false,
+    coupons: ["2026-07-30", "2026-10-30", "2027-01-30", "2027-04-30"],
+  },
+  // TXMJ9: dual CER/TAMAR del Tesoro, bullet al 29/06/2029, sin cupones
+  // (capitaliza). Paga MAX(CER lag 10 hd, TAMAR TEM + 3%), 30/360.
+  // RC 23/2026, emisión 30/04/2026.
+  TXMJ9: {
+    type: "floater",
+    maturityDate: "2029-06-29",
+    capitalizable: true,
+  },
 };
 
 /**
@@ -164,6 +192,26 @@ export function daysToMaturity(maturityDate) {
  *
  * @returns true si debe IGNORARSE
  */
+/**
+ * Tasa variable (floaters TAMAR/BADLAR + margen fijo).
+ *
+ * Estos bonos NO tienen pago al vencimiento conocido de antemano: el
+ * cupón se fija con la tasa de cada período. Sin ese número no hay TIR
+ * computable, así que quedan fuera de las pantallas de carry trade y
+ * rendimientos — meterlos ahí con un payoff supuesto (VN=100) daría un
+ * rendimiento negativo inventado.
+ *
+ * OJO: esto NO los saca del sistema. Siguen en BOND_REGISTRY para que
+ * el vencimiento, los cupones, la valuación a mercado y el filtro de
+ * tenencia fantasma funcionen igual que con cualquier otro bono.
+ *
+ * @returns true si el ticker es de tasa variable
+ */
+export function isFloatingRate(ticker) {
+  const t = (ticker || "").toUpperCase().trim();
+  return BOND_REGISTRY[t]?.type === "floater";
+}
+
 export function shouldIgnoreTicker(ticker) {
   if (!ticker || typeof ticker !== "string") return true;
   const t = ticker.toUpperCase().trim();

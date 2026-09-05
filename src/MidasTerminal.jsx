@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, createContext, useCo
 import { createPortal } from "react-dom";
 import { useAuth } from "./auth/AuthContext.jsx";
 import { supabase } from "./lib/supabase.js";
-import { resolveBond, daysToMaturity, shouldIgnoreTicker, BOND_REGISTRY } from "./bondMaturities.js";
+import { resolveBond, daysToMaturity, shouldIgnoreTicker, isFloatingRate, BOND_REGISTRY } from "./bondMaturities.js";
 import { CEDEAR_CAT } from "./cedearCatalog.js";
 import {
   DLR_REGISTRY,
@@ -7415,6 +7415,7 @@ function getTickerOptions(instrumentType, currentTicker, catalog) {
     const lecaps = [];
     const boncaps = [];
     const duales = [];
+    const floaters = [];
     for (const [t, info] of Object.entries(BOND_REGISTRY)) {
       if (shouldIgnoreTicker(t)) continue;
       if (info.maturityDate && info.maturityDate < todayStr) continue; // ya vencido
@@ -7426,6 +7427,7 @@ function getTickerOptions(instrumentType, currentTicker, catalog) {
       if (info.type === "lecap") lecaps.push(opt);
       else if (info.type === "boncap") boncaps.push(opt);
       else if (info.type === "dual") duales.push(opt);
+      else if (info.type === "floater") floaters.push(opt);
     }
 
     // Particionar catálogo dinámico USD en Bonares / Globales / Otros
@@ -7477,6 +7479,7 @@ function getTickerOptions(instrumentType, currentTicker, catalog) {
     lecaps.sort(sortByKey);
     boncaps.sort(sortByKey);
     duales.sort(sortByKey);
+    floaters.sort(sortByKey);
     bonares.sort(sortByKey);
     globales.sort(sortByKey);
     otrosUsd.sort(sortByKey);
@@ -7486,6 +7489,7 @@ function getTickerOptions(instrumentType, currentTicker, catalog) {
     if (lecaps.length)   groups.push({ label: "Lecaps",   options: lecaps   });
     if (boncaps.length)  groups.push({ label: "Boncaps",  options: boncaps  });
     if (duales.length)   groups.push({ label: "Duales",   options: duales   });
+    if (floaters.length) groups.push({ label: "Tasa variable", options: floaters });
     if (bonares.length)  groups.push({ label: "Bonares",  options: bonares  });
     if (globales.length) groups.push({ label: "Globales", options: globales });
     if (otrosUsd.length) groups.push({ label: "Otros USD", options: otrosUsd });
@@ -12495,6 +12499,30 @@ function FlowsSection({ positions, bondPrices, fx, futurePrices }) {
       if (t === "bond_ars" && BOND_REGISTRY[ticker]?.maturityDate) {
         date = BOND_REGISTRY[ticker].maturityDate;
         typeLabel = "Bono ARS";
+        // Bonos con renta periódica (floaters tipo PBA27): además del
+        // vencimiento, cada cupón es plata que entra. Sin esto el bono
+        // aparecía con un solo flujo dentro de meses y la renta
+        // trimestral no figuraba en ningún lado.
+        //
+        // El monto queda vacío a propósito: el cupón se fija con la tasa
+        // del período (TAMAR + margen) y todavía está devengándose, así
+        // que cualquier número sería inventado. La fecha sí la sabemos.
+        const coupons = BOND_REGISTRY[ticker].coupons;
+        if (Array.isArray(coupons)) {
+          for (const cd of coupons) {
+            if (cd >= date) continue; // el último cupón va con el vto
+            events.push({
+              ticker: g.ticker || "—",
+              type: "Cupón",
+              date: cd,
+              quantity: g.netQty,
+              amount: null,
+              amountSource: null,
+              amountNote: "se fija por tasa del período",
+              currency: g.currency || "ARS",
+            });
+          }
+        }
       } else if (t === "caucion") {
         // Cauciones son no-consolidables: usamos la operación específica.
         // (groupKey incluye el id, así que cada caución sigue siendo única)
@@ -22855,6 +22883,9 @@ function processCarryBonds(bondsRaw) {
     .map((row) => {
       const ticker = row.symbol;
       if (shouldIgnoreTicker(ticker)) return null;
+      // Tasa variable: sin pago al vto conocido no hay TIR. Si cayera en
+      // el `?? 100` de abajo mostraria un rendimiento negativo inventado.
+      if (isFloatingRate(ticker)) return null;
       const resolved = resolveBond(ticker);
       if (!resolved) return null;
       const days = daysToMaturity(resolved.maturityDate);
@@ -35633,6 +35664,10 @@ function CarryTradeModule() {
         // Sintetico DLR (que los trata como duales). Acá se excluyen.
         if (KNOWN_BONTAMS[ticker]) { ignoredCount++; return null; }
 
+        // Floaters (TAMAR + margen, ej PBA27): misma logica que arriba,
+        // el cupon se fija por periodo y no hay pago al vto que anclar.
+        if (isFloatingRate(ticker)) { ignoredCount++; return null; }
+
         const resolved = resolveBond(ticker);
         if (!resolved) { rejectedNoMap.push(ticker); return null; }
 
@@ -38451,18 +38486,29 @@ function SinteticoDolarModule() {
       // M: pago al vencimiento por 100 VN. Cinco fuentes en orden de
       // prioridad:
       //   (1) Override manual del usuario en el input local
-      //   (2) bond_emissions del worker (Supabase, fresco, oficial)
-      //   (3) Para BONTAMs: bontam_floor calculado (escenario peor con
-      //       tasa fija). Va ANTES que el registry porque los TT26 del
-      //       registry tienen un finalPayoff hardcodeado que es exacta-
-      //       mente el mismo floor (verificado: diff < 0.20 entre ambos)
-      //       pero el bontam_floor deja claro la semantica de "piso
+      //   (2) Para BONTAMs: bontam_floor calculado (escenario peor con
+      //       tasa fija). Va primero porque el registry marca los TT26
+      //       como boncap fijo y su finalPayoff ES ese mismo piso, pero
+      //       el bontam_floor deja clara la semantica de "piso
       //       garantizado, el real puede ser mayor si TAMAR supera la fija".
-      //   (4) BOND_REGISTRY.finalPayoff hardcoded (mismo dato que usa
-      //       el CarryTradeModule — verificado contra rendimientos.co,
-      //       cubre todo el universo historico aunque el worker no haya
-      //       visto el bono)
+      //   (3) BOND_REGISTRY.finalPayoff hardcoded (mismo dato que usa
+      //       el CarryTradeModule — asi las dos pantallas no muestran
+      //       TIRs distintas para el mismo bono)
+      //   (4) bond_emissions del worker (Supabase): capta los bonos que
+      //       el registry todavia no tiene
       //   (5) Nada → la fila aparece con TIR vacia
+      //
+      // POR QUE EL REGISTRY LE GANA AL WORKER (sep-2026): el worker
+      // deriva el pago cuando no conoce la fecha de emision exacta y le
+      // sale largo por 0,10-0,25 cada 100 VN. Es poca plata pero al
+      // anualizarla sobre un bono corto explota: S30S6 a 24 dias daba
+      // 29,2% TEA con el worker (117,7859) contra 25,1% con el registry
+      // (117,536). El registry reproduce exacto la capitalizacion 30/360
+      // desde la emision oficial — verificado contra las licitaciones en
+      // S30S6 (2,53% TEM desde 16/03/2026 = 117,5353), S30N6 (2,30%
+      // desde 15/12/2025 = 129,888) y S30O6 (2,55% x 12 meses = 135,278).
+      // Donde el worker SI tiene la emision real (T30J7, RC 3/2026) los
+      // dos coinciden al cuarto decimal.
       const overrideRaw = maturityPayments[bond.ticker];
       const overrideNum = (overrideRaw === "" || overrideRaw == null)
         ? null
@@ -38479,15 +38525,15 @@ function SinteticoDolarModule() {
       if (Number.isFinite(overrideNum) && overrideNum > 0) {
         maturityPayment = overrideNum;
         maturityPaymentSource = "override";
-      } else if (Number.isFinite(workerPago) && workerPago > 0) {
-        maturityPayment = workerPago;
-        maturityPaymentSource = "worker";
       } else if (isBontam && Number.isFinite(bontamFloor) && bontamFloor > 0) {
         maturityPayment = bontamFloor;
         maturityPaymentSource = "bontam_floor";
       } else if (Number.isFinite(registryPago) && registryPago > 0) {
         maturityPayment = registryPago;
         maturityPaymentSource = "registry";
+      } else if (Number.isFinite(workerPago) && workerPago > 0) {
+        maturityPayment = workerPago;
+        maturityPaymentSource = "worker";
       } else if (Number.isFinite(bontamFloor) && bontamFloor > 0) {
         maturityPayment = bontamFloor;
         maturityPaymentSource = "bontam_floor";
@@ -39150,8 +39196,8 @@ TIR_USD    = USD_factor^(365/T) − 1`}
             )}
             {sortedRows.map((row) => {
               // matRaw: valor a mostrar en el input. Sale de la MISMA
-              // cascada que ya resolvio el calculo (override > worker >
-              // registry > bontam_floor). Si la cascada no resuelve, el
+              // cascada que ya resolvio el calculo (override > bontam_floor
+              // > registry > worker). Si la cascada no resuelve, el
               // input queda vacio — no usamos placeholder con un numero
               // porque el usuario lo lee como dato cargado (bug viejo:
               // mostraba "115,5" mientras el calculo usaba el M real del
@@ -39256,13 +39302,21 @@ TIR_USD    = USD_factor^(365/T) − 1`}
                     ) : <span style={{ color: C.dim }}>—</span>}
                   </td>
                   <td style={td}>
-                    {row.tirArs != null ? (
+                    {/* Dual cotizando ARRIBA del piso: la TIR del piso no es
+                        un rendimiento, es el escenario "TAMAR se derrumba por
+                        debajo de la fija todo lo que queda". Anualizada sobre
+                        pocos dias da numeros absurdos (TTS26 a 9 dias daba
+                        -98,7% TEA) que se leen como si el bono perdiera todo.
+                        Mostramos "piso" y dejamos los numeros en el tooltip. */}
+                    {row.isBontamAbovePremium ? (
                       <span
-                        style={{ color: row.isBontamAbovePremium ? C.muted : C.text, cursor: row.isBontamAbovePremium ? "help" : "default" }}
-                        title={row.isBontamAbovePremium
-                          ? "El mercado paga prima sobre el piso de tasa fija (descuenta TAMAR > fija). La TIR mostrada es la del peor caso — el bono probablemente pague más al vencimiento."
-                          : undefined}
+                        style={{ color: C.muted, cursor: "help" }}
+                        title={`Sin TIR: manda la rama TAMAR, no la fija. El piso de tasa fija paga $${row.maturityPayment.toFixed(2)} y el mercado ya cotiza $${row.bondPrice.toFixed(2)} (prima de ${((row.bondPrice / row.maturityPayment - 1) * 100).toFixed(1)}%), asi que el pago real al vto va a ser mayor que el piso. Cuanto mayor depende de como cierre TAMAR — no lo sabemos de antemano, por eso no publicamos un numero.`}
                       >
+                        piso
+                      </span>
+                    ) : row.tirArs != null ? (
+                      <span style={{ color: C.text }}>
                         {fmtPct(row.tirArs * 100)}
                       </span>
                     ) : <span style={{ color: C.dim }}>—</span>}
@@ -39304,21 +39358,25 @@ TIR_USD    = USD_factor^(365/T) − 1`}
                       // TIR USD a mostrar: del modelo "const" (default), con
                       // strategy y horizonte seleccionados. El panel de detalle
                       // muestra ambos modelos (const y curve).
+                      // Mismo criterio que la columna TIR ARS: si el dual
+                      // cotiza arriba del piso, el sintetico calculado sobre
+                      // el piso no es un rendimiento. El detalle (click en la
+                      // fila) sí muestra el escenario completo con su aviso.
+                      if (row.isBontamAbovePremium) {
+                        return (
+                          <span
+                            style={{ color: C.muted, fontWeight: 500, cursor: "help" }}
+                            title="Sin TIR USD: el sintético saldría del piso de tasa fija, pero el mercado ya paga prima sobre ese piso (descuenta TAMAR > fija). Abrí el detalle para ver el escenario de peor caso."
+                          >
+                            piso
+                          </span>
+                        );
+                      }
                       const tirHere = row.multiTir?.[selectedStrategy]?.const?.[selectedHorizon];
                       if (!Number.isFinite(tirHere)) {
                         return <span style={{ color: C.dim, fontWeight: 400 }}>—</span>;
                       }
                       const formatted = formatTeaWithCap(tirHere);
-                      if (row.isBontamAbovePremium) {
-                        return (
-                          <span
-                            style={{ color: C.muted, fontWeight: 500, cursor: "help" }}
-                            title="El mercado paga prima sobre el piso de tasa fija. La TIR USD mostrada es la del peor caso — el sintético real probablemente rinda más si TAMAR queda arriba."
-                          >
-                            {formatted.text}
-                          </span>
-                        );
-                      }
                       if (formatted.isCapped) {
                         return (
                           <span
@@ -39350,6 +39408,19 @@ TIR_USD    = USD_factor^(365/T) − 1`}
                       if (!peak || !Number.isFinite(peak.tir)) {
                         return <span style={{ color: C.dim }}>—</span>;
                       }
+                      // Dual con prima: el peak sale del mismo piso que la TIR,
+                      // asi que tampoco es un rendimiento. Coherente con las
+                      // dos columnas de TIR.
+                      if (row.isBontamAbovePremium) {
+                        return (
+                          <span
+                            style={{ color: C.muted, cursor: "help" }}
+                            title="Sin horizonte óptimo: se calcularía sobre el piso de tasa fija, que no es el pago que va a hacer el bono."
+                          >
+                            piso
+                          </span>
+                        );
+                      }
                       const isCurrentBest = peak.horizon === selectedHorizon;
                       const horizonLabel = peak.horizon === "vto" ? "vto" : `${peak.horizon}d`;
                       const peakFormatted = formatTeaWithCap(peak.tir);
@@ -39375,12 +39446,12 @@ TIR_USD    = USD_factor^(365/T) − 1`}
                             {horizonLabel}
                           </span>
                           <span style={{
-                            color: row.isBontamAbovePremium ? C.muted : (peak.tir > 0 ? C.green : C.red),
+                            color: peak.tir > 0 ? C.green : C.red,
                             fontWeight: 600,
                           }}>
                             {peakFormatted.text}
                           </span>
-                          {pctPeriod != null && !row.isBontamAbovePremium && (
+                          {pctPeriod != null && (
                             <span style={{
                               color: C.dim,
                               fontSize: 9.5,
