@@ -22877,15 +22877,20 @@ function BcraIndicatorsWidget({ expanded }) {
 //   - Vencidos (days <= 0)
 //   - Sin precio (px_ask y c null o 0)
 // ═══════════════════════════════════════════════════════════════════════
-function processCarryBonds(bondsRaw) {
+function processCarryBonds(bondsRaw, emisMap) {
   if (!Array.isArray(bondsRaw)) return [];
   return bondsRaw
     .map((row) => {
       const ticker = row.symbol;
       if (shouldIgnoreTicker(ticker)) return null;
-      // Tasa variable: sin pago al vto conocido no hay TIR. Si cayera en
-      // el `?? 100` de abajo mostraria un rendimiento negativo inventado.
+      // Tasa variable: sin pago al vto conocido no hay TIR computable.
       if (isFloatingRate(ticker)) return null;
+      // Duales TAMAR: el registry los tiene como boncap fijo pero su pago
+      // fijo es solo un PISO, asi que la TIR sale catastrofica cuando TAMAR
+      // le gana a la fija. El CarryTradeModule ya los excluia; este widget
+      // no, y con la tabla expandida mostraba TTS26 en -98,7% TEA y TTD26
+      // en -16,5%. Se analizan en Sintetico DLR, que los trata como duales.
+      if (KNOWN_BONTAMS[ticker]) return null;
       const resolved = resolveBond(ticker);
       if (!resolved) return null;
       const days = daysToMaturity(resolved.maturityDate);
@@ -22893,10 +22898,18 @@ function processCarryBonds(bondsRaw) {
       const priceArs = (row.px_ask || row.c) ? (row.px_ask || row.c) : null;
       if (!priceArs || priceArs <= 0) return null;
 
-      // Pago final del bono: si está en el registry usamos el dato real,
-      // sino fallback a $100 VN (aproximación que subestima rendimiento).
-      const valorFinal = resolved.finalPayoff ?? 100;
-      const hasFinalPayoff = resolved.finalPayoff != null;
+      // Pago final del bono: registry (verificado) → catalogo del worker.
+      // Si no hay ninguno lo DEJAMOS AFUERA. Antes caia a "VN = 100", que
+      // no es una aproximacion conservadora sino un numero falso: para las
+      // Lecaps que capitalizan, 100 esta muy por debajo del pago real y el
+      // bono se mostraba rindiendo negativo (S29E7 en -1,2% cuando rinde
+      // +10,3%; S13N6 en -4,6% cuando rinde +4,6%). Mismo criterio que usa
+      // el CarryTradeModule.
+      const valorFinal = resolved.finalPayoff != null
+        ? resolved.finalPayoff
+        : (emisMap?.get(ticker) || null);
+      if (!(valorFinal > 0)) return null;
+      const hasFinalPayoff = true;
 
       const roiArs = valorFinal / priceArs - 1;
       const tirAnual = Math.pow(1 + roiArs, 365 / days) - 1;
@@ -22904,6 +22917,8 @@ function processCarryBonds(bondsRaw) {
       // que es la convención financiera correcta (un año tiene 365
       // días divididos en 12 meses). Verificado contra lamacro.ar:
       // T30A7 da TEM 2.04% con 365/12, vs 2.01% si usás "30 redondo".
+      // Ademas asi (1+TEM)^12 == TIR anual exacto: con meses de 30 dias
+      // la TEA capitaliza 360 dias y no cierra con su propia TIR.
       const tem = Math.pow(1 + roiArs, (365 / 12) / days) - 1;
       const tea = Math.pow(1 + tem, 12) - 1;
       // TNA para bonos del Tesoro (LECAPs/BONCAPs):
@@ -22953,9 +22968,22 @@ async function fetchCarryBonds() {
   if (_carryBondsCachePromise) return _carryBondsCachePromise;
 
   _carryBondsCachePromise = (async () => {
-    const [bondsRes, letrasRes] = await Promise.all([
+    // Traemos tambien el catalogo del worker (bond_emissions). Sin el, un
+    // bono que no esta en BOND_REGISTRY caia en el viejo `?? 100` y el
+    // widget lo mostraba rindiendo NEGATIVO: S29E7 aparecia en -1,2%
+    // cuando rinde +10,3%. Si Supabase falla seguimos igual, solo que sin
+    // los bonos que dependen de esa fuente.
+    const [bondsRes, letrasRes, emisRes] = await Promise.all([
       fetch("/api/data912?type=bonos"),
       fetch("/api/data912?type=letras"),
+      supabase
+        .from("bond_emissions")
+        .select("ticker, pago_vencimiento")
+        .then((r) => r)
+        .catch((e) => {
+          console.warn("[fetchCarryBonds] bond_emissions fallo:", e?.message);
+          return { data: null };
+        }),
     ]);
     if (!bondsRes.ok) throw new Error("API bonos respondió " + bondsRes.status);
     const bonds = await bondsRes.json();
@@ -22970,7 +22998,12 @@ async function fetchCarryBonds() {
         combined.push(item);
       }
     }
-    const processed = processCarryBonds(combined);
+    const emisMap = new Map();
+    for (const row of emisRes?.data || []) {
+      const pago = Number(row?.pago_vencimiento);
+      if (row?.ticker && pago > 0) emisMap.set(row.ticker, pago);
+    }
+    const processed = processCarryBonds(combined, emisMap);
     _carryBondsCache = processed;
     _carryBondsCacheAt = Date.now();
     _carryBondsCachePromise = null;
@@ -23127,11 +23160,11 @@ function CarryTradeWidget({ expanded }) {
         <tbody>
           {topBonds.map((b, i) => (
             <tr key={b.ticker} style={{ borderBottom: `1px solid ${C.border}` }}>
+              {/* Sin asterisco de "valor final aproximado": ya no aproximamos.
+                  El bono entra con el pago al vto real (registry o catalogo del
+                  worker) o no entra. */}
               <td style={{ padding: "5px", color: C.text, fontWeight: 500 }}>
                 {b.ticker}
-                {!b.hasFinalPayoff && (
-                  <span title="Valor final aproximado a $100 (sin dato real)" style={{ color: C.dim, marginLeft: 4 }}>*</span>
-                )}
               </td>
               <td style={{ padding: "5px", textAlign: "right", color: C.muted }}>
                 {fmtDateDDMM(b.maturityDate)}
@@ -35692,7 +35725,13 @@ function CarryTradeModule() {
         const roiArs = valorFinal / priceArs - 1;
         const tna = roiArs * (365 / days);                      // nominal anual (simple)
         const tirAnual = Math.pow(1 + roiArs, 365 / days) - 1;  // efectiva anual (TEA)
-        const tem = Math.pow(1 + roiArs, 30 / days) - 1;
+        // TEM con meses de 365/12 = 30,4167 dias, igual que el widget del
+        // Dashboard (verificado contra lamacro.ar). Con meses de 30 dias
+        // -como estaba- pasaban dos cosas: la TEM daba ~0,03 pp abajo, y la
+        // TEA salia de capitalizar 360 dias, asi que contradecia a la TIR de
+        // la fila de al lado por ~0,4 pp en TODOS los bonos. Ahora
+        // (1+tem)^12 == tirAnual por construccion.
+        const tem = Math.pow(1 + roiArs, (365 / 12) / days) - 1;
         const tea = Math.pow(1 + tem, 12) - 1;
 
         return {
@@ -36919,6 +36958,19 @@ function ByBandsMode({ bonds, fxRates, scenario, setScenario, usdAmount, setUsdA
     .filter((b) => b.roiUsdScenario != null)
     .reduce((a, b) => (a == null || b.roiUsdScenario > a.roiUsdScenario ? b : a), null);
 
+  // La banda se ensancha sola: desde ene-2026 el piso deflacta por la
+  // inflacion T-2 y el techo inflacta, asi que la distancia entre los dos
+  // crece todos los meses. A sep-2026 el piso proyectado ya va por ~$770
+  // con el mayorista en ~$1.507: el escenario "Piso" implica que el peso
+  // se aprecia la mitad. La cuenta esta bien -es el piso que sale del
+  // regimen- pero el ROI que devuelve es de tres digitos y se lee como si
+  // la pantalla estuviera rota. Avisamos cuando deja de ser una referencia
+  // operativa en vez de mostrar el numero pelado.
+  const refFx = fxRates.oficial || fxRates.mep || null;
+  const floorRef = enriched.length ? enriched[0].exitFx?.floor : null;
+  const floorGap = (refFx && floorRef > 0) ? (refFx / floorRef - 1) : null;
+  const floorFarBelow = scenario === "floor" && floorGap != null && floorGap > 0.15;
+
   return (
     <>
       {/* Inputs row: MEP de entrada (read only) + Monto USD */}
@@ -36945,6 +36997,17 @@ function ByBandsMode({ bonds, fxRates, scenario, setScenario, usdAmount, setUsdA
           {activeScenarioObj?.desc}
         </p>
       </div>
+
+      {floorFarBelow && (
+        <div style={{ marginBottom: 16, fontSize: 11.5, color: C.muted, background: "rgba(250,204,21,0.08)", border: "1px solid rgba(250,204,21,0.25)", padding: "8px 12px", lineHeight: 1.5 }}>
+          <strong style={{ color: C.cat.yellow }}>El piso dejó de ser una referencia operativa.</strong>{" "}
+          Proyecta {fmtARS(floorRef)} contra un dólar de {fmtARS(refFx)} hoy: el mercado está{" "}
+          {(floorGap * 100).toFixed(0)}% arriba, así que este escenario asume que el peso se aprecia{" "}
+          {((1 - 1 / (1 + floorGap)) * 100).toFixed(0)}%. Pasa porque desde enero de 2026 el piso
+          deflacta por inflación mientras el techo inflacta, y la banda se ensancha mes a mes. El ROI
+          de abajo es el techo teórico del escenario, no un pronóstico — para decidir mirá REM o Techo.
+        </div>
+      )}
 
       {scenario === "rem" && bonds.length > 0 && enriched.every((b) => b.exitFx.rem == null) && (
         <div style={{ marginBottom: 16, fontSize: 11.5, color: C.yellow, background: "rgba(250,204,21,0.08)", border: "1px solid rgba(250,204,21,0.25)", padding: "8px 12px" }}>
