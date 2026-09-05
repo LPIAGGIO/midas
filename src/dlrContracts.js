@@ -14,8 +14,8 @@
  *   - DLR/{MES1}/{MES2} (rolls / spreads entre dos vencimientos)
  *   - contratos ya vencidos (se podan al refrescar los seeds)
  *
- * Seed actualizado al 16/07/2026 con settlements de mtr_market_data (feed A3).
- * Spot mayorista (A3500) al mismo día: $1.474,8.
+ * Seed actualizado al 05/09/2026 con settlements de mtr_market_data (feed A3).
+ * Spot mayorista (A3500) al 04/09/2026 (último publicado): $1.507,4.
  *
  * El registry sirve como fallback. La UI permite al usuario actualizar
  * los precios manualmente y los persiste en localStorage hasta que
@@ -59,22 +59,20 @@ function decodeDlrSuffix(suffix) {
 }
 
 // Lista canónica de contratos con sus precios seed (= settlement A3 del
-// 16/07/2026, tomados de mtr_market_data). Los seeds son SOLO fallback si el
+// 05/09/2026, tomados de mtr_market_data). Los seeds son SOLO fallback si el
 // feed/worker no responde; la UI los pisa con el precio live. Al refrescarlos,
 // actualizar también DLR_SPOT_SEED y DLR_SEED_DATE.
 // MANTENIMIENTO: cuando A3 liste un contrato nuevo (hoy el último es ABR27),
 // agregarlo acá — las pantallas (curva, sintético, scalping) iteran este registry.
 const DLR_SEED_RAW = [
-  { suffix: "JUL26", priceSeed: 1483.0 },
-  { suffix: "AGO26", priceSeed: 1510.0 },
-  { suffix: "SEP26", priceSeed: 1536.0 },
-  { suffix: "OCT26", priceSeed: 1564.0 },
-  { suffix: "NOV26", priceSeed: 1594.0 },
-  { suffix: "DIC26", priceSeed: 1624.0 },
-  { suffix: "ENE27", priceSeed: 1654.0 },
-  { suffix: "FEB27", priceSeed: 1684.0 },
-  { suffix: "MAR27", priceSeed: 1715.0 },
-  { suffix: "ABR27", priceSeed: 1745.0 },
+  { suffix: "SEP26", priceSeed: 1528.0 },
+  { suffix: "OCT26", priceSeed: 1553.5 },
+  { suffix: "NOV26", priceSeed: 1580.5 },
+  { suffix: "DIC26", priceSeed: 1608.5 },
+  { suffix: "ENE27", priceSeed: 1637.5 },
+  { suffix: "FEB27", priceSeed: 1665.0 },
+  { suffix: "MAR27", priceSeed: 1698.0 },
+  { suffix: "ABR27", priceSeed: 1727.0 },
 ];
 
 /**
@@ -101,10 +99,10 @@ export const DLR_REGISTRY = DLR_SEED_RAW
  * Spot mayorista (BCRA Com. A 3500) al momento de la captura.
  * Se usa como fallback si /api/dolares no devuelve la casa "mayorista".
  */
-export const DLR_SPOT_SEED = 1474.8;
+export const DLR_SPOT_SEED = 1507.4;
 
 /** Fecha del seed (para mostrar en UI cuando no hay datos editados). */
-export const DLR_SEED_DATE = "2026-07-16";
+export const DLR_SEED_DATE = "2026-09-05";
 
 /**
  * Días desde el SETTLEMENT (T+1) hasta el vencimiento del futuro.
