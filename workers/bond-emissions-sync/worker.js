@@ -12,7 +12,12 @@
  *   - precio de corte (PC) y TIREA (parseados de la tabla)
  *
  * De ahi deriva el pago al vencimiento por 100 VN:
- *   pago_vto = PC × (1 + TIREA)^(years_remaining_at_auction)
+ *   pago_vto = PC × (1 + TIREA)^(dias360(liquidacion, vto) / 360) / 10
+ *
+ * OJO con las dos convenciones (ver computePagoVencimiento): el conteo
+ * es 30/360 y el punto de partida es la LIQUIDACION (T+2 habiles), no la
+ * fecha del articulo. Hacerlo con act/365 desde la fecha del articulo
+ * -como estaba hasta el 05/09/2026- daba el pago largo por 0,14-0,27%.
  *
  * Lo persiste en la tabla bond_emissions (PK ticker). En auctions
  * multiples del mismo bono (reaperturas), validamos consistencia y
@@ -114,10 +119,67 @@ function parseSpanishDate(text) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-function dateDiffDays(isoLater, isoEarlier) {
-  const d1 = new Date(isoLater + "T00:00:00Z");
-  const d2 = new Date(isoEarlier + "T00:00:00Z");
-  return (d1 - d2) / 86400000;
+/**
+ * Dias entre dos fechas con convencion 30/360 (US / Bond Basis).
+ * Es la que usan las Lecaps/Boncaps para capitalizar ("capitaliza a una
+ * TEM de X% desde la emision hasta el vencimiento", meses de 30 dias).
+ */
+function days360(isoStart, isoEnd) {
+  const [y1, m1, d1r] = isoStart.split("-").map(Number);
+  const [y2, m2, d2r] = isoEnd.split("-").map(Number);
+  let d1 = d1r, d2 = d2r;
+  if (d1 === 31) d1 = 30;
+  if (d2 === 31 && d1 === 30) d2 = 30;
+  return (y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1);
+}
+
+/**
+ * Suma N dias habiles (lun-vie) a una fecha ISO.
+ *
+ * NO contempla feriados argentinos: si la liquidacion cae despues de un
+ * feriado, nos corremos un dia y el pago sale ~0,07% largo. Es un orden
+ * de magnitud menos que el error que teniamos, pero si algun dia importa,
+ * el fix es un calendario de feriados BYMA.
+ */
+function addBusinessDays(iso, n) {
+  let d = new Date(iso + "T00:00:00Z");
+  let added = 0;
+  while (added < n) {
+    d = new Date(d.getTime() + 86400000);
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) added++;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+// Letra de mes en la convencion de tickers del Tesoro. Se saltean M/J/A
+// repetidas para evitar ambiguedad: Y=mayo, L=julio, G=agosto.
+const MES_LETRA_TICKER = {
+  1: "E", 2: "F", 3: "M", 4: "A", 5: "Y", 6: "J",
+  7: "L", 8: "G", 9: "S", 10: "O", 11: "N", 12: "D",
+};
+
+/**
+ * Deriva el ticker de una emision NUEVA a partir del vencimiento.
+ *
+ * Los articulos de resultado no traen el codigo cuando el instrumento es
+ * nuevo (dicen solo "(nueva)"), pero el ticker es deterministico:
+ *   [S|T] + DD + letra_de_mes + ultimo digito del anio
+ * donde S = LETRA (Lecap) y T = BONO (Boncap).
+ *
+ * Ej: LETRA con vencimiento 29/01/2027 -> S29E7
+ *     BONO  con vencimiento 30/06/2027 -> T30J7
+ *
+ * Contrastado contra el feed de mercado en S15S6, S16O6, S13N6 y S29E7,
+ * y contra los que ya teniamos cargados a mano (S30S6, T15E7, T30A7,
+ * T30J7, S31G6): la convencion cierra en los nueve.
+ */
+function tickerFromMaturity(rowType, isoVto) {
+  const [y, mo, d] = isoVto.split("-").map(Number);
+  const letra = MES_LETRA_TICKER[mo];
+  if (!letra || !Number.isFinite(d) || !Number.isFinite(y)) return null;
+  const prefix = String(rowType).toUpperCase() === "LETRA" ? "S" : "T";
+  return `${prefix}${String(d).padStart(2, "0")}${letra}${y % 10}`;
 }
 
 function parseSpanishNumber(s) {
@@ -306,9 +368,14 @@ function parseArticle(html, url) {
     }
   }
 
+  // NO cortamos si no hay footnotes. Desde ~mediados de 2026 los articulos
+  // dejaron de publicar el "capitaliza a una TEM de X%" y el corte dejaba
+  // afuera el articulo ENTERO: por eso el catalogo se quedo clavado en la
+  // licitacion de feb-2026 aunque hubo licitaciones en junio, julio y
+  // agosto. La TEM es metadato; el pago al vto sale de PC y TIREA, que si
+  // estan en la tabla. Sin footnote el tipo lo sacamos de LETRA/BONO.
   if (temByTicker.size === 0) {
-    dbg(`Sin footnotes de TEM en ${url}`);
-    return null;
+    dbg(`Sin footnotes de TEM en ${url} - sigo igual, el pago no depende de la TEM`);
   }
 
   // 3. Filas de la tabla como unidades atomicas.
@@ -330,15 +397,43 @@ function parseArticle(html, url) {
   //   m[6] = "reapertura" | "nueva" | undefined
   //   m[7] = celda PC/TEM como texto crudo
   //   m[8] = TIREA
-  const rowRegex = /(LETRA|BONO)\s+DEL\s+TESORO\s+NACIONAL\s+CAPITALIZABLE\s+EN\s+PESOS\s+CON\s+VENCIMIENTO\s+(\d{1,2})\s+DE\s+(\w+)\s+DE\s+(\d{4})\s+\(([A-Z]{1,2}\d{1,2}[A-Z]\d)(?:\s*[-\u2013]\s*(reapertura|nueva))?\s*\)(?:\s*\(\d+\))?[^|]*\|[^|]*\|[^|]*\|[^|]*\|\s*([^|]+?)\s*\|\s*([\d.,]+)\s*%/gi;
+  // OJO con el parentesis: las EMISIONES NUEVAS vienen como "(nueva)",
+  // SIN ticker \u2014 el codigo todavia no esta asignado al momento de la
+  // licitacion. Por eso el ticker es opcional en el regex y lo derivamos
+  // del vencimiento (ver tickerFromMaturity). Hasta el 05/09/2026 el
+  // regex lo exigia y se comia TODAS las emisiones nuevas: el bono recien
+  // aparecia cuando lo reabrian meses despues, y si no lo reabrian nunca,
+  // nunca entraba. Asi se habian perdido S15S6, S16O6, S13N6 y S29E7, que
+  // son de las Lecaps mas operadas del mercado.
+  const rowRegex = /(LETRA|BONO)\s+DEL\s+TESORO\s+NACIONAL\s+CAPITALIZABLE\s+EN\s+PESOS\s+CON\s+VENCIMIENTO\s+(\d{1,2})\s+DE\s+(\w+)\s+DE\s+(\d{4})\s+\(\s*(?:([A-Z]{1,2}\d{1,2}[A-Z]\d)\s*(?:[-\u2013]\s*)?)?(reapertura|nueva)?\s*\)(?:\s*\(\d+\))?[^|]*\|[^|]*\|[^|]*\|[^|]*\|\s*([^|]+?)\s*\|\s*([\d.,]+)\s*%/gi;
 
   const bondMentions = [];
   while ((m = rowRegex.exec(text)) !== null) {
     const rowType = m[1]; // "LETRA" o "BONO"
-    const ticker = m[5].toUpperCase();
     const emissionLabel = m[6] ? m[6].toLowerCase() : null; // "reapertura" | "nueva" | null
     const pcOrTemRaw = m[7].trim();
     const tirea_pct = parseSpanishNumber(m[8]);
+
+    // Parentesis vacio: no es una fila de instrumento, la salteamos.
+    if (!m[5] && !emissionLabel) {
+      dbg(`fila sin ticker ni etiqueta (vto ${m[2]}/${m[3]}/${m[4]}) - skip`);
+      continue;
+    }
+
+    // Validar fecha de vencimiento (va primero: de ella sale el ticker
+    // cuando el articulo no lo trae).
+    const vtoDate = parseSpanishDate(`${m[2]} de ${m[3]} de ${m[4]}`);
+    if (!vtoDate) {
+      dbg(`vto invalido (${m[2]} ${m[3]} ${m[4]})`);
+      continue;
+    }
+
+    const ticker = m[5] ? m[5].toUpperCase() : tickerFromMaturity(rowType, vtoDate);
+    if (!ticker) {
+      dbg(`no pude derivar ticker para vto ${vtoDate} (${rowType})`);
+      continue;
+    }
+    if (!m[5]) dbg(`emision nueva sin ticker en el articulo: derivado ${ticker} de ${vtoDate}`);
 
     // Detectar si la columna 5 trae TEM (X,XX%) o Precio ($ X.XXX,XX).
     // Si tiene %, es una emision nueva con la TEM en la columna.
@@ -367,27 +462,26 @@ function parseArticle(html, url) {
         dbg(`${ticker}: PC invalido (${pcOrTemRaw})`);
         continue;
       }
-      if (!footnote) {
-        // Sin footnote = no podemos saber la TEM. Skip.
-        // (Para reaperturas la TEM SIEMPRE viene en footnote.)
-        dbg(`${ticker}: reapertura/sin-marca sin footnote TEM - skip`);
-        continue;
-      }
       pc = pcNum;
-      tem = footnote.tem;
-      type = footnote.type;
+      if (footnote) {
+        tem = footnote.tem;
+        type = footnote.type;
+      } else {
+        // Formato nuevo: reapertura sin footnote de TEM. NO la salteamos
+        // (antes si, y eso nos dejaba sin las reaperturas recientes). El
+        // pago al vto no necesita la TEM. Guardamos 0, que es el centinela
+        // de "no aplica/desconocida" que ya usa la tabla y que el front
+        // filtra con `tem > 0`. Si el ticker ya existe, el update NO pisa
+        // la TEM vieja, asi que no perdemos el dato que ya teniamos.
+        tem = 0;
+        type = rowType === "LETRA" ? "lecap" : "boncap";
+        dbg(`${ticker}: reapertura sin footnote - type=${type} por LETRA/BONO, TEM sin dato`);
+      }
     }
 
     // Validar TIREA
     if (!Number.isFinite(tirea_pct) || tirea_pct <= 0 || tirea_pct > 500) {
       dbg(`${ticker}: TIREA invalida (${m[8]})`);
-      continue;
-    }
-
-    // Validar fecha de vencimiento
-    const vtoDate = parseSpanishDate(`${m[2]} de ${m[3]} de ${m[4]}`);
-    if (!vtoDate) {
-      dbg(`${ticker}: vto invalido (${m[2]} ${m[3]} ${m[4]})`);
       continue;
     }
 
@@ -413,18 +507,56 @@ function parseArticle(html, url) {
 /**
  * Computa el pago al vencimiento por 100 VN.
  *
- * pago_vto_por_1000VN = PC × (1 + TIREA)^(years_remaining_at_auction)
+ * pago_vto_por_1000VN = PC × (1 + TIREA)^(dias360(liquidacion, vto) / 360)
  * pago_vto_por_100VN  = pago_vto_por_1000VN / 10
  *
- * Esto es invariante del bono: pega lo mismo en cualquier auction
- * (original o reapertura), porque tanto PC como TIREA reflejan el
- * "estado" del bono en ese momento.
+ * Es invariante del bono: da lo mismo en cualquier licitacion (original o
+ * reapertura), porque tanto PC como TIREA reflejan el estado del bono en
+ * ese momento.
+ *
+ * LAS DOS CONVENCIONES, Y POR QUE (medido el 05/09/2026):
+ *
+ *   1. El exponente va en 30/360, no act/365. Estos bonos capitalizan por
+ *      meses de 30 dias, asi que la TIREA publicada esta expresada sobre
+ *      esa misma base.
+ *   2. El punto de partida es la LIQUIDACION (T+2 habiles), no la fecha
+ *      del articulo. El precio de corte es un precio de liquidacion: si
+ *      arrancamos a contar dos dias antes, le sumamos devengamiento que
+ *      el PC no tiene.
+ *
+ * Con act/365 desde la fecha del articulo el pago salia largo de forma
+ * sistematica (+0,14% a +0,27%). Poca plata, pero al anualizarla sobre un
+ * bono corto explota: S30S6 a 24 dias del vto daba 29,2% TEA contra el
+ * 25,1% real. Con las dos convenciones corregidas el error queda en
+ * ±0,003%, contrastado contra cuatro licitaciones independientes:
+ *
+ *   S30N6 12/08 -> 129,8867  (verdad 129,888)
+ *   S30N6 27/08 -> 129,8875  (verdad 129,888)
+ *   T31Y7 27/08 -> 151,5666  (verdad 151,563)
+ *   S30S6 13/05 -> 117,5361  (verdad 117,536)
+ *
+ * La "verdad" de contraste es 100 × (1 + TEM)^meses30/360 desde la
+ * emision oficial, que es la definicion del instrumento segun el propio
+ * articulo ("capitaliza a una TEM de X% desde la fecha de emision hasta
+ * su vencimiento").
+ *
+ * LO QUE ESTA FORMULA NO PUEDE RESOLVER: el T+2 habil es la regla, pero
+ * no siempre se cumple. La reapertura de T30A7 del 05/11/2025 (PC 1020,
+ * TIREA 34,23%) da 157,72 contra los 157,341 reales; recien cierra si la
+ * liquidacion fue el lunes 10/11, o sea T+3 habiles. No hay forma de
+ * saberlo desde el articulo -no publica la fecha de liquidacion- asi que
+ * en esos casos el pago sale ~0,25% largo. Por eso: (a) el umbral de
+ * drift esta en 0,2%, para que un caso asi avise en vez de pisar el dato
+ * en silencio, y (b) en el front BOND_REGISTRY le gana a este catalogo
+ * cuando el bono esta en los dos. Si algun dia hace falta cerrarlo del
+ * todo, el camino es la fecha de emision real (Boletin Oficial / RC) y
+ * calcular 100 × (1 + TEM)^meses, que es exacto por definicion.
  */
 function computePagoVencimiento(pc, tirea, fecha_auction, fecha_vto) {
-  const days = dateDiffDays(fecha_vto, fecha_auction);
+  const fecha_liquidacion = addBusinessDays(fecha_auction, 2);
+  const days = days360(fecha_liquidacion, fecha_vto);
   if (days <= 0) return null;
-  const years = days / 365;
-  const pagoPor1000 = pc * Math.pow(1 + tirea, years);
+  const pagoPor1000 = pc * Math.pow(1 + tirea, days / 360);
   return pagoPor1000 / 10;
 }
 
@@ -474,12 +606,17 @@ async function upsertEmission(record) {
   }
 
   // 2b. Update: mantener first_* viejos, actualizar last_* si es mas nuevo.
-  // Validar drift del pago_vencimiento (debe ser invariante; >1% = log).
+  // Validar drift del pago_vencimiento (debe ser invariante entre
+  // licitaciones del mismo bono). Umbral 0,2%: con las convenciones
+  // corregidas dos licitaciones distintas dan el mismo pago con ±0,002%
+  // de error, asi que cualquier cosa arriba de 0,2% es un parseo malo o
+  // un cambio real en el instrumento. Antes el umbral era 1% y nunca
+  // saltaba, justamente porque el error sistematico caia por debajo.
   const newer = fecha_articulo > existing.last_auction_date;
   const earlier = fecha_articulo < existing.first_auction_date;
   const drift = Math.abs(pago_vencimiento - Number(existing.pago_vencimiento)) /
                 Number(existing.pago_vencimiento);
-  if (drift > 0.01) {
+  if (drift > 0.002) {
     warn(`${ticker}: drift ${(drift * 100).toFixed(2)}% (existing ${Number(existing.pago_vencimiento).toFixed(4)}, new ${pago_vencimiento.toFixed(4)}) - articulo ${source_url}`);
   }
 
