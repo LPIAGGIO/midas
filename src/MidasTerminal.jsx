@@ -14445,12 +14445,20 @@ function getPositionMaturity(p) {
 // dígito-año. Letras de mes BYMA: E F M A Y J L G S O N D = ene..dic (Y=mayo,
 // L=julio, G=agosto — se saltean M/J/A para evitar ambigüedad). Ej: S29Y6 =
 // 29/05/2026, T30J7 = 30/06/2027. Devuelve "YYYY-MM-DD" o null si no matchea.
+//
+// El regex NO cubre los duales TAMAR (TTS26, TTD26) ni los duales que terminan
+// en D (S2G6D): su segundo caracter no es un dia. Para esos caemos a
+// BOND_REGISTRY, que tiene el vencimiento verificado. Importa porque de esta
+// funcion cuelga el filtro de "tenencia fantasma": una letra vencida cobra por
+// caja como "Renta y Amortizacion" (sin ticker), la posicion nunca se cierra y
+// sin vencimiento conocido quedaria valuada a costo para siempre.
 const LETRA_MES = { E: 1, F: 2, M: 3, A: 4, Y: 5, J: 6, L: 7, G: 8, S: 9, O: 10, N: 11, D: 12 };
 function parseLetraMaturity(ticker) {
-  const mm = /^([ST])(\d{2})([EFMAYJLGSOND])(\d)$/.exec((ticker || "").toUpperCase().trim());
-  if (!mm) return null;
+  const tk = (ticker || "").toUpperCase().trim();
+  const mm = /^([ST])(\d{2})([EFMAYJLGSOND])(\d)$/.exec(tk);
+  if (!mm) return BOND_REGISTRY[tk]?.maturityDate || null;
   const dd = +mm[2], mon = LETRA_MES[mm[3]], yr = 2020 + (+mm[4]);
-  if (!mon || dd < 1 || dd > 31) return null;
+  if (!mon || dd < 1 || dd > 31) return BOND_REGISTRY[tk]?.maturityDate || null;
   return `${yr}-${String(mon).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
 }
 
