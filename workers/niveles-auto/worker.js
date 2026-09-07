@@ -1623,6 +1623,23 @@ async function paperPass() {
   if (!trades?.length) return;
   const now = Date.now();
   for (const t of trades.filter((x) => x.status === "pending" && now - new Date(x.created_at).getTime() > BOT_VENTANA_H * 3600 * 1000)) {
+    /* Si el trade es real, PRIMERO se baja la orden del broker. Marcar la fila
+     * y dejar la orden viva fue el bug del 05-07/09: la validez de 24h NO la
+     * mata — IOL re-ingresa la orden vigente al cierre de cada rueda con un
+     * NUMERO NUEVO (mismos parametros, otra id), y quedo una huerfana de $488k
+     * apoyada tres ruedas sin nadie gestionandola. El cancel es best-effort:
+     * si la id ya fue renumerada por IOL, falla — y ahi el unico camino es
+     * avisar para bajarla a mano. */
+    if (t.modo === "real" && t.broker_order_id) {
+      try { await iolCancelar(t.broker_order_id); log(`[bot ${t.ticker}] orden ${t.broker_order_id} cancelada en IOL (expiro la ventana)`); }
+      catch (e) {
+        log(`[bot ${t.ticker}] NO pude cancelar la orden ${t.broker_order_id} en IOL: ${e.message}`);
+        await tgEspejo(
+          `<b>BOT · ATENCION ${t.ticker}</b>\n` +
+          `La orden real expiro para el bot pero NO pude bajarla de IOL (id ${t.broker_order_id}: ${e.message}).\n` +
+          `<b>Cancelala a mano en la app de IOL</b> — ojo que IOL renumera las ordenes por rueda: busca la compra de ${t.qty} × ${t.ticker} pendiente, sea cual sea el numero.`);
+      }
+    }
     await supabase.from("paper_iol_trades").update({
       status: "cancelled", exit_reason: `expirada ${BOT_VENTANA_H}h sin fill`, veredicto: "sin_fill",
       nota_sim: `El papel nunca bajó a US$${Number(t.entry_limit).toFixed(2)} en ${BOT_VENTANA_H}hs: la orden se cayó sola, sin costo. No hubo decisión que juzgar.`,
