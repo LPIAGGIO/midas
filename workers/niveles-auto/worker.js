@@ -1123,7 +1123,13 @@ async function volumeProfilePass() {
 // Todos verificados con precio en data912 (arg_cedears + usa_stocks), que es lo
 // que el bot necesita para derivar el ratio. El sizing no cambia: sigue siendo
 // 1,5% del capital por trade, y CAP_ARS limita cuantas van simultaneas.
-const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL,NVDA,AMD,AAPL,MSFT,GOOGL,META,AMZN,KO,JNJ,XOM,MELI,NU,INTC,SPCX")
+/* Ampliacion 07/09/2026 (pedido de LP: mas espectro para lograr entradas):
+ * +TSLA, ORCL, AVGO, VST, MCD, VIST — los 6 CEDEARs mas operados del dia que
+ * faltaban Y tienen precio USD nativo en data912/usa_stocks. Quedaron afuera
+ * BRK.B y TSM (simbolo local no matchea el feed, caerian a Yahoo en cada
+ * pasada) y los ETFs SPY/QQQ/IBIT (sin feed nativo y clase sin evidencia
+ * propia). Los cripto-proxy (MSTR, HUT) afuera a proposito. */
+const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL,NVDA,AMD,AAPL,MSFT,GOOGL,META,AMZN,KO,JNJ,XOM,MELI,NU,INTC,SPCX,TSLA,ORCL,AVGO,VST,MCD,VIST")
   .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 const BOT_UNIVERSO = new Set(BOT_TICKERS);
 
