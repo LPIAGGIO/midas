@@ -1588,10 +1588,19 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
     try { fila.broker_order_id = await iolOrden("compra", tk, qty, precioUnidad); }
     catch (e) {
       log(`[bot ${tk}] NO se mandó la orden real: ${e.message}`);
-      await tgEspejo(
-        `<b>BOT · FALLO orden real ${tk}</b>\n` +
-        `IOL rechazo la compra de ${qty} × ${pesos(precioUnidad)}: ${e.message}\n` +
-        `No quedo nada colocado — el bot sigue, pero esta senal se perdio.`);
+      /* El aviso va UNA vez cada 6h por ticker+motivo, no en cada reintento:
+       * el 07/09 un saldo insuficiente sostenido (la letra del barrido ocupaba
+       * la caja) genero un telegram por pasada, cada 15 min, toda la manana. */
+      const motivo = /excede el límite de su saldo|saldo/i.test(e.message) ? "saldo" : "otro";
+      const clave = `fallo|${tk}|${motivo}`;
+      const antes = descartes.get(clave);
+      if (!antes || Date.now() - antes >= 6 * 3600 * 1000) {
+        descartes.set(clave, Date.now());
+        await tgEspejo(
+          `<b>BOT · FALLO orden real ${tk}</b>\n` +
+          `IOL rechazo la compra de ${qty} × ${pesos(precioUnidad)}: ${e.message}\n` +
+          `No quedo nada colocado. El bot reintenta en cada pasada mientras la senal siga viva; este aviso no se repite por 6 horas.`);
+      }
       return;
     }
   }
