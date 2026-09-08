@@ -11177,7 +11177,7 @@ function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxSt
           valuationCurrency={valuationCurrency}
           balanceByCurrency={balanceWithIol}
           futureAdjLookup={futureAdjLookup}
-          movements={cashState?.movements}
+          movements={effectiveMovements}
         />
         <DistributionCard
           positions={positions}
