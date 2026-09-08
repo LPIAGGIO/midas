@@ -1400,8 +1400,8 @@ async function cmdDolar(chatId) {
   for (const d of data) if (!seen.has(d.casa)) rows.push({ name: d.nombre, venta: d.venta, compra: d.compra });
   // Tabla monospace alineada con <code> (no <pre>): mantiene la alineación SIN el
   // botón "copy" que <pre> agrega arriba (que se veía mal en el celu).
-  const header = `${"".padEnd(10)}${"venta".padStart(7)}${"compra".padStart(9)}`;
-  const body = rows.map((r) => `${r.name.padEnd(10)}${fInt(r.venta).padStart(7)}${(r.compra != null ? fInt(r.compra) : "—").padStart(9)}`).join("\n");
+  const header = `${"".padEnd(10)}${"compra".padStart(7)}${"venta".padStart(9)}`;
+  const body = rows.map((r) => `${r.name.padEnd(10)}${(r.compra != null ? fInt(r.compra) : "—").padStart(7)}${fInt(r.venta).padStart(9)}`).join("\n");
   await sendMessage(chatId, `💵 <b>Dólar — cotizaciones</b>\n<code>${header}\n${body}</code>`);
 }
 
