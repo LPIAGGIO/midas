@@ -33561,6 +33561,35 @@ function PnlPorInstrumentoModule() {
       }
     } catch (err) { console.warn("[PnlPorInstrumento] consolidate falló:", err); }
 
+    // Letras/boncaps YA VENCIDAS: la consolidada las tira enteras (para la
+    // cartera es correcto — el cobro del vto entra por caja como "Renta y
+    // Amortización", no como venta), pero este reporte es HISTÓRICO y sin
+    // esto perdían todo su P&L (T30J6 vendida entera antes del vto mostraba
+    // "—"; S29Y6/S30A6 quedaban "abiertas s/precio"). Realizado:
+    //   pata vendida:     (PPP venta − PPP compra) × qty vendida / 100
+    //   pata cobrada vto: (pago final del registry − PPP compra) × VN / 100
+    // Si el registry no tiene el pago, mostramos solo la pata vendida.
+    try {
+      const hoyISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      for (const e of acc.values()) {
+        if (e.type !== "bond_ars" && e.type !== "bond_usd") continue;
+        const mat = parseLetraMaturity(e.ticker);
+        if (!mat || mat >= hoyISO) continue;
+        const pppBuy = e.buyQty > 0 ? e.buyNot / e.buyQty : null;
+        if (pppBuy == null) continue;
+        let realized = 0, has = false;
+        if (e.sellQty > 0) { realized += (e.sellNot / e.sellQty - pppBuy) * e.sellQty / 100; has = true; }
+        const held = e.buyQty - e.sellQty;
+        const payoff = Number(BOND_REGISTRY?.[e.ticker]?.finalPayoff);
+        if (held > 0 && Number.isFinite(payoff)) { realized += (payoff - pppBuy) * held / 100; has = true; }
+        if (!has) continue;
+        e.realized = realized;   // la consolidada no aportó nada (las saltea): pisar, no sumar
+        e.total = realized;
+        e.hasPnl = true;
+        e.matured = true;        // vencida y cobrada: no es tenencia abierta
+      }
+    } catch (err) { console.warn("[PnlPorInstrumento] letras vencidas falló:", err); }
+
     // Futuros DUAL (ej. WTI petróleo): liquidan en PESOS vía "Débito/Crédito
     // Cambio" (incluye la pata del dólar), NO por la fórmula USD del consolidado
     // — esa subestima porque ignora la revaluación del dólar de la posición. Su
@@ -33773,7 +33802,9 @@ function PnlPorInstrumentoModule() {
                     <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.muted }}>{r.sellQty > 0 ? fmtQ(r.sellQty) : "—"}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.text }}>{fmtP(r.pppSell)}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: r.open === 0 ? C.dim : C.muted }}>
-                      {r.open === 0 ? "cerrado" : (
+                      {r.open === 0 ? "cerrado" : r.matured ? (
+                        <span style={{ color: C.dim }}>cobrada al vto</span>
+                      ) : (
                         <>{fmtQ(r.open)}{!r.atMarket && r.unrealized === 0 && <span style={{ color: C.dim, fontSize: 9 }}> ·s/precio</span>}</>
                       )}
                     </td>

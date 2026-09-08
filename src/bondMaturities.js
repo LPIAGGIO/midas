@@ -30,6 +30,9 @@ const MONTH_LETTER = {
 //   coupons: fechas de pago de renta (solo para los que NO capitalizan al vto)
 export const BOND_REGISTRY = {
   // ─── Lecaps (S) — capitalizan al vencimiento ───
+  // S30A6: pago verificado contra el cobro real del 30/04/26 en el libro Cocos
+  // ($25.236.760,12 por 19.795.711 VN → 127,486 por 100).
+  S30A6: { type: "lecap", maturityDate: "2026-04-30", finalPayoff: 127.486, capitalizable: true },
   S15Y6: { type: "lecap", maturityDate: "2026-05-15", finalPayoff: 105.178, capitalizable: true },
   S29Y6: { type: "lecap", maturityDate: "2026-05-29", finalPayoff: 132.044, capitalizable: true },
   S17L6: { type: "lecap", maturityDate: "2026-07-17", finalPayoff: 107.920, capitalizable: true },
