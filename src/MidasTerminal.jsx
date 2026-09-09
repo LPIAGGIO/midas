@@ -5135,18 +5135,40 @@ function ImportacionesView() {
 
   // Aplica lo derivado del ledger: reemplaza SOLO lo derivado del libro
   // (source='derivado_libro'), conservando los trades del día que subís desde
-  // Portfolio (source='csv_matriz'). El libro cubre principio de año → ayer; el
-  // import de Portfolio cubre solo hoy — son complementarios, no se pisan.
+  // Portfolio (source='csv_matriz') QUE EL LIBRO TODAVÍA NO CUBRE. El libro
+  // cubre principio de año → su última fecha; el import de Portfolio es el
+  // puente del día. Apenas el libro alcanza una fecha, es la fuente de verdad
+  // y las filas csv_matriz de esa fecha o antes se retiran — sin esto se
+  // duplican al día siguiente (09/09: la venta de 350 XOM cargada desde
+  // Portfolio + la misma venta re-derivada del libro = corto fantasma de 350;
+  // la caución como posición + la deuda re-anclada en caja = deuda doble).
   // IOL (broker='iol') intacto. Devuelve error o null.
   const applyDerived = async (derived) => {
-    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos").filter("extra->>source", "eq", "derivado_libro");
-    // Borra TODA la caja del usuario: la derivada (Σtotal del libro) ya incluye
-    // futuros (Credito/Debito Indice), caución, aranceles, etc. — no debe convivir
-    // con los ajustes del worker de futuros o se duplicaría. (El import de
-    // Portfolio no crea caja, solo posiciones, así que esto no lo toca.)
-    await supabase.from("cash_movements").delete().eq("user_id", user.id);
-    const today = new Date().toISOString().slice(0, 10);
     const allPos = [...derived.positions, ...derived.lots];
+    const libroHasta = allPos.reduce((m, p) => (p.entry_date && p.entry_date > m ? p.entry_date : m), "");
+    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos").filter("extra->>source", "eq", "derivado_libro");
+    if (libroHasta) {
+      await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos")
+        .filter("extra->>source", "eq", "csv_matriz").lte("entry_date", libroHasta);
+    }
+    // Borra la caja del usuario: la derivada (Σtotal del libro) ya incluye
+    // futuros (Credito/Debito Indice), caución, aranceles, etc. — no debe convivir
+    // con los ajustes del worker de futuros o se duplicaría. EXCEPCIÓN: las
+    // patas de caja de las posiciones csv_matriz que el libro todavía no cubre
+    // (source_ref = "trg-<position id>": T+1 pendiente, capital de caución) se
+    // conservan — borrarlas dejaría la posición sin su plata (la caución como
+    // posición sin su depósito descontaba $44M de patrimonio, 09/09).
+    const { data: puentes } = await supabase.from("positions").select("id")
+      .eq("user_id", user.id).eq("broker", "cocos").filter("extra->>source", "eq", "csv_matriz");
+    const keepRefs = (puentes || []).map((p) => `trg-${p.id}`);
+    await supabase.from("cash_movements").delete().eq("user_id", user.id).is("source_ref", null);
+    if (keepRefs.length) {
+      await supabase.from("cash_movements").delete().eq("user_id", user.id)
+        .not("source_ref", "in", `(${keepRefs.map((r) => `"${r}"`).join(",")})`);
+    } else {
+      await supabase.from("cash_movements").delete().eq("user_id", user.id).not("source_ref", "is", null);
+    }
+    const today = new Date().toISOString().slice(0, 10);
     const posRows = allPos.map((p) => ({
       user_id: user.id, ticker: p.ticker, instrument_type: p.instrument_type, operation_type: p.side,
       quantity: p.quantity, entry_price: p.entry_price, entry_currency: p.entry_currency, entry_date: p.entry_date,
