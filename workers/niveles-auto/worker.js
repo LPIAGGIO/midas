@@ -1208,9 +1208,46 @@ async function tgEspejo(texto) {
  * Escala observada, no documental — si Cocos rechaza un multiplo de estos,
  * el que corrige es este piso. */
 function tickPiso(pxArs) {
+  // Escalera FALLBACK (cuando el libro no da evidencia). Re-medida 09/09 con
+  // libros reales: NU/GLD $12k tick 10, XOM/JNJ $26-28k tick 20, AMD $83k y
+  // MU $327k tick 25, SPCX $4,7k tick 2,5. OJO: el tick real es POR
+  // INSTRUMENTO (MU a $327k usa 25, mas fino que XOM a $26k) — por eso la
+  // fuente primaria es tickDelLibro y esto es solo el mejor intento.
   const px = Number(pxArs) || 0;
-  const tick = px >= 50000 ? 50 : px >= 10000 ? 10 : px >= 1000 ? 5 : 1;
-  return Math.floor(px / tick) * tick;
+  const tick = px >= 50000 ? 25 : px >= 25000 ? 20 : px >= 10000 ? 10 : px >= 1000 ? 2.5 : 1;
+  return Math.floor(Math.round(px * 100) / (tick * 100)) * (tick * 100) / 100;
+}
+
+/* Tick real desde el LIBRO del propio papel (IOL Cotizacion → puntas): todas
+ * las puntas vigentes son multiplos del tick del instrumento, asi que el gcd
+ * de sus precios tambien lo es — y pisar a un multiplo del gcd es SIEMPRE un
+ * precio valido (todo multiplo del gcd es multiplo del tick real). Si el
+ * libro esta flaco (<3 precios distintos) o el gcd queda grosero (>0,5% del
+ * precio: puntas casualmente alineadas), devuelve null y se cae a tickPiso. */
+function gcdInt(a, b) { while (b) { const t = a % b; a = b; b = t; } return a; }
+async function tickDelLibro(simbolo, token) {
+  try {
+    const r = await fetch(`https://api.invertironline.com/api/v2/bCBA/Titulos/${simbolo}/Cotizacion`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => null);
+    const centavos = new Set();
+    for (const p of j?.puntas || []) {
+      for (const v of [p.precioCompra, p.precioVenta]) {
+        const c = Math.round(Number(v) * 100);
+        if (Number.isFinite(c) && c > 0) centavos.add(c);
+      }
+    }
+    const unicos = [...centavos];
+    if (unicos.length < 3) return null;
+    let g = unicos[0];
+    for (let i = 1; i < unicos.length; i++) g = gcdInt(g, unicos[i]);
+    const tick = g / 100;
+    const pxRef = Math.min(...unicos) / 100;
+    if (!(tick >= 0.01) || tick > pxRef * 0.005) return null;
+    return tick;
+  } catch { return null; }
 }
 const BOT_RISK = 0.015;      // riesgo por trade: 1,5% del capital
 const BOT_VENTANA_H = 48;    // la orden límite vive 48hs y se cae sola
@@ -1442,16 +1479,22 @@ async function iolToken() {
 async function iolOrden(lado, simbolo, cantidad, precio) {
   const token = await iolToken();
   const url = `https://api.invertironline.com/api/v2/operar/${lado === "compra" ? "Comprar" : "Vender"}`;
-  /* BYMA exige precios multiplos del tick ("alteracion minima"): la primera
-   * orden real (SNDK 04/09, $14.352,97) volvio rechazada con "los decimales
-   * indicados no son compatibles con la alteracion minima permitida". Se usa
-   * la misma escala medida en vivo con el espejo de Cocos (tickPiso), y
-   * SIEMPRE piso: en la compra, pagar de menos o quedarse afuera; en la
-   * venta limite el precio es el MINIMO aceptable, asi que el piso garantiza
-   * el cruce — perder un tick es mas barato que quedarse comprado. */
+  /* BYMA exige precios multiplos del tick ("alteracion minima") y el tick es
+   * POR INSTRUMENTO (rechazos reales: SNDK 04/09 con decimales, XOM 09/09 en
+   * $25.430 porque su tick es 20 y la tabla decia 10). Fuente primaria: el
+   * gcd del libro de puntas del propio papel (tickDelLibro); fallback: la
+   * escalera tickPiso. SIEMPRE piso: en la compra, pagar de menos o quedarse
+   * afuera; en la venta limite el precio es el MINIMO aceptable, asi que el
+   * piso garantiza el cruce — perder un tick es mas barato que quedarse
+   * comprado. */
+  const tick = await tickDelLibro(simbolo, token);
+  const px = tick != null
+    ? Math.floor(Math.round(precio * 100) / Math.round(tick * 100)) * Math.round(tick * 100) / 100
+    : tickPiso(precio);
+  log(`[iol] ${lado} ${simbolo}: pedido $${precio} → $${px} (tick ${tick != null ? tick + " del libro" : "de tabla"})`);
   const body = {
     mercado: "bCBA", simbolo, cantidad,
-    precio: tickPiso(precio),
+    precio: px,
     plazo: "t1", validez: new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 19),
     tipoOrden: "precioLimite",
   };
@@ -1461,7 +1504,7 @@ async function iolOrden(lado, simbolo, cantidad, precio) {
     body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j?.ok === false) throw new Error(`IOL ${lado} ${simbolo}: ${r.status} ${JSON.stringify(j).slice(0, 300)}`);
+  if (!r.ok || j?.ok === false) throw new Error(`IOL ${lado} ${simbolo} @$${px}: ${r.status} ${JSON.stringify(j).slice(0, 300)}`);
   return String(j?.numeroOperacion ?? j?.numero ?? j?.id ?? "");
 }
 
