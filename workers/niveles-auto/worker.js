@@ -1529,6 +1529,60 @@ async function iolCancelar(numero) {
   return true;
 }
 
+/* Estado actual de una orden en IOL ("pendiente", "terminada", "cancelada por
+ * vencimiento de validez", ...). null si no se pudo consultar. */
+async function iolEstado(numero) {
+  const token = await iolToken();
+  const r = await fetch(`https://api.invertironline.com/api/v2/operaciones/${encodeURIComponent(numero)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  return String(j?.estadoActual ?? j?.estado ?? "") || null;
+}
+
+/* Ordenes PENDIENTES de la cuenta del bot en IOL. La cuenta es solo del bot,
+ * asi que matchear por ticker+cantidad alcanza para reconocer un clon. */
+async function iolPendientes() {
+  const token = await iolToken();
+  const r = await fetch(`https://api.invertironline.com/api/v2/operaciones?filtro.estado=pendientes`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!r.ok) return [];
+  const j = await r.json().catch(() => null);
+  return Array.isArray(j) ? j : (j?.operaciones || []);
+}
+
+/* RECONCILIAR la orden real de un trade contra IOL. Medido 09/09 con la API
+ * de estados: IOL CANCELA todas las ordenes apoyadas en cada cierre de rueda
+ * ("cancelada por vencimiento de validez", ~17:28) y solo re-ingresa con
+ * NUMERO NUEVO las que tienen validez restante. O sea: la id guardada caduca
+ * por rueda, y entre el cierre y el re-ingreso puede no haber NADA apoyado
+ * (el fantasma de SNDK 05-09/09: tres dias avisando por una orden que estaba
+ * muerta desde el lunes — el 500 del cancel era IOL negandose a cancelar una
+ * orden ya cancelada).
+ * Devuelve { estado: "viva"|"ejecutada"|"nada", numero } — "viva" actualiza
+ * la fila si la orden se renumero; "ejecutada" es un fill que debe resolver
+ * el chequeo de fills (NO cancelar ni recolocar). */
+async function ordenVivaDe(t) {
+  const estado = await iolEstado(t.broker_order_id).catch(() => null);
+  if (estado && /pendiente|proceso|iniciada/i.test(estado)) return { estado: "viva", numero: String(t.broker_order_id) };
+  if (estado && /terminada|ejecutada|cumplida/i.test(estado)) return { estado: "ejecutada", numero: String(t.broker_order_id) };
+  // La id guardada esta muerta (o no se pudo leer): buscar un clon renumerado.
+  const pend = await iolPendientes().catch(() => []);
+  const clon = pend.find((o) =>
+    String(o.simbolo ?? "").toUpperCase() === String(t.ticker).toUpperCase() &&
+    Math.round(Number(o.cantidad ?? o.cantidadOperada ?? 0)) === Math.round(Number(t.qty)) &&
+    /comp/i.test(String(o.tipo ?? "")));
+  const numero = clon ? String(clon.numero ?? clon.numeroOperacion ?? "") : "";
+  if (!numero) return { estado: "nada", numero: null };
+  if (numero !== String(t.broker_order_id)) {
+    await supabase.from("paper_iol_trades").update({ broker_order_id: numero }).eq("id", t.id);
+    log(`[bot ${t.ticker}] IOL renumero la orden al re-ingresarla: ${t.broker_order_id} → ${numero}`);
+  }
+  return { estado: "viva", numero };
+}
+
 // Cuánto puede despegarse el límite apoyado del nivel vigente antes de
 // recolocar. Medido sobre 231 ruedas de 2026, el CCL se mueve 0,27% en dos días
 // (mediana) y 1,20% en el percentil 90: con 0,3% se recolocaría casi siempre y
@@ -1536,6 +1590,18 @@ async function iolCancelar(numero) {
 // normal y la corrige cuando el movimiento empieza a pesar contra un stop de
 // 2,5%.
 const DERIVA_MAX = 0.005;
+
+// Cadencia de la reconciliación contra IOL cuando el dólar NO corrió el
+// límite (la deriva > DERIVA_MAX reconcilia siempre, sin esperar turno). Cada
+// 5 min por trade cuida el cupo de la API: 3 trades ≈ 36 consultas/hora.
+const RECON_CADA_MS = 5 * 60 * 1000;
+const reconUltima = new Map();
+function deriva_check(t) {
+  const antes = reconUltima.get(t.id) || 0;
+  if (Date.now() - antes < RECON_CADA_MS) return false;
+  reconUltima.set(t.id, Date.now());
+  return true;
+}
 
 /* libro: "paper" (el bot real, con filtros y espejo) o "shadow" (el A/B SIN
  * FILTRO pedido por LP el 04/09/2026: opera TODO soporte que el kit detecte
@@ -1672,21 +1738,25 @@ async function paperPass() {
   if (!trades?.length) return;
   const now = Date.now();
   for (const t of trades.filter((x) => x.status === "pending" && now - new Date(x.created_at).getTime() > BOT_VENTANA_H * 3600 * 1000)) {
-    /* Si el trade es real, PRIMERO se baja la orden del broker. Marcar la fila
-     * y dejar la orden viva fue el bug del 05-07/09: la validez de 24h NO la
-     * mata — IOL re-ingresa la orden vigente al cierre de cada rueda con un
-     * NUMERO NUEVO (mismos parametros, otra id), y quedo una huerfana de $488k
-     * apoyada tres ruedas sin nadie gestionandola. El cancel es best-effort:
-     * si la id ya fue renumerada por IOL, falla — y ahi el unico camino es
-     * avisar para bajarla a mano. */
+    /* Si el trade es real, PRIMERO se baja la orden del broker — pero
+     * RECONCILIANDO contra IOL: al cierre de cada rueda IOL cancela todas las
+     * ordenes y re-ingresa con numero nuevo las que tienen validez restante,
+     * asi que la id guardada puede estar muerta (y el cancel da 500 por
+     * cancelar algo ya cancelado — el fantasma de SNDK 05-09/09) o apuntar a
+     * un clon renumerado. Telegram solo si de verdad quedo algo apoyado que
+     * no se pudo bajar. */
     if (t.modo === "real" && t.broker_order_id) {
-      try { await iolCancelar(t.broker_order_id); log(`[bot ${t.ticker}] orden ${t.broker_order_id} cancelada en IOL (expiro la ventana)`); }
-      catch (e) {
+      try {
+        const viva = await ordenVivaDe(t);
+        if (viva.estado === "viva") { await iolCancelar(viva.numero); log(`[bot ${t.ticker}] orden ${viva.numero} cancelada en IOL (expiro la ventana)`); }
+        else if (viva.estado === "nada") log(`[bot ${t.ticker}] la orden ya no estaba apoyada en IOL (la cancelo el cierre de rueda)`);
+        else log(`[bot ${t.ticker}] OJO: la orden figura EJECUTADA en IOL — no se cancela; el chequeo de fills la va a levantar`);
+      } catch (e) {
         log(`[bot ${t.ticker}] NO pude cancelar la orden ${t.broker_order_id} en IOL: ${e.message}`);
         await tgEspejo(
           `<b>BOT · ATENCION ${t.ticker}</b>\n` +
           `La orden real expiro para el bot pero NO pude bajarla de IOL (id ${t.broker_order_id}: ${e.message}).\n` +
-          `<b>Cancelala a mano en la app de IOL</b> — ojo que IOL renumera las ordenes por rueda: busca la compra de ${t.qty} × ${t.ticker} pendiente, sea cual sea el numero.`);
+          `<b>Cancelala a mano en la app de IOL</b> — busca la compra de ${t.qty} × ${t.ticker} pendiente, sea cual sea el numero.`);
       }
     }
     await supabase.from("paper_iol_trades").update({
@@ -1721,12 +1791,29 @@ async function paperPass() {
        *
        * Sólo aplica en modo real: en paper no hay orden que corregir, el nivel
        * se recalcula solo en cada pasada. */
-      if (MODO_REAL && t.broker_order_id && t.px_ars_orden > 0) {
+      if (MODO_REAL && t.broker_order_id && t.px_ars_orden > 0 &&
+          (deriva_check(t) || Math.abs(Number(t.entry_limit) * rArs / Number(t.px_ars_orden) - 1) > DERIVA_MAX)) {
         const deberia = Number(t.entry_limit) * rArs;
         const deriva = Math.abs(deberia / Number(t.px_ars_orden) - 1);
-        if (deriva > DERIVA_MAX) {
-          try {
-            await iolCancelar(t.broker_order_id);
+        try {
+          /* Reconciliar SIEMPRE, no solo cuando el dolar la corrio: IOL mata
+           * las ordenes en cada cierre y no siempre re-ingresa (validez
+           * corta), asi que "tengo una orden apoyada" es una creencia que
+           * caduca por rueda. Sin esto, el nivel puede tocar con NADA en el
+           * book y el real se pierde el fill que el paper si registra. */
+          const viva = await ordenVivaDe(t);
+          if (viva.estado === "ejecutada") {
+            // fill que el chequeo de fills todavia no proceso: no tocar nada
+          } else if (viva.estado === "nada") {
+            const nuevo = await iolOrden("compra", t.ticker, t.qty, deberia);
+            await supabase.from("paper_iol_trades").update({
+              broker_order_id: nuevo,
+              px_ars_orden: Math.round(deberia),
+              recolocaciones: (t.recolocaciones || 0) + 1,
+            }).eq("id", t.id);
+            log(`[bot ${t.ticker}] la orden no estaba apoyada (la cancelo el cierre de rueda): re-colocada en ${pesos(deberia)}`);
+          } else if (deriva > DERIVA_MAX) {
+            await iolCancelar(viva.numero);
             const nuevo = await iolOrden("compra", t.ticker, t.qty, deberia);
             await supabase.from("paper_iol_trades").update({
               broker_order_id: nuevo,
@@ -1734,9 +1821,9 @@ async function paperPass() {
               recolocaciones: (t.recolocaciones || 0) + 1,
             }).eq("id", t.id);
             log(`[bot ${t.ticker}] orden recolocada: el dólar la corrió ${(deriva * 100).toFixed(2)}% · ${pesos(t.px_ars_orden)} → ${pesos(deberia)}`);
-          } catch (e) {
-            log(`[bot ${t.ticker}] NO se pudo recolocar (${e.message}) — la orden vieja sigue apoyada en ${pesos(t.px_ars_orden)}`);
           }
+        } catch (e) {
+          log(`[bot ${t.ticker}] NO se pudo reconciliar/recolocar (${e.message})`);
         }
       }
       // Una orden límite descansa en el book: alcanza con que el papel haya
