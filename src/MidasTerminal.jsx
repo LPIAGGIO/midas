@@ -15023,7 +15023,11 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
     let unrealizedPnl = null;   // P&L mark-to-market sobre la posición abierta
 
     if (g.instrument_type === "future") {
-      const mult = FUTURE_MULTIPLIER_DEFAULT;
+      // Multiplicador del CONTRATO del grupo (extra.contract_size: WTI=10
+      // barriles, ORO=1 onza; default 1000 = DLR). Estaba clavado en el
+      // default y un WTI mostraba notional y P&L cien veces mas grandes
+      // (short 20 SEP26: +12.500 en vez de +125 USD).
+      const mult = getFutureMultiplier(g.operations?.[0]);
 
       // Construimos el sintético una sola vez. Devuelve los pares
       // COMPRA-espejo + VENTA neteados, y el P&L realizado total
