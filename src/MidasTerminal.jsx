@@ -4945,6 +4945,9 @@ function deriveFromLedger(movs) {
     else if (cat === "trade_otro") type = "stock";
     else if (cat === "futuro") type = "future";
     else type = "bond_ars";
+    // Futuros en dolares: ORO (liquida USD) y WTI (cotiza USD por barril,
+    // liquida pesos al TC de referencia — se modela en USD). El DLR sigue ARS.
+    if (type === "future" && /^(ORO|WTI)/i.test(ticker || "")) cur = "USD-MEP";
 
     const q = Number(m.cantidad) || 0;
     if (Math.abs(q) < 1e-12) continue;
@@ -5172,7 +5175,10 @@ function ImportacionesView() {
     const posRows = allPos.map((p) => ({
       user_id: user.id, ticker: p.ticker, instrument_type: p.instrument_type, operation_type: p.side,
       quantity: p.quantity, entry_price: p.entry_price, entry_currency: p.entry_currency, entry_date: p.entry_date,
-      broker: "cocos", settlement: (p.instrument_type === "fci" || p.instrument_type === "future") ? "CI" : "T1", extra: { source: "derivado_libro" },
+      broker: "cocos", settlement: (p.instrument_type === "fci" || p.instrument_type === "future") ? "CI" : "T1",
+      // contract_size: sin esto un futuro no-DLR derivado del libro caeria al
+      // multiplicador default de 1000 (WTI son 10 barriles, ORO 1 onza).
+      extra: { source: "derivado_libro", ...(p.instrument_type === "future" ? { contract_size: futMultiplier(p.ticker) } : {}) },
     }));
     for (let k = 0; k < posRows.length; k += 200) {
       const { error } = await supabase.from("positions").insert(posRows.slice(k, k + 200));
@@ -16097,7 +16103,13 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
     // resultado 1.000 veces mas grande.
     const isFutureDlr = sec.startsWith("rx_DDF_DLR") || /^DLR\//.test(sym);
     const isFutureOro = sec.startsWith("rx_DUAL_ORO") || sym.toUpperCase().startsWith("ORO/");
-    const isFuture = isFutureDlr || isFutureOro;
+    // WTI (10/09/2026, reglamento MtR): 10 BARRILES por contrato, cotiza en
+    // DOLARES por barril y liquida EN PESOS al TC de referencia de MtR. Se
+    // modela en USD (P&L = Δprecio × 10 × contratos en USD, convertido al
+    // dolar de la app ≈ la liquidacion real; la caja exacta la traen los
+    // Debito/Credito Cambio del libro).
+    const isFutureWti = sec.startsWith("rx_DUAL_WTI") || sym.toUpperCase().startsWith("WTI/");
+    const isFuture = isFutureDlr || isFutureOro || isFutureWti;
     const isBond = sec.startsWith("bm_") || / - XMEV - /.test(sym) || /\bMERV\b/.test(sym);
 
     let ticker = null, instrumentType = null, entryCurrency = null,
@@ -16108,8 +16120,8 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
     if (isFuture) {
       ticker = sym.replace("/", "").toUpperCase();
       instrumentType = "future";
-      entryCurrency = isFutureOro ? "USD-MEP" : "ARS";
-      contractSize = isFutureOro ? 1 : null;   // null = default 1000 (DLR)
+      entryCurrency = (isFutureOro || isFutureWti) ? "USD-MEP" : "ARS";
+      contractSize = isFutureOro ? 1 : isFutureWti ? 10 : null;   // null = default 1000 (DLR)
       settlement = "CI";
       price = rawPrice; // futuros: precio tal cual (1461)
       kind = "Futuro";
@@ -33167,7 +33179,7 @@ function esFlujoExterno(m) {
 // dólares por contrato y el ORO de 1 onza. Ver futuresContractSize() para las
 // posiciones, que sí lo tienen guardado en extra.
 function futMultiplier(ticker) {
-  return /^ORO/i.test(ticker || "") ? 1 : FUTURE_MULTIPLIER_DEFAULT;
+  return /^ORO/i.test(ticker || "") ? 1 : /^WTI/i.test(ticker || "") ? 10 : FUTURE_MULTIPLIER_DEFAULT;
 }
 
 function CajaTiempoModule() {
