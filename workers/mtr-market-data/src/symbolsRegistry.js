@@ -34,8 +34,14 @@ const CAUCIONES_ARS = [
   { securityId: "rx_MAE_CAARS_4D", symbol: "CAARS/4D", segment: "rx_MAE" },
 ];
 
+// WTI: 10 barriles/contrato, cotiza en USD por barril, liquida en pesos al
+// TC de referencia. Refrescado 10/09/2026 (JUL26 vencio; LP quedo short
+// SEP26 y NOV26 — se suscriben esos mas OCT/DIC para el roll y la curva).
 const WTI_FUTURES = [
-  { securityId: "rx_DUAL_WTI_JUL26", symbol: "WTI/JUL26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_WTI_SEP26", symbol: "WTI/SEP26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_WTI_OCT26", symbol: "WTI/OCT26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_WTI_NOV26", symbol: "WTI/NOV26", segment: "rx_DUAL" },
+  { securityId: "rx_DUAL_WTI_DIC26", symbol: "WTI/DIC26", segment: "rx_DUAL" },
 ];
 
 /* Futuros de ACCIONES individuales (segmento rx_DUAL, multiplicador 100 —

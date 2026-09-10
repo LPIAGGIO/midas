@@ -15725,6 +15725,11 @@ function computeFuturesDailyByTicker(positions, futurePrices, futureAdjLookup) {
   }
   const out = new Map();
   for (const [ticker, lotes] of byT) {
+    // Futuros en DOLARES (WTI, ORO): su P&L diario esta en USD y este mapa se
+    // convierte desde ARS en el banner — sumarlo acá lo etiquetaria mal de
+    // moneda. Quedan afuera del banner del dia (la fila de la tabla y el P&L
+    // total de la consolidada si los valuan, con su propia moneda).
+    if (lotes.some((p) => String(p.entry_currency || "ARS").startsWith("USD"))) continue;
     const fp = futurePrices ? futurePrices[ticker] : null;
     const lastRaw = fp?.last != null ? fp.last : fp?.settlement;
     if (lastRaw == null || fp?.error) continue;

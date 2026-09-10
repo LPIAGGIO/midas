@@ -92,11 +92,17 @@ function rowToPriceEntry(row, nowMs) {
   return { last, bid, offer, settlement, reference, midpoint, price, priceSource, lastDate, freshness, bidSize, askSize, volume };
 }
 
-/** app ticker "DLRMAY26" -> security_id "rx_DDF_DLR_MAY26". null si no es DLR. */
+/** app ticker -> security_id de la tabla. DLR va al segmento rx_DDF;
+ * WTI y ORO al rx_DUAL (10/09/2026: el mapeo era solo-DLR y filtraba los
+ * WTI del request, asi que el front nunca recibia su precio aunque el
+ * worker lo trackeara). null si no es un futuro conocido. */
 function appToSecurityId(appTicker) {
-  const m = (appTicker || "").toUpperCase().trim().replace("/", "").match(/^(DLR)([A-Z]{3})(\d{2})$/);
-  if (!m) return null;
-  return `rx_DDF_DLR_${m[2]}${m[3]}`;
+  const t = (appTicker || "").toUpperCase().trim().replace("/", "");
+  let m = t.match(/^(DLR)([A-Z]{3})(\d{2})$/);
+  if (m) return `rx_DDF_DLR_${m[2]}${m[3]}`;
+  m = t.match(/^(WTI|ORO)([A-Z]{3})(\d{2})$/);
+  if (m) return `rx_DUAL_${m[1]}_${m[2]}${m[3]}`;
+  return null;
 }
 
 /** symbol de la tabla "DLR/MAY26" -> app ticker "DLRMAY26". */
