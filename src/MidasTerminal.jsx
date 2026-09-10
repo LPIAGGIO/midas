@@ -13071,7 +13071,10 @@ function computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices) {
 
   const price = Number(g?.currentPrice);
   if (!Number.isFinite(price) || price <= 0) return null;
-  const mult = FUTURE_MULTIPLIER_DEFAULT;
+  // Multiplicador del CONTRATO del grupo (WTI=10 barriles, ORO=1 onza,
+  // default 1000 = DLR). Clavado en el default, los 30 WTI de LP entraban
+  // al patrimonio multiplicados por 100 (10/09/2026).
+  const mult = getFutureMultiplier(g.operations?.[0]);
   const tk = (g.ticker || "").toUpperCase().trim();
   let tc = futureAdjLookup?.tickerConfirmed?.get(tk) || null;
 
