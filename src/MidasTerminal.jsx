@@ -32295,6 +32295,124 @@ function SiAtrasoBadge({ dias, sufijo = "d" }) {
   );
 }
 
+/* ── Solapa Insiders (Form 4) ──────────────────────────────────────────
+ * Muestra lo que junta el worker insider-form4: compras/ventas a mercado
+ * de directivos (código P/S del Form 4, 2 días hábiles de rezago) sobre el
+ * universo propio, clasificadas en secuencias (paper Biggerstaff-Cicero-
+ * Wintoki): el evento informativo es el FIN de una secuencia de compras.
+ * Independiente de la carga del 13F: fetch propio. */
+function InsidersTab() {
+  const [datos, setDatos] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { data: secs, error: e1 } = await supabase.from("insider_sequences")
+          .select("ticker,owner_name,owner_title,side,n_ops,first_date,last_date,total_value_usd,after_hours_n,status,finalized_at")
+          .order("last_date", { ascending: false }).limit(300);
+        if (e1) throw e1;
+        const desde = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+        const { data: ops, error: e2 } = await supabase.from("insider_filings")
+          .select("ticker,owner_name,owner_title,trans_date,trans_code,shares,price_usd,value_usd,after_hours")
+          .gte("trans_date", desde)
+          .order("trans_date", { ascending: false }).limit(120);
+        if (e2) throw e2;
+        if (vivo) setDatos({ secs: secs || [], ops: ops || [] });
+      } catch (e) { if (vivo) setErr(e?.message || String(e)); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+
+  const fUsd = (n) => (n == null || !(Number(n) > 0) ? "—" : `US$ ${Math.round(Number(n)).toLocaleString("en-US")}`);
+  const fFecha = (iso) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "—");
+  const estadoColor = { activa: C.accent, finalizada: C.cat.amber, aislada: C.dim };
+  const th = { textAlign: "left", padding: "7px 10px", fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.08em", color: C.dim };
+  const td = { padding: "6px 10px", fontSize: 12, color: C.text, whiteSpace: "nowrap" };
+
+  if (err) return <div style={{ fontSize: 12, color: C.red, padding: 20 }}>No se pudo leer la data de insiders: {err}</div>;
+  if (!datos) return (
+    <div className="flex items-center justify-center" style={{ height: 200 }}>
+      <Loader2 size={22} color={C.muted} className="eco-spin" strokeWidth={1.5} />
+    </div>
+  );
+  const secuencias = datos.secs.filter((s) => s.n_ops >= 2);
+  const compras = datos.ops.filter((o) => o.trans_code === "P");
+  const ventas = datos.ops.filter((o) => o.trans_code === "S");
+
+  const tablaSec = (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, background: C.panel, overflow: "auto", marginBottom: 18 }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr style={{ background: "rgba(255,255,255,0.02)" }}>
+          <th style={th}>Papel</th><th style={th}>Insider</th><th style={th}>Lado</th>
+          <th style={{ ...th, textAlign: "right" }}>Ops</th><th style={th}>Período</th>
+          <th style={{ ...th, textAlign: "right" }}>Monto</th><th style={th}>After-hs</th><th style={th}>Estado</th>
+        </tr></thead>
+        <tbody>
+          {secuencias.length === 0 && (
+            <tr><td colSpan={8} style={{ ...td, color: C.dim, textAlign: "center", padding: 18 }}>
+              Sin secuencias todavía (una secuencia son 2+ operaciones del mismo insider con menos de 45 días entre sí).
+            </td></tr>
+          )}
+          {secuencias.map((s, i) => (
+            <tr key={i} style={{ borderTop: `1px solid ${C.border}` }}>
+              <td style={{ ...td, fontWeight: 700 }}>{s.ticker}</td>
+              <td style={td}>{s.owner_name || "—"}{s.owner_title ? <span style={{ color: C.dim, fontSize: 10.5 }}> · {s.owner_title}</span> : null}</td>
+              <td style={{ ...td, color: s.side === "buy" ? C.green : C.red, fontWeight: 600 }}>{s.side === "buy" ? "COMPRA" : "VENTA"}</td>
+              <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{s.n_ops}</td>
+              <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: C.muted }}>{fFecha(s.first_date)} → {fFecha(s.last_date)}</td>
+              <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fUsd(s.total_value_usd)}</td>
+              <td style={{ ...td, color: s.after_hours_n ? C.cat.amber : C.dim }}>{s.after_hours_n || "—"}</td>
+              <td style={{ ...td, color: estadoColor[s.status] || C.dim, fontWeight: 600 }}>
+                {s.status}{s.status === "finalizada" && s.finalized_at ? <span style={{ color: C.dim, fontWeight: 400, fontSize: 10.5 }}> ({fFecha(s.finalized_at)})</span> : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  const tablaOps = (titulo, filas, color) => (
+    <div style={{ flex: "1 1 380px", minWidth: 340, border: `1px solid ${C.border}`, borderRadius: 6, background: C.panel, overflow: "auto" }}>
+      <div style={{ padding: "8px 12px", fontSize: 11, fontWeight: 700, color, borderBottom: `1px solid ${C.border}` }}>{titulo}</div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <tbody>
+          {filas.length === 0 && <tr><td style={{ ...td, color: C.dim, padding: 14 }}>Sin operaciones en 60 días.</td></tr>}
+          {filas.slice(0, 25).map((o, i) => (
+            <tr key={i} style={{ borderTop: i ? `1px solid ${C.border}` : "none" }}>
+              <td style={{ ...td, color: C.muted, fontVariantNumeric: "tabular-nums" }}>{fFecha(o.trans_date)}</td>
+              <td style={{ ...td, fontWeight: 700 }}>{o.ticker}</td>
+              <td style={{ ...td, color: C.muted, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{o.owner_name || "—"}</td>
+              <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fUsd(o.value_usd)}</td>
+              <td style={{ ...td, color: C.cat.amber, fontSize: 10 }}>{o.after_hours ? "AH" : ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ border: `1px solid ${C.borderStrong}`, background: C.deep, borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+        <b style={{ color: C.text }}>Form 4 de la SEC: compras y ventas a mercado de los propios directivos</b> (rezago
+        máx. 2 días hábiles; grants y opciones excluidos). La señal medida (Biggerstaff-Cicero-Wintoki) no es la compra
+        suelta sino el <b style={{ color: C.text }}>fin de una secuencia</b>: cuando el que venía acumulando deja de
+        comprar, el drift posterior duró ~3 meses en la muestra 1986-2017. <b style={{ color: C.text }}>AH</b> = filing
+        presentado fuera de rueda (variante más fuerte). Filtro de research — no es señal de trading automática, y los
+        emisores extranjeros (NU, GGAL, YPF, VIST) no presentan Form 4.
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 8 }}>Secuencias detectadas</div>
+      {tablaSec}
+      <div className="flex" style={{ gap: 14, flexWrap: "wrap" }}>
+        {tablaOps("Últimas compras (P)", compras, C.green)}
+        {tablaOps("Últimas ventas (S)", ventas, C.red)}
+      </div>
+    </div>
+  );
+}
+
 function SuperinversoresModule() {
   const { user } = useAuth();
   const [tab, setTab] = useState("ranking");     // ranking | cartera | gestores
@@ -32588,9 +32706,12 @@ function SuperinversoresModule() {
         {tabBtn("ranking", "Ranking")}
         {tabBtn("cartera", "Mi cartera")}
         {tabBtn("gestores", "Gestores")}
+        {tabBtn("insiders", "Insiders")}
       </div>
 
-      {cargando ? (
+      {tab === "insiders" ? (
+        <InsidersTab />
+      ) : cargando ? (
         <div className="flex items-center justify-center" style={{ height: 280 }}>
           <Loader2 size={24} color={C.muted} className="eco-spin" strokeWidth={1.5} />
         </div>
