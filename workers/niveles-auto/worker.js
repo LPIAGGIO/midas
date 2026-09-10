@@ -1522,7 +1522,11 @@ function botDescarte(tk, nivel, faltas) {
  * vivo todavía. */
 async function iolCancelar(numero) {
   const token = await iolToken();
-  const r = await fetch(`https://api.invertironline.com/api/v2/operar/Cancelar/${encodeURIComponent(numero)}`, {
+  /* ENDPOINT MEDIDO 10/09/2026: DELETE /api/v2/operaciones/{numero}. La ruta
+   * anterior (/api/v2/operar/Cancelar/{numero}) devuelve 500 SIEMPRE — con
+   * ordenes vivas y muertas por igual (asi quedo huerfana SPCX 188154683
+   * hasta que se bajo por el endpoint bueno). */
+  const r = await fetch(`https://api.invertironline.com/api/v2/operaciones/${encodeURIComponent(numero)}`, {
     method: "DELETE", headers: { Authorization: `Bearer ${token}` },
   });
   if (!r.ok) throw new Error(`IOL cancelar ${numero}: ${r.status}`);
@@ -1750,13 +1754,30 @@ async function paperPass() {
         const viva = await ordenVivaDe(t);
         if (viva.estado === "viva") { await iolCancelar(viva.numero); log(`[bot ${t.ticker}] orden ${viva.numero} cancelada en IOL (expiro la ventana)`); }
         else if (viva.estado === "nada") log(`[bot ${t.ticker}] la orden ya no estaba apoyada en IOL (la cancelo el cierre de rueda)`);
-        else log(`[bot ${t.ticker}] OJO: la orden figura EJECUTADA en IOL — no se cancela; el chequeo de fills la va a levantar`);
+        else {
+          /* EJECUTADA: hay posicion real. Marcar "expirada sin fill" seria
+           * mentira y el fill quedaria sin procesar — se deja pending para
+           * que el chequeo de fills la levante en esta misma pasada. */
+          log(`[bot ${t.ticker}] OJO: la orden figura EJECUTADA en IOL — no se expira; el chequeo de fills la levanta`);
+          continue;
+        }
       } catch (e) {
-        log(`[bot ${t.ticker}] NO pude cancelar la orden ${t.broker_order_id} en IOL: ${e.message}`);
-        await tgEspejo(
-          `<b>BOT · ATENCION ${t.ticker}</b>\n` +
-          `La orden real expiro para el bot pero NO pude bajarla de IOL (id ${t.broker_order_id}: ${e.message}).\n` +
-          `<b>Cancelala a mano en la app de IOL</b> — busca la compra de ${t.qty} × ${t.ticker} pendiente, sea cual sea el numero.`);
+        /* Cancel fallido con orden posiblemente VIVA: NO marcar el trade como
+         * cancelado — quedaria una orden huerfana apoyada sin nadie
+         * gestionandola (paso con SPCX el 10/09: expiro en DB con la orden
+         * "en proceso" en IOL). Se deja pending y se reintenta en la proxima
+         * pasada; el aviso va con freno de 6h para no spamear. */
+        log(`[bot ${t.ticker}] NO pude cancelar la orden ${t.broker_order_id} en IOL: ${e.message} — el trade sigue pending, reintento`);
+        const clave = `cancelfail|${t.ticker}`;
+        const antes = descartes.get(clave);
+        if (!antes || Date.now() - antes >= 6 * 3600 * 1000) {
+          descartes.set(clave, Date.now());
+          await tgEspejo(
+            `<b>BOT · ATENCION ${t.ticker}</b>\n` +
+            `La orden real expiro para el bot pero NO pude bajarla de IOL (id ${t.broker_order_id}: ${e.message}).\n` +
+            `El bot la sigue reintentando. Si el aviso se repite, <b>cancelala a mano en la app de IOL</b>: compra de ${t.qty} × ${t.ticker} pendiente, sea cual sea el numero.`);
+        }
+        continue;
       }
     }
     await supabase.from("paper_iol_trades").update({
