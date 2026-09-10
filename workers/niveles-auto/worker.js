@@ -1882,7 +1882,9 @@ async function paperPass() {
         px_ars_entrada: pxArs, ratio: Math.round(rArs * 100) / 100,
         nota_sim: `LLEGÓ al nivel. Entró ${t.qty} × ${pesos(pxArs)} (US$${pxUsd.toFixed(2)}), total ${pesos(pxArs * t.qty)}. Vende en el target US$${Number(t.target).toFixed(2)} ≈ ${pesos(Number(t.target) * rArs)}; corta en el stop US$${Number(t.stop).toFixed(2)} ≈ ${pesos(Number(t.stop) * rArs)}.`,
       }).eq("id", t.id);
-      log(`[bot ${t.ticker}] LLEGÓ AL NIVEL → ${MODO_REAL ? "compra ejecutada" : "fill simulado"} ${t.qty} × ${pesos(pxArs)} · vendería en ${pesos(Number(t.target) * rArs)} / corta en ${pesos(Number(t.stop) * rArs)}`);
+      // Etiqueta por MODO DEL TRADE, no por el flag global: un fill del sombra
+      // salia como "[bot ...] compra ejecutada" y parecia plata real.
+      log(`[${t.modo === "shadow" ? "shadow" : "bot"} ${t.ticker}] LLEGÓ AL NIVEL → ${t.modo === "real" ? "compra ejecutada" : "fill simulado"} ${t.qty} × ${pesos(pxArs)} · vendería en ${pesos(Number(t.target) * rArs)} / corta en ${pesos(Number(t.stop) * rArs)}`);
       /* La venta del espejo se deja PUESTA junto con la entrada (pedido de LP
        * 01/09: "asi si entra ya pongo la venta tambien y no tengo que estar
        * pendiente"). El limite de venta va redondeado al tick para ABAJO por
