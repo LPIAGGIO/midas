@@ -1618,6 +1618,25 @@ const RECOLOC_COOLDOWN_MS = 10 * 60 * 1000;
 const RECOLOC_DERIVA_URGENTE = 0.015;
 const recolocadaEn = new Map();
 
+// AVISO DE ESPEJO en recolocaciones (11/09/2026, pedido de LP: "no me llego
+// por telegram la modificacion"): las recolocaciones eran solo-log y el
+// espejo de Cocos quedaba desactualizado en silencio. Se avisa por Telegram
+// SOLO cuando el precio se movio >=1% desde el ultimo AVISADO de ese trade —
+// el espejo no necesita perseguir cada tick de 0,5%, y en dia serrucho el
+// aviso por recolocacion seria spam.
+const AVISO_RECOLOC_PCT = 0.01;
+const avisadoPx = new Map();
+async function avisarRecolocacion(t, nuevoPx, motivo) {
+  const antes = avisadoPx.get(t.id);
+  if (antes && Math.abs(nuevoPx / antes - 1) < AVISO_RECOLOC_PCT) return;
+  avisadoPx.set(t.id, nuevoPx);
+  await tgEspejo(
+    `<b>BOT · RECOLOCADA ${t.ticker}</b> (${motivo})\n` +
+    `La orden de compra se movio a <b>${pesos(nuevoPx)}</b> (${t.qty} papeles).\n` +
+    `Espejo en Cocos: ajusta tu limite a <b>${pesos(tickPiso(nuevoPx))}</b>. ` +
+    `Solo aviso cuando el corrimiento supera el 1% — los micro-ajustes no ameritan tocar el espejo.`);
+}
+
 /* libro: "paper" (el bot real, con filtros y espejo) o "shadow" (el A/B SIN
  * FILTRO pedido por LP el 04/09/2026: opera TODO soporte que el kit detecte
  * —cualquier score, R:R, regimen, hasta contra-tendencia— con la MISMA
@@ -1844,6 +1863,7 @@ async function paperPass() {
               recolocaciones: (t.recolocaciones || 0) + 1,
             }).eq("id", t.id);
             log(`[bot ${t.ticker}] la orden no estaba apoyada (la cancelo el cierre de rueda): re-colocada en ${pesos(deberia)}`);
+            if (t.modo === "real") await avisarRecolocacion(t, deberia, "re-apoyada tras el cierre");
           } else if (deriva > DERIVA_MAX) {
             const ultima = recolocadaEn.get(t.id) || 0;
             if (deriva < RECOLOC_DERIVA_URGENTE && Date.now() - ultima < RECOLOC_COOLDOWN_MS) {
@@ -1859,6 +1879,7 @@ async function paperPass() {
                 recolocaciones: (t.recolocaciones || 0) + 1,
               }).eq("id", t.id);
               log(`[bot ${t.ticker}] orden recolocada: el dólar la corrió ${(deriva * 100).toFixed(2)}% · ${pesos(t.px_ars_orden)} → ${pesos(deberia)}`);
+              if (t.modo === "real") await avisarRecolocacion(t, deberia, "el dolar corrio el limite");
             }
           }
         } catch (e) {
