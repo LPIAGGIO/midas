@@ -5151,8 +5151,17 @@ function ImportacionesView() {
     const libroHasta = allPos.reduce((m, p) => (p.entry_date && p.entry_date > m ? p.entry_date : m), "");
     await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos").filter("extra->>source", "eq", "derivado_libro");
     if (libroHasta) {
-      await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos")
-        .filter("extra->>source", "eq", "csv_matriz").lte("entry_date", libroHasta);
+      // Solo se retiran los puentes de tickers que el libro EFECTIVAMENTE
+      // re-deriva. La cuenta corriente de Cocos no lista todas las
+      // operaciones: los futuros DUAL (WTI) entran solo como Debito/Credito
+      // Cambio SIN ticker — el 11/09 la barrida por fecha sola borro los 4
+      // cortos de WTI de LP y el libro no tenia con que reponerlos.
+      const derivedTickers = [...new Set(allPos.map((p) => (p.ticker || "").toUpperCase()).filter(Boolean))];
+      if (derivedTickers.length) {
+        await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos")
+          .filter("extra->>source", "eq", "csv_matriz").lte("entry_date", libroHasta)
+          .in("ticker", derivedTickers);
+      }
     }
     // Borra la caja del usuario: la derivada (Σtotal del libro) ya incluye
     // futuros (Credito/Debito Indice), caución, aranceles, etc. — no debe convivir
