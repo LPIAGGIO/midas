@@ -1607,6 +1607,17 @@ function deriva_check(t) {
   return true;
 }
 
+// FRENO ANTI-SERRUCHO (11/09/2026, mañana del CPI): el CCL fue y vino ±0,8%
+// y el bot recolocó SNDK 8 veces en 25 minutos — puro churn de cancel+place
+// persiguiendo ruido cambiario (el nivel en DOLARES no habia cambiado).
+// Regla: tras recolocar, no se vuelve a recolocar el mismo trade por 10
+// minutos SALVO deriva grande (>=1,5%, ahi el limite quedo de verdad lejos
+// del nivel y esperar seria perder fills). El re-apoyo de una orden caida
+// ("nada") no espera turno: eso no es serrucho, es una orden que no existe.
+const RECOLOC_COOLDOWN_MS = 10 * 60 * 1000;
+const RECOLOC_DERIVA_URGENTE = 0.015;
+const recolocadaEn = new Map();
+
 /* libro: "paper" (el bot real, con filtros y espejo) o "shadow" (el A/B SIN
  * FILTRO pedido por LP el 04/09/2026: opera TODO soporte que el kit detecte
  * —cualquier score, R:R, regimen, hasta contra-tendencia— con la MISMA
@@ -1834,14 +1845,21 @@ async function paperPass() {
             }).eq("id", t.id);
             log(`[bot ${t.ticker}] la orden no estaba apoyada (la cancelo el cierre de rueda): re-colocada en ${pesos(deberia)}`);
           } else if (deriva > DERIVA_MAX) {
-            await iolCancelar(viva.numero);
-            const nuevo = await iolOrden("compra", t.ticker, t.qty, deberia);
-            await supabase.from("paper_iol_trades").update({
-              broker_order_id: nuevo,
-              px_ars_orden: Math.round(deberia),
-              recolocaciones: (t.recolocaciones || 0) + 1,
-            }).eq("id", t.id);
-            log(`[bot ${t.ticker}] orden recolocada: el dólar la corrió ${(deriva * 100).toFixed(2)}% · ${pesos(t.px_ars_orden)} → ${pesos(deberia)}`);
+            const ultima = recolocadaEn.get(t.id) || 0;
+            if (deriva < RECOLOC_DERIVA_URGENTE && Date.now() - ultima < RECOLOC_COOLDOWN_MS) {
+              // serrucho del CCL: recolocada hace poco y la deriva es chica —
+              // se deja donde esta y se revisa en la proxima pasada.
+            } else {
+              recolocadaEn.set(t.id, Date.now());
+              await iolCancelar(viva.numero);
+              const nuevo = await iolOrden("compra", t.ticker, t.qty, deberia);
+              await supabase.from("paper_iol_trades").update({
+                broker_order_id: nuevo,
+                px_ars_orden: Math.round(deberia),
+                recolocaciones: (t.recolocaciones || 0) + 1,
+              }).eq("id", t.id);
+              log(`[bot ${t.ticker}] orden recolocada: el dólar la corrió ${(deriva * 100).toFixed(2)}% · ${pesos(t.px_ars_orden)} → ${pesos(deberia)}`);
+            }
           }
         } catch (e) {
           log(`[bot ${t.ticker}] NO se pudo reconciliar/recolocar (${e.message})`);
