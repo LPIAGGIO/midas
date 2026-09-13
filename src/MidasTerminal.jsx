@@ -32743,7 +32743,9 @@ function SuperinversoresModule() {
       </div>
 
       {tab === "insiders" ? (
-        <InsidersTab />
+        // key={tick}: el boton "Actualizar" re-monta la solapa y re-trae la
+        // data de insiders (antes solo refrescaba el 13F).
+        <InsidersTab key={tick} />
       ) : cargando ? (
         <div className="flex items-center justify-center" style={{ height: 280 }}>
           <Loader2 size={24} color={C.muted} className="eco-spin" strokeWidth={1.5} />
