@@ -1166,13 +1166,16 @@ const CAP_ARS = Number(process.env.IOL_BOT_CAP_ARS || 3000000);
  *   - guard de dos llaves (IOL_BOT_REAL en el VPS + bot_enabled en la base)
  *     ya vigente en resolverModo() */
 const CAP_REAL = Number(process.env.IOL_BOT_CAP_REAL || 2000000);
-const RISK_REAL = 0.01;
-/* Tope de posicion 25% (decision de LP al fondear, 04/09/2026): el bot entra
- * 1-2 veces por semana — con 10% el capital dormia y el objetivo declarado de
- * este libro es construir VOLUMEN hacia la comision Black. El freno de
- * perdidas sigue siendo el riesgo del 1% via stop; el tope de posicion solo
- * acota el riesgo de gap (25% x gap nocturno de -10% = -2,5% del capital). */
-const MAX_POS_PCT_REAL = 0.25;
+/* Riesgo 1,5% + tope 35% (decision de LP, 13/09/2026, "opcion A" con el
+ * capital en $7M): con los stops tipicos del sistema (2-3%) el tope del 25%
+ * cortaba antes que el riesgo — el riesgo REAL por trade quedaba en ~0,6%.
+ * Con 35% la posicion tipica sube a ~$2,45M y el riesgo real a ~0,9%; el
+ * 1,5% ademas ALINEA el real con el paper (misma constante BOT_RISK), asi
+ * la brecha real-vs-paper ya no mezcla dos sizings. Historia: 04/09 arranco
+ * 1% + tope 25% con $2M ("el freno de perdidas es el stop; el tope acota el
+ * gap nocturno": 35% x gap de -10% = -3,5% del capital, aceptado). */
+const RISK_REAL = 0.015;
+const MAX_POS_PCT_REAL = 0.35;
 const MAX_POS_REAL = 5;
 const MAX_ENTRADAS_DIA_REAL = 5;
 
