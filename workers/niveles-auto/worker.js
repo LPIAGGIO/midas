@@ -1511,6 +1511,62 @@ async function iolOrden(lado, simbolo, cantidad, precio) {
   return String(j?.numeroOperacion ?? j?.numero ?? j?.id ?? "");
 }
 
+/* DESPLAZO POR CERCANIA (regla de LP, 13/09/2026): si una señal nueva no
+ * entra por saldo, se cancela la orden PENDIENTE que este MAS LEJOS de
+ * llenar (mayor distancia % entre el precio actual del subyacente y su
+ * nivel) para liberar capital, y se reintenta la nueva. Guardas:
+ *   - Solo pendientes (posiciones abiertas jamas se tocan).
+ *   - Anti ping-pong: la nueva tiene que estar al menos 1pp MAS CERCA de
+ *     su nivel que la desplazada — si no, no se desplaza nada.
+ * Devuelve true si libero una orden (el caller reintenta la colocacion). */
+const MARGEN_DESPLAZO = 0.01;
+async function desplazarPendienteLejana(tkNueva, symNueva, entryNueva) {
+  const f = await botFeeds();
+  const pxNueva = Number(f.usd[String(symNueva).toUpperCase()]);
+  if (!(pxNueva > 0) || !(entryNueva > 0)) return false;
+  const distNueva = (pxNueva - entryNueva) / entryNueva;
+
+  const { data: pendientes } = await supabase.from("paper_iol_trades")
+    .select("*").eq("modo", "real").eq("status", "pending");
+  let peor = null;
+  for (const t of pendientes || []) {
+    if (String(t.ticker).toUpperCase() === String(tkNueva).toUpperCase()) continue;
+    const px = Number(f.usd[String(t.sym).toUpperCase()]);
+    const lim = Number(t.entry_limit);
+    if (!(px > 0) || !(lim > 0)) continue;
+    const dist = (px - lim) / lim;
+    if (!peor || dist > peor.dist) peor = { t, dist };
+  }
+  if (!peor) { log(`[bot ${tkNueva}] sin saldo y sin pendientes desplazables`); return false; }
+  if (peor.dist <= distNueva + MARGEN_DESPLAZO) {
+    log(`[bot ${tkNueva}] sin saldo; la pendiente mas lejana (${peor.t.ticker}, ${(peor.dist * 100).toFixed(1)}% del nivel) esta tan cerca como la nueva (${(distNueva * 100).toFixed(1)}%) — no se desplaza`);
+    return false;
+  }
+
+  const t = peor.t;
+  try {
+    const viva = await ordenVivaDe(t);
+    if (viva.estado === "ejecutada") { log(`[bot ${t.ticker}] iba a desplazarla pero figura EJECUTADA — no se toca`); return false; }
+    if (viva.estado === "viva") await iolCancelar(viva.numero);
+  } catch (e) {
+    log(`[bot ${t.ticker}] no pude bajar la orden para desplazarla (${e.message}) — no se desplaza`);
+    return false;
+  }
+  await supabase.from("paper_iol_trades").update({
+    status: "cancelled",
+    exit_reason: `desplazada por ${tkNueva} (senal mas cercana al fill)`,
+    veredicto: "sin_fill",
+    nota_sim: `Cancelada para liberar capital: ${tkNueva} quedo a ${(distNueva * 100).toFixed(1)}% de su nivel y esta orden estaba a ${(peor.dist * 100).toFixed(1)}%.`,
+  }).eq("id", t.id);
+  log(`[bot ${t.ticker}] DESPLAZADA por ${tkNueva}: estaba a ${(peor.dist * 100).toFixed(1)}% del nivel vs ${(distNueva * 100).toFixed(1)}% de la nueva`);
+  await tgEspejo(
+    `<b>BOT · DESPLAZADA ${t.ticker}</b>\n` +
+    `Sin saldo para una senal nueva mas cercana (${tkNueva} a ${(distNueva * 100).toFixed(1)}% de su nivel vs ${t.ticker} a ${(peor.dist * 100).toFixed(1)}%). ` +
+    `Se cancelo la orden de ${t.ticker} para liberar capital.\n` +
+    `Si la espejaste en Cocos, CANCELALA.`);
+  return true;
+}
+
 const descartes = new Map();
 function botDescarte(tk, nivel, faltas) {
   const clave = `${tk}|${Math.round(nivel * 100)}|${faltas.join("+")}`;
@@ -1737,8 +1793,16 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
     nota_sim: `Nivel de compra US$${entry.toFixed(2)} ≈ ${pesos(precioUnidad)} por unidad. Esperando que el papel baje a buscarlo. Si llega: compra ${qty}, vende en US$${target.toFixed(2)} ≈ ${pesos(target * rArs)}, corta en US$${stop.toFixed(2)} ≈ ${pesos(stop * rArs)}.`,
   };
   if (MODO_REAL && !esShadow) {
-    try { fila.broker_order_id = await iolOrden("compra", tk, qty, precioUnidad); }
-    catch (e) {
+    let colocada = false;
+    for (let intento = 0; intento < 2 && !colocada; intento++) {
+      try { fila.broker_order_id = await iolOrden("compra", tk, qty, precioUnidad); colocada = true; continue; }
+      catch (e) {
+        // Sin saldo en el primer intento: probar desplazar la pendiente mas
+        // lejana del fill (regla de LP 13/09) y reintentar una vez.
+        if (intento === 0 && /excede el límite de su saldo|saldo/i.test(e.message)) {
+          const libero = await desplazarPendienteLejana(tk, sym, entry).catch((e2) => { log(`[bot ${tk}] desplazo fallo: ${e2.message}`); return false; });
+          if (libero) continue;
+        }
       log(`[bot ${tk}] NO se mandó la orden real: ${e.message}`);
       /* El aviso va UNA vez cada 6h por ticker+motivo, no en cada reintento:
        * el 07/09 un saldo insuficiente sostenido (la letra del barrido ocupaba
@@ -1754,6 +1818,7 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
           `No quedo nada colocado. El bot reintenta en cada pasada mientras la senal siga viva; este aviso no se repite por 6 horas.`);
       }
       return;
+      }
     }
   }
   const { error } = await supabase.from("paper_iol_trades").insert(fila);
