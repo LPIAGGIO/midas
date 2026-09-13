@@ -1,27 +1,23 @@
 /**
  * Worker paper-consenso — paper trading del "consenso de superinversores".
  *
- * ESTRATEGIA (reglas fijadas en frio con LP, 13/09/2026):
- *   - Cartera = los 6 papeles con MAS GESTORES detras en los 13F del panel
- *     de superinversores (tabla superinvestors + si_holdings, ultimo filing
- *     de cada gestor). Desempate por valor agregado declarado.
- *   - ANTI-CHURN: para desplazar a un incumbente del top-6, el desafiante
- *     tiene que ganarle ESTRICTO (mas gestores; o igual y mas valor
- *     agregado). El empate lo retiene el que ya esta en cartera.
- *   - Equal-weight al armar; en cada rotacion, el producido de la venta va
- *     entero a la compra del entrante (sin rebalanceo continuo).
+ * ESTRATEGIA (reglas de LP, ajustadas 13/09/2026):
+ *   - Cartera = los papeles de los PRIMEROS 6 PUESTOS del ranking por
+ *     cantidad de gestores 13F, CON EMPATES INCLUIDOS: el umbral es la
+ *     cantidad de gestores del 6to papel, y entra TODO papel que iguale o
+ *     supere ese umbral (hoy: 6to = 9 gestores -> entran META y TSM, 7
+ *     papeles en total).
+ *   - $1.000.000 POR EMPRESA al entrar (tamano fijo, no equal-weight de un
+ *     pool): el que entra compra ~$1M al precio del dia; el que sale se
+ *     vende entero y el producido queda en caja.
+ *   - REVISION SEMANAL (lunes 11:30 ART), no diaria: los 13F cambian de
+ *     verdad en las olas trimestrales de filings.
  *   - Fill pesimista: compra al ask, venta al bid (data912 arg_cedears).
  *   - Comision IOL Gold por pata (0,5% + derechos 0,05% + IVA = 0,6655%).
  *
  * EL ASTERISCO ES PARTE DEL EXPERIMENTO: el 13F llega con 45-166 dias de
  * atraso. Este paper mide si el consenso RANCIO de los grandes gestores
- * igual le gana al mercado — no asume que si.
- *
- * Corre 1x/dia habil en horario de mercado (pm2 cron). El dato 13F cambia
- * de verdad en las olas de filings (feb/may/ago/nov): entre olas el top-6
- * casi no se mueve y el worker solo snapshotea el equity.
- *
- * Capital paper: $10.000.000 ARS (constante abajo).
+ * igual paga — no lo asume.
  */
 require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
@@ -35,11 +31,10 @@ const supabase = createClient(SUPABASE_URL, KEY, {
 });
 const log = (...a) => console.log(`[${new Date().toISOString()}]`, ...a);
 
-const CAPITAL_ARS = 10_000_000;
-const N_TOP = 6;
-const FEE_PATA = 0.005 * 1.21 + 0.0005 * 1.21;   // IOL Gold + derechos, con IVA = 0,6655%
+const POR_EMPRESA_ARS = 1_000_000;   // tamano fijo por papel (regla de LP)
+const N_PUESTOS = 6;                 // el umbral sale del 6to papel del ranking
+const FEE_PATA = 0.005 * 1.21 + 0.0005 * 1.21;   // IOL Gold + derechos, con IVA
 
-// Usuario dueno de los avisos (LP) — mismo esquema que niveles-auto.
 const BOT_USER = "cafc5a8c-1cee-4d57-a765-6aacf1acc661";
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 
@@ -64,7 +59,7 @@ async function tg(texto) {
 
 const pesos = (n) => `$${Math.round(n).toLocaleString("es-AR")}`;
 
-// ── Ranking 13F: [{tk13f, gestores, valor}] orden estable ───────────────
+// ── Ranking 13F: [{tk13f, gestores, valor}] ─────────────────────────────
 async function rankingConsenso() {
   const { data: gs } = await supabase.from("superinvestors").select("cik,last_report_date");
   const ultimo = new Map((gs || []).map((g) => [g.cik, g.last_report_date]));
@@ -92,6 +87,14 @@ async function rankingConsenso() {
     .sort((a, b) => b.gestores - a.gestores || b.valor - a.valor);
 }
 
+// Cartera objetivo: umbral = gestores del papel en el 6to puesto; entra todo
+// el que iguale o supere (empates INCLUIDOS, regla de LP 13/09).
+function carteraObjetivo(ranking) {
+  if (ranking.length < N_PUESTOS) return null;
+  const umbral = ranking[N_PUESTOS - 1].gestores;
+  return { umbral, papeles: ranking.filter((r) => r.gestores >= umbral) };
+}
+
 // ── Precios CEDEAR (data912, fill pesimista) ────────────────────────────
 async function preciosCedear() {
   const r = await fetch("https://data912.com/live/arg_cedears");
@@ -101,27 +104,29 @@ async function preciosCedear() {
   for (const x of arr || []) {
     const sym = String(x.symbol || "").toUpperCase();
     px.set(sym, {
-      buy: Number(x.px_ask) > 0 ? Number(x.px_ask) : Number(x.c) || null,   // compra paga el ask
-      sell: Number(x.px_bid) > 0 ? Number(x.px_bid) : Number(x.c) || null,  // venta cobra el bid
+      buy: Number(x.px_ask) > 0 ? Number(x.px_ask) : Number(x.c) || null,
+      sell: Number(x.px_bid) > 0 ? Number(x.px_bid) : Number(x.c) || null,
       last: Number(x.c) || null,
     });
   }
   return px;
 }
 
-// Top-6 con regla anti-churn: los incumbentes retienen el empate.
-function topConAntiChurn(ranking, incumbentes) {
-  const inSet = new Set(incumbentes);
-  const orden = [...ranking].sort((a, b) => {
-    const d = b.gestores - a.gestores || b.valor - a.valor;
-    if (d !== 0) return d;
-    // empate total: el incumbente primero
-    return (inSet.has(b.tk13f) ? 1 : 0) - (inSet.has(a.tk13f) ? 1 : 0);
+async function comprar(t, px, hoy, motivo) {
+  const ced = cedearDe(t.tk13f);
+  const p = px.get(ced);
+  if (!p?.buy) { log(`${ced}: sin precio data912 — queda para la proxima revision`); return false; }
+  const qty = Math.floor(POR_EMPRESA_ARS / (p.buy * (1 + FEE_PATA)));
+  if (qty < 1) { log(`${ced}: $1M no alcanza para 1 papel (${pesos(p.buy)})`); return false; }
+  const fee = qty * p.buy * FEE_PATA;
+  await supabase.from("paper_consenso_state").insert({
+    ticker: ced, ticker_13f: t.tk13f, qty,
+    entry_price: p.buy, entry_date: hoy, entry_gestores: t.gestores,
   });
-  // ademas: un desafiante NO desplaza a un incumbente si empata en gestores
-  // y no le gana en valor — eso ya lo resuelve el sort de arriba, porque el
-  // orden (gestores, valor, incumbencia) es total.
-  return orden.slice(0, N_TOP);
+  await supabase.from("paper_consenso_trades").insert({
+    fecha: hoy, side: "buy", ticker: ced, qty, price: p.buy, fee_ars: Math.round(fee), motivo,
+  });
+  return { ced, qty, precio: p.buy };
 }
 
 (async () => {
@@ -130,85 +135,56 @@ function topConAntiChurn(ranking, incumbentes) {
   if (dow === "Sat" || dow === "Sun") { log("finde: no opera"); return; }
 
   const ranking = await rankingConsenso();
-  if (ranking.length < N_TOP) { log(`ranking corto (${ranking.length}), no opero`); return; }
+  const objetivo = carteraObjetivo(ranking);
+  if (!objetivo) { log(`ranking corto (${ranking.length}), no opero`); return; }
+  const px = await preciosCedear();
   const { data: estadoRows } = await supabase.from("paper_consenso_state").select("*");
   const estado = estadoRows || [];
-  const px = await preciosCedear();
-
-  const rankBy = new Map(ranking.map((r) => [r.tk13f, r]));
-  const incumbentes = estado.map((s) => s.ticker_13f);
 
   if (estado.length === 0) {
-    // ── ARMADO INICIAL: equal-weight del capital en el top-6 ────────────
-    const top = topConAntiChurn(ranking, []);
-    const porPata = CAPITAL_ARS / N_TOP;
-    let cash = CAPITAL_ARS;
+    // ── ARMADO INICIAL: $1M por papel del objetivo ──────────────────────
     const compras = [];
-    for (const t of top) {
-      const ced = cedearDe(t.tk13f);
-      const p = px.get(ced);
-      if (!p?.buy) { log(`${ced}: sin precio data912 — ABORTO armado (probar proxima corrida)`); return; }
-      const fee = porPata * FEE_PATA / (1 + FEE_PATA);
-      const neto = porPata - fee;
-      const qty = Math.floor(neto / p.buy);
-      if (qty < 1) { log(`${ced}: no alcanza para 1 papel (${pesos(p.buy)})`); return; }
-      const costo = qty * p.buy;
-      cash -= costo + costo * FEE_PATA;
-      compras.push({ t, ced, qty, precio: p.buy, fee: costo * FEE_PATA });
+    for (const t of objetivo.papeles) {
+      const c = await comprar(t, px, hoy, `armado inicial: ${t.gestores} gestores (umbral ${objetivo.umbral})`);
+      if (c) compras.push({ ...c, gestores: t.gestores });
     }
-    for (const c of compras) {
-      await supabase.from("paper_consenso_state").insert({
-        ticker: c.ced, ticker_13f: c.t.tk13f, qty: c.qty,
-        entry_price: c.precio, entry_date: hoy, entry_gestores: c.t.gestores,
-      });
+    if (!compras.length) { log("armado: sin precios, reintento en la proxima revision"); return; }
+    const detalle = compras.map((c) => `${c.ced} ${c.qty} × ${pesos(c.precio)} (${c.gestores} gestores)`).join("\n");
+    log(`ARMADO: ${compras.length} papeles`);
+    await tg(`<b>PAPER CONSENSO · armado inicial</b> (simulado, ${pesos(POR_EMPRESA_ARS)} por empresa)\nUmbral: ${objetivo.umbral} gestores (6to puesto, empates incluidos → ${objetivo.papeles.length} papeles):\n${detalle}\nRevision semanal, lunes. Aviso cada rotacion.`);
+  } else {
+    // ── REVISION SEMANAL: sincronizar cartera con el objetivo ───────────
+    const objSet = new Set(objetivo.papeles.map((t) => t.tk13f));
+    const tengoSet = new Set(estado.map((s) => s.ticker_13f));
+    const salen = estado.filter((s) => !objSet.has(s.ticker_13f));
+    const entran = objetivo.papeles.filter((t) => !tengoSet.has(t.tk13f));
+    const rankBy = new Map(ranking.map((r) => [r.tk13f, r]));
+
+    for (const out of salen) {
+      const p = px.get(out.ticker);
+      if (!p?.sell) { log(`${out.ticker}: sin precio para vender, queda para la proxima`); continue; }
+      const fee = out.qty * p.sell * FEE_PATA;
+      const gAhora = rankBy.get(out.ticker_13f)?.gestores ?? 0;
+      const motivo = `sale: ${gAhora} gestores, umbral ${objetivo.umbral}`;
       await supabase.from("paper_consenso_trades").insert({
-        fecha: hoy, side: "buy", ticker: c.ced, qty: c.qty, price: c.precio,
-        fee_ars: Math.round(c.fee), motivo: `armado inicial: ${c.t.gestores} gestores`,
+        fecha: hoy, side: "sell", ticker: out.ticker, qty: out.qty, price: p.sell, fee_ars: Math.round(fee), motivo,
       });
+      await supabase.from("paper_consenso_state").delete().eq("ticker", out.ticker);
+      const pnl = (p.sell - Number(out.entry_price)) * out.qty - fee;
+      log(`SALE ${out.ticker}: ${pesos(pnl)} realizado (${motivo})`);
+      await tg(`<b>PAPER CONSENSO · sale ${out.ticker}</b>\n${motivo}. Vende ${out.qty} × ${pesos(p.sell)} · realizado ${pesos(pnl)} (entro a ${pesos(Number(out.entry_price))} el ${out.entry_date}).`);
     }
-    const detalle = compras.map((c) => `${c.ced} ${c.qty} × ${pesos(c.precio)} (${c.t.gestores} gestores)`).join("\n");
-    await supabase.from("paper_consenso_equity").upsert({
-      fecha: hoy, equity_ars: CAPITAL_ARS, cash_ars: Math.round(cash),
-      detalle: compras.map((c) => ({ ticker: c.ced, qty: c.qty, px: c.precio, valor: Math.round(c.qty * c.precio) })),
-    }, { onConflict: "fecha" });
-    log(`ARMADO: ${compras.map((c) => c.ced).join(", ")} · caja ${pesos(cash)}`);
-    await tg(`<b>PAPER CONSENSO · armado inicial</b> (simulado, ${pesos(CAPITAL_ARS)})\nLos 6 con mas gestores 13F detras:\n${detalle}\nRota solo cuando el ranking cambia. Aviso cada rotacion.`);
-    return;
+    for (const t of entran) {
+      const c = await comprar(t, px, hoy, `entra: ${t.gestores} gestores, umbral ${objetivo.umbral}`);
+      if (c) {
+        log(`ENTRA ${c.ced}: ${c.qty} × ${pesos(c.precio)}`);
+        await tg(`<b>PAPER CONSENSO · entra ${c.ced}</b>\n${t.gestores} gestores lo tienen (umbral ${objetivo.umbral}). Compra ${c.qty} × ${pesos(c.precio)} (~$1M).\n<i>El 13F llega con 45-166 dias de atraso: la rotacion sigue al ranking, no al precio.</i>`);
+      }
+    }
+    if (!salen.length && !entran.length) log(`sin cambios: cartera = objetivo (${estado.length} papeles, umbral ${objetivo.umbral})`);
   }
 
-  // ── ROTACION: comparar cartera actual vs top-6 anti-churn ─────────────
-  const top = topConAntiChurn(ranking, incumbentes);
-  const topSet = new Set(top.map((t) => t.tk13f));
-  const salen = estado.filter((s) => !topSet.has(s.ticker_13f));
-  const entran = top.filter((t) => !incumbentes.includes(t.tk13f));
-
-  for (let i = 0; i < Math.min(salen.length, entran.length); i++) {
-    const out = salen[i], inn = entran[i];
-    const pOut = px.get(out.ticker), cedIn = cedearDe(inn.tk13f), pIn = px.get(cedIn);
-    if (!pOut?.sell || !pIn?.buy) { log(`rotacion ${out.ticker}→${cedIn}: sin precio, la reintento manana`); continue; }
-    const producido = out.qty * pOut.sell;
-    const feeVenta = producido * FEE_PATA;
-    const neto = producido - feeVenta;
-    const qtyIn = Math.floor(neto / (pIn.buy * (1 + FEE_PATA)));
-    if (qtyIn < 1) { log(`rotacion ${cedIn}: no alcanza para 1 papel`); continue; }
-    const feeCompra = qtyIn * pIn.buy * FEE_PATA;
-    const gOut = rankBy.get(out.ticker_13f)?.gestores ?? "?";
-    const motivo = `sale ${out.ticker} (${gOut} gestores), entra ${cedIn} (${inn.gestores})`;
-    await supabase.from("paper_consenso_trades").insert([
-      { fecha: hoy, side: "sell", ticker: out.ticker, qty: out.qty, price: pOut.sell, fee_ars: Math.round(feeVenta), motivo },
-      { fecha: hoy, side: "buy", ticker: cedIn, qty: qtyIn, price: pIn.buy, fee_ars: Math.round(feeCompra), motivo },
-    ]);
-    await supabase.from("paper_consenso_state").delete().eq("ticker", out.ticker);
-    await supabase.from("paper_consenso_state").insert({
-      ticker: cedIn, ticker_13f: inn.tk13f, qty: qtyIn,
-      entry_price: pIn.buy, entry_date: hoy, entry_gestores: inn.gestores,
-    });
-    const pnlOut = (pOut.sell - Number(out.entry_price)) * out.qty - feeVenta;
-    log(`ROTACION: ${motivo} · realizado ${out.ticker}: ${pesos(pnlOut)}`);
-    await tg(`<b>PAPER CONSENSO · rotacion</b>\n${motivo}.\nVende ${out.qty} × ${pesos(pOut.sell)} (realizado ${pesos(pnlOut)}), compra ${qtyIn} × ${pesos(pIn.buy)}.\n<i>El 13F llega con 45-166 dias de atraso: la rotacion sigue al ranking, no al precio.</i>`);
-  }
-
-  // ── SNAPSHOT diario de equity ─────────────────────────────────────────
+  // ── SNAPSHOT de equity (cada corrida) ─────────────────────────────────
   const { data: estadoFinal } = await supabase.from("paper_consenso_state").select("*");
   let valor = 0; const detalle = [];
   for (const s of estadoFinal || []) {
@@ -217,15 +193,19 @@ function topConAntiChurn(ranking, incumbentes) {
     valor += s.qty * ref;
     detalle.push({ ticker: s.ticker, qty: Number(s.qty), px: ref, valor: Math.round(s.qty * ref) });
   }
-  // caja = capital − costo historico neto (suma de trades)
+  // caja acumulada = -(compras) + (ventas) - fees; el "capital" del paper es
+  // lo efectivamente puesto ($1M por entrada), asi que el equity se lee como
+  // valor de cartera + caja residual de rotaciones.
   const { data: tr } = await supabase.from("paper_consenso_trades").select("side,qty,price,fee_ars");
-  let cash = CAPITAL_ARS;
+  let flujo = 0, invertidoBruto = 0;
   for (const t of tr || []) {
     const bruto = Number(t.qty) * Number(t.price);
-    cash += (t.side === "sell" ? bruto : -bruto) - Number(t.fee_ars);
+    if (t.side === "buy") { flujo -= bruto + Number(t.fee_ars); invertidoBruto += bruto + Number(t.fee_ars); }
+    else flujo += bruto - Number(t.fee_ars);
   }
   await supabase.from("paper_consenso_equity").upsert({
-    fecha: hoy, equity_ars: Math.round(valor + cash), cash_ars: Math.round(cash), detalle,
+    fecha: hoy, equity_ars: Math.round(valor + flujo + invertidoBruto), cash_ars: Math.round(flujo + invertidoBruto), detalle,
   }, { onConflict: "fecha" });
-  log(`snapshot: cartera ${pesos(valor)} + caja ${pesos(cash)} = ${pesos(valor + cash)} (${(((valor + cash) / CAPITAL_ARS) - 1) * 100 > 0 ? "+" : ""}${((((valor + cash) / CAPITAL_ARS) - 1) * 100).toFixed(2)}%)`);
+  const pnlTotal = valor + flujo;   // valor actual + flujo neto (que arranca en -invertido)
+  log(`snapshot: cartera ${pesos(valor)} · P&L total ${pesos(pnlTotal)}`);
 })().catch((e) => { console.error(e); process.exit(1); });
