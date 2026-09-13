@@ -10,8 +10,10 @@
  *   - $1.000.000 POR EMPRESA al entrar (tamano fijo, no equal-weight de un
  *     pool): el que entra compra ~$1M al precio del dia; el que sale se
  *     vende entero y el producido queda en caja.
- *   - REVISION SEMANAL (lunes 11:30 ART), no diaria: los 13F cambian de
- *     verdad en las olas trimestrales de filings.
+ *   - REVISION DIARIA (habiles 11:30 ART): los superinversores manejan
+ *     informacion y una semana de atraso encima del atraso del 13F puede
+ *     costar cara (pedido de LP 13/09). Igual, los cambios reales llegan en
+ *     las olas trimestrales de filings.
  *   - Fill pesimista: compra al ask, venta al bid (data912 arg_cedears).
  *   - Comision IOL Gold por pata (0,5% + derechos 0,05% + IVA = 0,6655%).
  *
@@ -151,9 +153,9 @@ async function comprar(t, px, hoy, motivo) {
     if (!compras.length) { log("armado: sin precios, reintento en la proxima revision"); return; }
     const detalle = compras.map((c) => `${c.ced} ${c.qty} × ${pesos(c.precio)} (${c.gestores} gestores)`).join("\n");
     log(`ARMADO: ${compras.length} papeles`);
-    await tg(`<b>PAPER CONSENSO · armado inicial</b> (simulado, ${pesos(POR_EMPRESA_ARS)} por empresa)\nUmbral: ${objetivo.umbral} gestores (6to puesto, empates incluidos → ${objetivo.papeles.length} papeles):\n${detalle}\nRevision semanal, lunes. Aviso cada rotacion.`);
+    await tg(`<b>PAPER CONSENSO · armado inicial</b> (simulado, ${pesos(POR_EMPRESA_ARS)} por empresa)\nUmbral: ${objetivo.umbral} gestores (6to puesto, empates incluidos → ${objetivo.papeles.length} papeles):\n${detalle}\nRevision diaria (habiles 11:30). Aviso cada rotacion.`);
   } else {
-    // ── REVISION SEMANAL: sincronizar cartera con el objetivo ───────────
+    // ── REVISION DIARIA: sincronizar cartera con el objetivo ───────────
     const objSet = new Set(objetivo.papeles.map((t) => t.tk13f));
     const tengoSet = new Set(estado.map((s) => s.ticker_13f));
     const salen = estado.filter((s) => !objSet.has(s.ticker_13f));
