@@ -2865,7 +2865,7 @@ function useBrokerCashSnapshots(userId) {
     setError(null);
     supabase
       .from("broker_cash_snapshots")
-      .select("id, broker, account_id, account_type, currency, total, available, snapshot_at")
+      .select("id, broker, account_id, account_type, currency, total, available, pending_t1, snapshot_at")
       .eq("user_id", userId)
       .then(({ data: rows, error: err }) => {
         if (cancelled) return;
@@ -11092,7 +11092,7 @@ function fmtDateShort(iso) {
  * useBondPrices se encarga de fetchear y cachear esos precios.
  */
 
-function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxState, bondPricesState, futurePricesState, stockPricesState, fciPricesState, cashState, futureAdjustmentsState }) {
+function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, iolPendingT1ByCurrency, fxState, bondPricesState, futurePricesState, stockPricesState, fciPricesState, cashState, futureAdjustmentsState }) {
   const { fx, loading: fxLoading, error: fxError, lastUpdated: fxLastUpdated, refresh: refreshFx } = fxState;
   const { prices: bondPrices, loading: pricesLoading, error: pricesError, lastFetch: pricesLastFetch, refresh: refreshBondPrices } = bondPricesState;
   // futurePricesState viene de PortfolioDashboard (un solo hook compartido
@@ -11123,6 +11123,11 @@ function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxSt
   const effectiveIolCash = useMemo(
     () => (showIolCash ? iolCashByCurrency : { "ARS": 0, "USD-MEP": 0, "USD-CCL": 0 }),
     [showIolCash, iolCashByCurrency]
+  );
+  // El "a liquidar" de IOL sigue al mismo chip que su caja.
+  const effectiveIolPending = useMemo(
+    () => (showIolCash ? (iolPendingT1ByCurrency || { "ARS": 0, "USD-MEP": 0, "USD-CCL": 0 }) : { "ARS": 0, "USD-MEP": 0, "USD-CCL": 0 }),
+    [showIolCash, iolPendingT1ByCurrency]
   );
   // La caja sigue al chip de SU broker. Antes colgaba de un chip "efectivo"
   // que no existe en la UI (los chips son IOL y COC), asi que apagar COC le
@@ -11215,6 +11220,7 @@ function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxSt
           balanceByCurrency={balanceWithIol}
           futureAdjLookup={futureAdjLookup}
           movements={effectiveMovements}
+          iolPendingT1ByCurrency={effectiveIolPending}
         />
         <DistributionCard
           positions={positions}
@@ -11238,6 +11244,7 @@ function DashboardOverview({ positions, excludedBrokers, iolCashByCurrency, fxSt
           valuationCurrency={valuationCurrency}
           movements={effectiveMovements}
           iolCashByCurrency={effectiveIolCash}
+          iolPendingT1ByCurrency={effectiveIolPending}
           futureAdjLookup={futureAdjLookup}
           window={liquidityWindow}
           onWindowChange={setLiquidityWindow}
@@ -11681,7 +11688,7 @@ function computeRealizedTodayContado(positions, bondPrices, stockPrices, futureP
   return sum;
 }
 
-function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPrices, valuationCurrency, balanceByCurrency, futureAdjLookup, movements }) {
+function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPrices, valuationCurrency, balanceByCurrency, futureAdjLookup, movements, iolPendingT1ByCurrency }) {
   const { hidden: privHidden } = usePrivacy();
   // V2: ahora usamos precios de mercado de data912 cuando están disponibles.
   // El P&L se calcula como market - cost. Si no hay precio actualizado para
@@ -11804,13 +11811,20 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
   // de mucha venta: la plata "a liquidar" existe, solo que llega mañana —
   // es el "Total dinero" que muestra la app de Cocos (06/08).
   const pendingCashInValuation = useMemo(() => {
-    if (!movements?.length) return 0;
-    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
     const byCur = {};
-    for (const m of movements) {
-      if (!m.movement_date || m.movement_date <= today) continue;
-      const sign = (m.movement_type === "deposit" || m.movement_type === "sale_proceeds") ? 1 : -1;
-      byCur[m.currency] = (byCur[m.currency] || 0) + sign * Number(m.amount || 0);
+    if (movements?.length) {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      for (const m of movements) {
+        if (!m.movement_date || m.movement_date <= today) continue;
+        const sign = (m.movement_type === "deposit" || m.movement_type === "sale_proceeds") ? 1 : -1;
+        byCur[m.currency] = (byCur[m.currency] || 0) + sign * Number(m.amount || 0);
+      }
+    }
+    // A liquidar de IOL (bucket t1 del estadocuenta: ventas T+1). Viene del
+    // snapshot del worker, no de cash_movements — sin esto los $1,14M de la
+    // venta de la letra eran invisibles (13/09).
+    for (const [cur, amount] of Object.entries(iolPendingT1ByCurrency || {})) {
+      if (amount) byCur[cur] = (byCur[cur] || 0) + Number(amount);
     }
     let total = 0;
     for (const [cur, amount] of Object.entries(byCur)) {
@@ -11818,7 +11832,7 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
       if (conv != null) total += conv;
     }
     return total;
-  }, [movements, valuationCurrency, fx]);
+  }, [movements, iolPendingT1ByCurrency, valuationCurrency, fx]);
   const committedCash = cashInValuation + pendingCashInValuation;
 
   // Total efectivo en pantalla: posiciones a mercado + dinero comprometido.
@@ -12415,10 +12429,10 @@ function DonutChart({ slices, size = 100 }) {
 
 /* ─────────────── Card 3: Liquidez Proyectada ─────────────── */
 
-function LiquidityCard({ positions, fx, bondPrices, futurePrices, valuationCurrency, movements, iolCashByCurrency, futureAdjLookup, window: windowKey, onWindowChange }) {
+function LiquidityCard({ positions, fx, bondPrices, futurePrices, valuationCurrency, movements, iolCashByCurrency, iolPendingT1ByCurrency, futureAdjLookup, window: windowKey, onWindowChange }) {
   const breakdown = useMemo(
-    () => computeLiquidityBreakdown(positions, fx, valuationCurrency, windowKey, bondPrices, movements, futurePrices, futureAdjLookup, iolCashByCurrency),
-    [positions, fx, valuationCurrency, windowKey, bondPrices, movements, futurePrices, futureAdjLookup, iolCashByCurrency]
+    () => computeLiquidityBreakdown(positions, fx, valuationCurrency, windowKey, bondPrices, movements, futurePrices, futureAdjLookup, iolCashByCurrency, iolPendingT1ByCurrency),
+    [positions, fx, valuationCurrency, windowKey, bondPrices, movements, futurePrices, futureAdjLookup, iolCashByCurrency, iolPendingT1ByCurrency]
   );
 
   // Mensaje de footer dinámico según el window seleccionado.
@@ -14200,7 +14214,7 @@ function prettifyGroupKey(key, view) {
  * El cash actual (CI) SIEMPRE se incluye como base. Las otras ventanas lo
  * acumulan sumándole los flujos esperados.
  */
-function computeLiquidityBreakdown(positions, fx, valuationCurrency, windowKey, bondPrices, movements, futurePrices, futureAdjLookup, iolCashByCurrency) {
+function computeLiquidityBreakdown(positions, fx, valuationCurrency, windowKey, bondPrices, movements, futurePrices, futureAdjLookup, iolCashByCurrency, iolPendingT1ByCurrency) {
   const result = { ARS: 0, "USD-MEP": 0, "USD-CCL": 0 };
 
   // 0) Efectivo disponible de IOL (broker_cash_snapshots, campo `available`).
@@ -14210,6 +14224,14 @@ function computeLiquidityBreakdown(positions, fx, valuationCurrency, windowKey, 
   if (iolCashByCurrency) {
     for (const k of ["ARS", "USD-MEP", "USD-CCL"]) {
       result[k] += Number(iolCashByCurrency[k]) || 0;
+    }
+  }
+  // 0b) A liquidar de IOL (bucket t1: ventas T+1). NO es CI — entra recien
+  // en la ventana T1 y superiores (13/09: los $1,14M de la venta de la
+  // letra no aparecian en ninguna ventana).
+  if (windowKey !== "CI" && iolPendingT1ByCurrency) {
+    for (const k of ["ARS", "USD-MEP", "USD-CCL"]) {
+      result[k] += Number(iolPendingT1ByCurrency[k]) || 0;
     }
   }
 
@@ -16544,6 +16566,18 @@ function PortfolioDashboard({ onNavigate }) {
     }
     return acc;
   }, [brokerCashSnapshots]);
+  // Plata de IOL que liquida al siguiente día hábil (bucket t1 del
+  // estadocuenta: ventas T+1). Separada del available a propósito: es
+  // "a liquidar", no CI — el 13/09 los $1,14M de la venta de la letra
+  // eran invisibles en toda la app.
+  const iolPendingT1ByCurrency = useMemo(() => {
+    const acc = { "ARS": 0, "USD-MEP": 0, "USD-CCL": 0 };
+    for (const s of brokerCashSnapshots || []) {
+      if (s.broker !== "iol") continue;
+      acc[iolBalanceCurrency(s.account_type)] += Number(s.pending_t1) || 0;
+    }
+    return acc;
+  }, [brokerCashSnapshots]);
 
   // Levantamos los hooks de FX y precios de bonos al nivel del Dashboard,
   // así DashboardOverview Y PositionsTable comparten la misma instancia
@@ -16964,6 +16998,7 @@ function PortfolioDashboard({ onNavigate }) {
             positions={brokerFilteredPositions}
             excludedBrokers={excludedBrokers}
             iolCashByCurrency={iolCashByCurrency}
+            iolPendingT1ByCurrency={iolPendingT1ByCurrency}
             fxState={fxState}
             bondPricesState={bondPricesState}
             futurePricesState={futurePricesState}

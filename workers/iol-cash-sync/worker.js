@@ -107,7 +107,25 @@ function parseCuenta(cuenta) {
   }
 
   if (total == null) total = 0;
-  return { accountType, accountId, currency, total, available };
+
+  // pending_t1 = plata que liquida al siguiente dia habil (ventas T+1).
+  // IOL lo publica como bucket de saldos[] con liquidacion "veinticuatro
+  // horas" / "24hs". Sin esto, los proceeds de una venta quedaban
+  // invisibles en Midas hasta liquidar (caso letra S30S6, 13/09/2026).
+  let pendingT1 = 0;
+  const t1 = saldos.find((s) => {
+    const l = String(s && s.liquidacion ? s.liquidacion : "").toLowerCase();
+    return l.includes("veinticuatro") || l.includes("24");
+  });
+  if (t1) {
+    pendingT1 =
+      numOrNull(t1.disponible) ??
+      numOrNull(t1.saldo) ??
+      numOrNull(t1.disponibleOperar) ??
+      0;
+  }
+
+  return { accountType, accountId, currency, total, available, pendingT1 };
 }
 
 // ----- Fetch /estadocuenta -----
@@ -178,7 +196,7 @@ async function syncOne(link) {
   const rows = [];
   for (const cuenta of cuentas) {
     const p = parseCuenta(cuenta);
-    info(`${tag}: ${p.accountType} (${p.currency}) - total=${p.total} disponible=${p.available}`);
+    info(`${tag}: ${p.accountType} (${p.currency}) - total=${p.total} disponible=${p.available} t1=${p.pendingT1}`);
     rows.push({
       user_id: link.user_id,
       broker: "iol",
@@ -187,6 +205,7 @@ async function syncOne(link) {
       currency: p.currency,
       total: p.total,
       available: p.available,
+      pending_t1: p.pendingT1,
       raw: cuenta,
       snapshot_at: now,
     });
