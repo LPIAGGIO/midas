@@ -1594,13 +1594,17 @@ async function iolCancelar(numero) {
 
 /* Estado actual de una orden en IOL ("pendiente", "terminada", "cancelada por
  * vencimiento de validez", ...). null si no se pudo consultar. */
-async function iolEstado(numero) {
+async function iolDetalle(numero) {
   const token = await iolToken();
   const r = await fetch(`https://api.invertironline.com/api/v2/operaciones/${encodeURIComponent(numero)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!r.ok) return null;
-  const j = await r.json().catch(() => null);
+  return await r.json().catch(() => null);
+}
+
+async function iolEstado(numero) {
+  const j = await iolDetalle(numero);
   return String(j?.estadoActual ?? j?.estado ?? "") || null;
 }
 
@@ -1834,6 +1838,13 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
 
 // Candidatos a fill/salida esperando su segunda lectura (anti-fantasma).
 const fillCand = new Map();
+// Trades reales cuyo subyacente cruzó el nivel pero IOL aún no confirma la
+// ejecución local — para loguear el desfasaje UNA vez y no cada pasada.
+const cruceSinFill = new Set();
+// Cadencia de consulta a IOL por el fill de un trade cruzado (cuida el cupo
+// de la API: la pasada corre cada 60s pero preguntar cada vez es al pedo).
+const FILL_IOL_CADA_MS = 2 * 60 * 1000;
+const fillIolCheck = new Map();
 async function paperPass() {
   await resolverModo();
   const { data: trades } = await supabase.from("paper_iol_trades").select("*").in("status", ["pending", "open"]);
@@ -1972,18 +1983,53 @@ async function paperPass() {
         continue;
       }
       if (Date.now() - cand < 150000) continue;
+      /* CONFIRMACIÓN CONTRA IOL (14/09/2026): en modo real el cruce del
+       * subyacente NO es un fill. SPCX cruzó en dólares pero el CEDEAR local
+       * nunca operó el límite: se avisó "ENTRO SPCX" con 0 ejecutado en IOL y
+       * el espejo en Cocos replicó una posición fantasma. El fill lo declara
+       * IOL — el feed solo dice que vale la pena preguntarle. */
+      let fillIol = null;
+      if (t.modo === "real" && t.broker_order_id) {
+        const antesIol = fillIolCheck.get(t.id) || 0;
+        if (Date.now() - antesIol < FILL_IOL_CADA_MS) continue;
+        fillIolCheck.set(t.id, Date.now());
+        const det = await iolDetalle(t.broker_order_id).catch(() => null);
+        const estadoIol = String(det?.estadoActual ?? det?.estado ?? "");
+        if (!/terminada|ejecutada|cumplida/i.test(estadoIol)) {
+          if (!cruceSinFill.has(t.id)) {
+            cruceSinFill.add(t.id);
+            log(`[bot ${t.ticker}] subyacente cruzó el nivel pero IOL no confirma ejecución (estado: ${estadoIol || "sin dato"}) — la orden local sigue apoyada, espero el fill de IOL`);
+          }
+          continue;
+        }
+        const operada = Math.round(Number(det?.cantidadOperada ?? 0));
+        if (/parcial/i.test(estadoIol) && operada > 0 && operada < Math.round(Number(t.qty))) {
+          // Parcial: se cancela el remanente y se maneja SOLO lo ejecutado,
+          // así no queda un resto apoyado que nadie sigue.
+          try { await iolCancelar(t.broker_order_id); } catch {}
+          log(`[bot ${t.ticker}] fill PARCIAL en IOL: ${operada} de ${t.qty} — cancelo el remanente y manejo lo ejecutado`);
+          await supabase.from("paper_iol_trades").update({ qty: operada }).eq("id", t.id);
+          t.qty = operada;
+        }
+        cruceSinFill.delete(t.id);
+        fillIol = det;
+      }
       fillCand.delete(t.id);
       // Fill: la CONDICIÓN se evalúa en dólares (la tesis es sobre el papel),
       // el PRECIO se toma en pesos del papel local pagando la punta vendedora,
       // que es lo que cuesta de verdad cruzarse contra el book.
-      const pxUsd = Math.min(lim, p > 0 ? Math.max(p, bajo) : lim);
+      let pxUsd = Math.min(lim, p > 0 ? Math.max(p, bajo) : lim);
       // El precio en pesos sale del NIVEL, no del ask del momento.
       // Estaba usando el ask y era un error grueso: el ask refleja dónde está
       // el papel AHORA, no dónde se ejecutó la orden. Con MU llegó a inventar
       // $4.644 de sobreprecio por unidad — 1,6%, más que una vuelta completa
       // de comisiones. Una orden límite descansando en el book es el lado
       // PASIVO: la cruza un vendedor y se ejecuta al límite, sin pagar spread.
-      const pxArs = Math.round(pxUsd * rArs);
+      let pxArs = Math.round(pxUsd * rArs);
+      // Con fill confirmado por IOL, el precio manda IOL (precioOperado en
+      // pesos), no la reconstrucción desde el feed.
+      const pxOper = Number(fillIol?.precioOperado ?? 0);
+      if (pxOper > 0) { pxArs = Math.round(pxOper); pxUsd = pxOper / rArs; }
       await supabase.from("paper_iol_trades").update({
         status: "open", entry_price: pxUsd, entry_ts: new Date().toISOString(),
         px_ars_entrada: pxArs, ratio: Math.round(rArs * 100) / 100,
