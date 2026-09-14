@@ -359,10 +359,13 @@ async function evalPriceAlerts(users, fut) {
   if (!alerts || !alerts.length) return;
   const chatBy = Object.fromEntries(subs.map((u) => [u.userId, u.chatId]));
   let d912 = null;
-  if (alerts.some((a) => !isDlrFuture(a.ticker))) d912 = await loadData912();
+  // Cualquier futuro del feed MtR (DLR, WTI, ORO, futuros de accion) resuelve
+  // por fut.price; el resto cae a data912. Antes solo DLR podia tener alertas
+  // (13/09/2026: LP quiso alertas de recompra escalonada del corto WTI).
+  if (alerts.some((a) => fut.price[(a.ticker || "").toUpperCase().trim().replace("/", "")] == null)) d912 = await loadData912();
   for (const a of alerts) {
-    const tk = (a.ticker || "").toUpperCase().trim();
-    const price = isDlrFuture(tk) ? fut.price[tk] : (d912 && d912[a.ticker] ? d912[a.ticker].c : null);
+    const tk = (a.ticker || "").toUpperCase().trim().replace("/", "");
+    const price = fut.price[tk] != null ? fut.price[tk] : (d912 && d912[a.ticker] ? d912[a.ticker].c : null);
     if (price == null) continue;
     const level = Number(a.price);
     if (!(a.dir === "up" ? price >= level : price <= level)) continue;
