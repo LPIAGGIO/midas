@@ -250,8 +250,13 @@ async function esperarFill(numero, token, desc) {
     await sleep(POLL_MS);
     const j = await iolDetalle(numero, token);
     const estado = String(j?.estadoActual ?? j?.estado ?? "");
-    const pxOper = Number(j?.precioOperado ?? 0);
-    const qtyOper = Number(j?.cantidadOperada ?? j?.cantidad ?? 0);
+    // Lo ejecutado vive en el array "operaciones" (medido 15/09 con la orden
+    // 188897671): no existe precioOperado/cantidadOperada en el detalle REST.
+    const ops = Array.isArray(j?.operaciones) ? j.operaciones : [];
+    const qtyOper = ops.reduce((s, o) => s + (Number(o.cantidad) || 0), 0);
+    const pxOper = qtyOper > 0
+      ? ops.reduce((s, o) => s + (Number(o.cantidad) || 0) * (Number(o.precio) || 0), 0) / qtyOper
+      : 0;
     if (/terminada|ejecutada|cumplida/i.test(estado) && pxOper > 0)
       return { ok: true, px: pxOper, qty: qtyOper, estado };
     if (/cancelada|rechazada/i.test(estado))

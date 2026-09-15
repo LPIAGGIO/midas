@@ -2020,7 +2020,10 @@ async function paperPass() {
           }
           continue;
         }
-        const operada = Math.round(Number(det?.cantidadOperada ?? 0));
+        // Lo ejecutado vive en el array "operaciones" del detalle REST — no
+        // existen precioOperado/cantidadOperada (medido 15/09, orden 188897671).
+        const opsIol = Array.isArray(det?.operaciones) ? det.operaciones : [];
+        const operada = Math.round(opsIol.reduce((s, o) => s + (Number(o.cantidad) || 0), 0));
         if (/parcial/i.test(estadoIol) && operada > 0 && operada < Math.round(Number(t.qty))) {
           // Parcial: se cancela el remanente y se maneja SOLO lo ejecutado,
           // así no queda un resto apoyado que nadie sigue.
@@ -2044,9 +2047,14 @@ async function paperPass() {
       // de comisiones. Una orden límite descansando en el book es el lado
       // PASIVO: la cruza un vendedor y se ejecuta al límite, sin pagar spread.
       let pxArs = Math.round(pxUsd * rArs);
-      // Con fill confirmado por IOL, el precio manda IOL (precioOperado en
-      // pesos), no la reconstrucción desde el feed.
-      const pxOper = Number(fillIol?.precioOperado ?? 0);
+      // Con fill confirmado por IOL, el precio manda IOL (promedio ponderado
+      // del array "operaciones"), no la reconstrucción desde el feed — el
+      // 15/09 el feed dio $28.326 cuando IOL ejecutó HUT a $28.660.
+      const opsFill = Array.isArray(fillIol?.operaciones) ? fillIol.operaciones : [];
+      const qtyFill = opsFill.reduce((s, o) => s + (Number(o.cantidad) || 0), 0);
+      const pxOper = qtyFill > 0
+        ? opsFill.reduce((s, o) => s + (Number(o.cantidad) || 0) * (Number(o.precio) || 0), 0) / qtyFill
+        : 0;
       if (pxOper > 0) { pxArs = Math.round(pxOper); pxUsd = pxOper / rArs; }
       await supabase.from("paper_iol_trades").update({
         status: "open", entry_price: pxUsd, entry_ts: new Date().toISOString(),
