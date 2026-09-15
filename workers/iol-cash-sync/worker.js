@@ -84,26 +84,25 @@ function parseCuenta(cuenta) {
     numOrNull(cuenta.disponible) ??
     numOrNull(cuenta.total);
 
-  // available = disponible inmediato (liquidez CI).
-  let available = numOrNull(cuenta.disponible);
-
-  // Si no hubo nada arriba, miramos el bucket 'inmediato' de saldos[].
+  /* available = disponible inmediato (liquidez CI). Sale del bucket
+   * "inmediato" de saldos[], NO de cuenta.disponible: ese campo NETEA los
+   * compromisos T+1 del día y puede dar muy negativo con la cuenta sana
+   * (15/09/2026: -2.427.814 con $41.628 operables y $2.47M de ventas
+   * liquidando mañana — Midas mostraba el total de cartera 2,5M abajo). */
   const saldos = Array.isArray(cuenta.saldos) ? cuenta.saldos : [];
   const inmediato = saldos.find((s) =>
     String(s && s.liquidacion ? s.liquidacion : "")
       .toLowerCase()
       .includes("inmediato")
   );
-  if (inmediato) {
-    if (available == null) {
-      available =
-        numOrNull(inmediato.disponible) ??
-        numOrNull(inmediato.saldo) ??
-        numOrNull(inmediato.disponibleOperar);
-    }
-    if (total == null) {
-      total = numOrNull(inmediato.saldo) ?? available;
-    }
+  let available = inmediato
+    ? (numOrNull(inmediato.disponible) ??
+       numOrNull(inmediato.disponibleOperar) ??
+       numOrNull(inmediato.saldo))
+    : null;
+  if (available == null) available = numOrNull(cuenta.disponible);
+  if (inmediato && total == null) {
+    total = numOrNull(inmediato.saldo) ?? available;
   }
 
   if (total == null) total = 0;
@@ -118,9 +117,12 @@ function parseCuenta(cuenta) {
     return l.includes("veinticuatro") || l.includes("24");
   });
   if (t1) {
+    // El SALDO manda: es la plata que liquida mañana. "disponible" del
+    // bucket suele venir 0 cuando IOL ya la comprometió contra los pagos
+    // de las compras del día (15/09: saldo 2.469.443, disponible 0).
     pendingT1 =
-      numOrNull(t1.disponible) ??
       numOrNull(t1.saldo) ??
+      numOrNull(t1.disponible) ??
       numOrNull(t1.disponibleOperar) ??
       0;
   }
