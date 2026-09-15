@@ -231,6 +231,19 @@ async function iolCancelar(numero, token) {
   });
   if (!r.ok) throw new Error(`IOL cancelar ${numero}: ${r.status}`);
 }
+/* Los access token de IOL viven ~15 minutos y una rotación con esperas de
+ * fill los supera (pasada 1 del 15/09: el cancel del timeout y una compra
+ * murieron con 401 a los 16 minutos de corrida). El keep-alive deja siempre
+ * un token fresco en Supabase: se relee con cache corto en vez de cargarlo
+ * una sola vez al arrancar. */
+let _tokCache = { v: null, at: 0 };
+async function tokenFresco() {
+  if (_tokCache.v && Date.now() - _tokCache.at < 5 * 60 * 1000) return _tokCache.v;
+  _tokCache.v = await iolToken();
+  _tokCache.at = Date.now();
+  return _tokCache.v;
+}
+
 async function iolDetalle(numero, token) {
   const r = await fetch(`${IOL_BASE}/api/v2/operaciones/${encodeURIComponent(numero)}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -248,7 +261,7 @@ async function esperarFill(numero, token, desc) {
   const desde = Date.now();
   for (;;) {
     await sleep(POLL_MS);
-    const j = await iolDetalle(numero, token);
+    const j = await iolDetalle(numero, await tokenFresco());
     const estado = String(j?.estadoActual ?? j?.estado ?? "");
     // Lo ejecutado vive en el array "operaciones" (medido 15/09 con la orden
     // 188897671): no existe precioOperado/cantidadOperada en el detalle REST.
@@ -267,7 +280,7 @@ async function esperarFill(numero, token, desc) {
       return { ok: false, motivo: `orden ${estado}`, estado };
     if (Date.now() - desde > FILL_TIMEOUT_MS) {
       log(`[fill] ${desc}: timeout ${FILL_TIMEOUT_MS / 60000} min (estado "${estado || "?"}") — cancelo`);
-      await iolCancelar(numero, token).catch((e) => log(`[fill] no pude cancelar ${numero}: ${e.message}`));
+      await iolCancelar(numero, await tokenFresco()).catch((e) => log(`[fill] no pude cancelar ${numero}: ${e.message}`));
       // Si operó parcial antes del timeout, ese parcial es real y se cuenta.
       const parcial = pxOper > 0 && qtyOper > 0 ? { px: pxOper, qty: qtyOper } : null;
       return { ok: false, motivo: "timeout", parcial, estado };
@@ -285,7 +298,16 @@ async function cashIol(token) {
   let ars = 0, usdMep = 0;
   for (const c of j?.cuentas || []) {
     const tipo = String(c.tipo || "").toLowerCase();
-    const disp = Number(c.disponible) || 0;
+    /* El disponible operable vive en el bucket "inmediato" de saldos[].
+     * cuenta.disponible NETEA los compromisos T+1 del día y puede dar
+     * NEGATIVO con la cuenta sana (15/09: -637.316 = 1.832.126 del bucket
+     * inmediato menos 2.469.443 de ventas liquidando mañana) — con eso la
+     * sanity congelaba una rotación perfectamente financiada. */
+    const saldos = Array.isArray(c.saldos) ? c.saldos : [];
+    const inm = saldos.find((s) => String(s?.liquidacion ?? "").toLowerCase().includes("inmediato"));
+    const disp = inm
+      ? (Number(inm.disponible) || Number(inm.saldo) || 0)
+      : (Number(c.disponible) || 0);
     // Solo las cuentas "inversión Argentina": pesos y dólares MEP. La de
     // Estados Unidos no participa del momentum.
     if (tipo.includes("argentina") && tipo.includes("peso")) ars += disp;
@@ -566,7 +588,7 @@ function planCompras(top8, valorPorBase, cajaArs, cajaUsd, ccl, libros) {
   }
   for (const v of ventas) {
     try {
-      const num = await iolOrden("venta", v.sym, v.qty, v.limit, token);
+      const num = await iolOrden("venta", v.sym, v.qty, v.limit, await tokenFresco());
       log(`VENTA ${v.sym} ×${v.qty} lim ${v.limit} → orden ${num}`);
       const fill = await esperarFill(num, token, `venta ${v.sym}`);
       if (fill.ok || fill.parcial) {
@@ -591,7 +613,7 @@ function planCompras(top8, valorPorBase, cajaArs, cajaUsd, ccl, libros) {
 
   // Caja POST-ventas leída de IOL (el disponible ya trae el aforo ~85% de
   // T+1 aplicado — no se estima, se lee). La reserva del bot se resta SIEMPRE.
-  const cash1 = await cashIol(token);
+  const cash1 = await cashIol(await tokenFresco());
   const cajaArsPost = Math.max(0, cash1.ars - bot.reserva);
   const producido = ventas.reduce((s, v) => s + (v.fill && !v.esUsd ? v.fill.px * v.fill.qty : 0), 0);
   // Congelada: nada de caja nueva — el budget es el producido de HOY (con el
@@ -615,7 +637,7 @@ function planCompras(top8, valorPorBase, cajaArs, cajaUsd, ccl, libros) {
   for (const c of [...plan.comprasUsd, ...plan.comprasArs]) {
     const fmt = c.moneda === "USD" ? usd : pesos;
     try {
-      const num = await iolOrden("compra", c.sym, c.qty, c.limit, token);
+      const num = await iolOrden("compra", c.sym, c.qty, c.limit, await tokenFresco());
       log(`COMPRA ${c.sym} ×${c.qty} lim ${c.limit} → orden ${num}`);
       const fill = await esperarFill(num, token, `compra ${c.sym}`);
       if (fill.ok || fill.parcial) {
@@ -635,7 +657,7 @@ function planCompras(top8, valorPorBase, cajaArs, cajaUsd, ccl, libros) {
   }
   for (const s of plan.saltos) resumen.push(`Compra salteada: ${s}`);
 
-  const cashFin = await cashIol(token).catch(() => null);
+  const cashFin = await cashIol(await tokenFresco()).catch(() => null);
   const sinCambios = !ventas.length && !plan.comprasUsd.length && !plan.comprasArs.length;
   await tg(
     `<b>MOMENTUM · rotación ${hoy} — resumen</b>\n` +

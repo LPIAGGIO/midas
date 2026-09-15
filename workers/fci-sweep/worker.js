@@ -127,6 +127,17 @@ async function iolToken() {
     throw new Error("access_token de IOL vencido (lo revive el keep-alive)");
   return data.access_token;
 }
+// Los access token de IOL viven ~15 min y la medición de acreditación puede
+// durar 2 horas: se relee de Supabase (el keep-alive lo mantiene fresco) con
+// cache corto. Lección de la rotación del 15/09 (401 a los 16 minutos).
+let _tokCache = { v: null, at: 0 };
+async function tokenFresco() {
+  if (_tokCache.v && Date.now() - _tokCache.at < 5 * 60 * 1000) return _tokCache.v;
+  _tokCache.v = await iolToken();
+  _tokCache.at = Date.now();
+  return _tokCache.v;
+}
+
 async function iolDetalle(numero, token) {
   const r = await fetch(`${IOL_BASE}/api/v2/operaciones/${encodeURIComponent(numero)}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -154,7 +165,12 @@ async function disponibleArs(token) {
   let ars = 0;
   for (const c of j?.cuentas || []) {
     const tipo = String(c.tipo || "").toLowerCase();
-    if (tipo.includes("argentina") && tipo.includes("peso")) ars += Number(c.disponible) || 0;
+    if (!(tipo.includes("argentina") && tipo.includes("peso"))) continue;
+    // Bucket "inmediato" de saldos[]: cuenta.disponible netea los
+    // compromisos T+1 y puede dar negativo con la cuenta sana (15/09).
+    const saldos = Array.isArray(c.saldos) ? c.saldos : [];
+    const inm = saldos.find((s) => String(s?.liquidacion ?? "").toLowerCase().includes("inmediato"));
+    ars += inm ? (Number(inm.disponible) || Number(inm.saldo) || 0) : (Number(c.disponible) || 0);
   }
   return ars;
 }
@@ -270,7 +286,7 @@ async function barrer() {
       const objetivo = disp0 + liberado * 0.9; // 90%: px_ars_orden es estimación, no el escrow exacto
       const limite = Date.now() + 5 * 60 * 1000;
       for (;;) {
-        disp = await disponibleArs(token);
+        disp = await disponibleArs(await tokenFresco());
         log(`disponible ${pesos(disp)} (objetivo ~${pesos(objetivo)})`);
         if (disp >= objetivo) break;
         if (Date.now() > limite) {
@@ -404,7 +420,7 @@ async function rescatar() {
     let avisado1035 = false, acreditado = false;
     for (;;) {
       const t = ahoraAr();
-      const disp = await disponibleArs(token).catch((e) => { log(`poll falló: ${e.message}`); return null; });
+      const disp = await disponibleArs(await tokenFresco()).catch((e) => { log(`poll falló: ${e.message}`); return null; });
       if (disp != null) {
         log(`${t.hhmm} ART · disponible ${pesos(disp)} (base ${pesos(disp0)}, salto de ${pesos(disp - disp0)} / umbral ${pesos(estimadoArs * 0.5)})`);
         if (disp - disp0 > estimadoArs * 0.5) {
