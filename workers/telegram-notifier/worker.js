@@ -984,7 +984,9 @@ async function buildMorningBrief(userId) {
 
   // (2) Asia (cerrada a esta hora) y (3) futuros USA
   const ASIA = [["^N225", "Nikkei"], ["^KS11", "KOSPI"], ["^HSI", "HangSeng"], ["000001.SS", "Shanghai"]];
-  const USA = [["ES=F", "S&P fut"], ["NQ=F", "Nasdaq fut"], ["^VIX", "VIX"], ["GC=F", "Oro"]];
+  // WTI al final (pedido de LP 15/09: tiene cortos de WTI en MtR y el brief
+  // era el unico lugar sin el crudo a la vista).
+  const USA = [["ES=F", "S&P fut"], ["NQ=F", "Nasdaq fut"], ["^VIX", "VIX"], ["GC=F", "Oro"], ["CL=F", "WTI"]];
   const asia = [], usa = [];
   for (const [sym, nom] of ASIA) { const q = await yahooBrief(sym); if (q) asia.push(`${nom} ${briefPct(q.pct)}`); }
   for (const [sym, nom] of USA) { const q = await yahooBrief(sym); if (q) usa.push(`${nom} ${briefPct(q.pct)}`); }
