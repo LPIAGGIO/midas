@@ -1663,6 +1663,20 @@ const DERIVA_MAX = 0.005;
 // 5 min por trade cuida el cupo de la API: 3 trades ≈ 36 consultas/hora.
 const RECON_CADA_MS = 5 * 60 * 1000;
 const reconUltima = new Map();
+
+/* CORTE de órdenes reales (15/09, barrido FCI): desde esta hora ART no se
+ * colocan ni recolocan órdenes reales. El barrido de las 16:50 cancela las
+ * pendientes y sube el saldo ocioso a un FCI money market — si el bot
+ * recolocara detrás del barrido, la suscripción saldría sin plata o la orden
+ * quedaría sin respaldo. Las señales de los últimos minutos de rueda se
+ * pierden: es el costo de que ~$5M no duerman gratis cada noche. */
+const CORTE_REAL_HHMM = process.env.IOL_BOT_CORTE_HHMM || "16:50";
+function enCorteReal() {
+  const [hh, mm] = CORTE_REAL_HHMM.split(":").map(Number);
+  const ahora = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false });
+  const [h, m] = ahora.split(":").map(Number);
+  return h > hh || (h === hh && m >= mm);
+}
 function deriva_check(t) {
   const antes = reconUltima.get(t.id) || 0;
   if (Date.now() - antes < RECON_CADA_MS) return false;
@@ -1797,6 +1811,10 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
     nota_sim: `Nivel de compra US$${entry.toFixed(2)} ≈ ${pesos(precioUnidad)} por unidad. Esperando que el papel baje a buscarlo. Si llega: compra ${qty}, vende en US$${target.toFixed(2)} ≈ ${pesos(target * rArs)}, corta en US$${stop.toFixed(2)} ≈ ${pesos(stop * rArs)}.`,
   };
   if (MODO_REAL && !esShadow) {
+    if (enCorteReal()) {
+      log(`[bot ${tk}] corte ${CORTE_REAL_HHMM}: sin órdenes reales nuevas hasta mañana (el saldo queda quieto para el barrido FCI)`);
+      return;
+    }
     let colocada = false;
     for (let intento = 0; intento < 2 && !colocada; intento++) {
       try { fila.broker_order_id = await iolOrden("compra", tk, qty, precioUnidad); colocada = true; continue; }
@@ -1921,7 +1939,7 @@ async function paperPass() {
        *
        * Sólo aplica en modo real: en paper no hay orden que corregir, el nivel
        * se recalcula solo en cada pasada. */
-      if (MODO_REAL && t.broker_order_id && t.px_ars_orden > 0 &&
+      if (MODO_REAL && !enCorteReal() && t.broker_order_id && t.px_ars_orden > 0 &&
           (deriva_check(t) || Math.abs(Number(t.entry_limit) * rArs / Number(t.px_ars_orden) - 1) > DERIVA_MAX)) {
         const deberia = Number(t.entry_limit) * rArs;
         const deriva = Math.abs(deberia / Number(t.px_ars_orden) - 1);
