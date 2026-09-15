@@ -257,7 +257,11 @@ async function esperarFill(numero, token, desc) {
     const pxOper = qtyOper > 0
       ? ops.reduce((s, o) => s + (Number(o.cantidad) || 0) * (Number(o.precio) || 0), 0) / qtyOper
       : 0;
-    if (/terminada|ejecutada|cumplida/i.test(estado) && pxOper > 0)
+    // "Parcialmente Terminada" es un estado TRANSITORIO mientras la orden
+    // sigue llenándose (AVGO 15/09: el regex viejo lo tomó por final con 7 de
+    // 26 ejecutados y el producido quedó en un cuarto). Final es terminada/
+    // ejecutada/cumplida SIN "parcial" — con parcial, se sigue esperando.
+    if (/terminada|ejecutada|cumplida/i.test(estado) && !/parcial/i.test(estado) && pxOper > 0)
       return { ok: true, px: pxOper, qty: qtyOper, estado };
     if (/cancelada|rechazada/i.test(estado))
       return { ok: false, motivo: `orden ${estado}`, estado };

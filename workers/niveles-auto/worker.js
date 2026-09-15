@@ -2013,10 +2013,13 @@ async function paperPass() {
         fillIolCheck.set(t.id, Date.now());
         const det = await iolDetalle(t.broker_order_id).catch(() => null);
         const estadoIol = String(det?.estadoActual ?? det?.estado ?? "");
-        if (!/terminada|ejecutada|cumplida/i.test(estadoIol)) {
+        // "Parcialmente Terminada" es transitorio: la orden sigue llenándose
+        // (HUT 15/09 pasó por ahí 19 segundos entre los tramos de 70 y 4).
+        // Solo el estado final SIN "parcial" confirma; mientras, se espera.
+        if (!/terminada|ejecutada|cumplida/i.test(estadoIol) || /parcial/i.test(estadoIol)) {
           if (!cruceSinFill.has(t.id)) {
             cruceSinFill.add(t.id);
-            log(`[bot ${t.ticker}] subyacente cruzó el nivel pero IOL no confirma ejecución (estado: ${estadoIol || "sin dato"}) — la orden local sigue apoyada, espero el fill de IOL`);
+            log(`[bot ${t.ticker}] subyacente cruzó el nivel pero IOL no confirma ejecución completa (estado: ${estadoIol || "sin dato"}) — la orden local sigue apoyada, espero el fill de IOL`);
           }
           continue;
         }
@@ -2024,11 +2027,10 @@ async function paperPass() {
         // existen precioOperado/cantidadOperada (medido 15/09, orden 188897671).
         const opsIol = Array.isArray(det?.operaciones) ? det.operaciones : [];
         const operada = Math.round(opsIol.reduce((s, o) => s + (Number(o.cantidad) || 0), 0));
-        if (/parcial/i.test(estadoIol) && operada > 0 && operada < Math.round(Number(t.qty))) {
-          // Parcial: se cancela el remanente y se maneja SOLO lo ejecutado,
-          // así no queda un resto apoyado que nadie sigue.
-          try { await iolCancelar(t.broker_order_id); } catch {}
-          log(`[bot ${t.ticker}] fill PARCIAL en IOL: ${operada} de ${t.qty} — cancelo el remanente y manejo lo ejecutado`);
+        if (operada > 0 && operada < Math.round(Number(t.qty))) {
+          // Estado final con menos ejecutado que lo pedido (raro: IOL cerró la
+          // orden con un resto sin operar): se maneja SOLO lo ejecutado.
+          log(`[bot ${t.ticker}] fill PARCIAL final en IOL: ${operada} de ${t.qty} — manejo lo ejecutado`);
           await supabase.from("paper_iol_trades").update({ qty: operada }).eq("id", t.id);
           t.qty = operada;
         }
