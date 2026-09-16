@@ -377,6 +377,41 @@ async function rescatar() {
     }
 
     const token = await iolToken();
+
+    /* PASO 0 — SUSCRIPCIONES PENDIENTES (el ciclo real, medido 16/09): la
+     * suscripción de las 16:50 cae DESPUÉS del cut-off del fondo y queda
+     * "Iniciada" toda la noche, con el cash retenido. Cancelarla a la
+     * mañana lo devuelve AL INSTANTE — sin cuotapartes, sin concertación,
+     * sin acreditación que esperar. Y la remuneración nocturna llega igual
+     * (crédito 22:00 del 15/09: $773,52 sobre $1,94M ≈ 14,6% TNA — a
+     * CONFIRMAR con más noches; si no se repite, este ciclo no rinde y hay
+     * que repensar el horario del barrido). */
+    paso = "cancelación de suscripciones pendientes";
+    let recuperado = 0, cancelSubs = 0;
+    try {
+      const rp = await fetch(`${IOL_BASE}/api/v2/operaciones?filtro.estado=pendientes`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const jp = rp.ok ? await rp.json().catch(() => []) : [];
+      const lista = Array.isArray(jp) ? jp : (jp?.operaciones || []);
+      for (const o of lista) {
+        const sim = String(o.simbolo ?? "").toUpperCase();
+        if (sim !== FONDO.toUpperCase()) continue;
+        const num = String(o.numero ?? o.numeroOperacion ?? "");
+        if (!num) continue;
+        if (DRY_RUN) { log(`[DRY-RUN] cancelaría suscripción pendiente ${num} (~${pesos(Number(o.monto) || 0)})`); continue; }
+        await iolCancelar(num, token);
+        cancelSubs++;
+        recuperado += Number(o.monto) || 0;
+        log(`suscripción pendiente ${num} cancelada — cash de vuelta al instante`);
+      }
+    } catch (e) {
+      log(`paso 0 falló (${e.message}) — sigo con el rescate por cuotapartes`);
+    }
+    if (cancelSubs > 0) {
+      await tg(`<b>FCI-SWEEP · mañana</b> (${hoy})\nCancelé ${cancelSubs} suscripción(es) pendiente(s) de ${FONDO}: ~${pesos(recuperado)} de vuelta en el disponible, al instante. La remuneración de anoche llega como Crédito ~22:00.`);
+    }
+
     paso = "lectura del portafolio";
     const r = await fetch(`${IOL_BASE}/api/v2/portafolio/argentina`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
@@ -388,7 +423,7 @@ async function rescatar() {
     );
     const cuotapartes = Number(activo?.cantidad) || 0;
     if (cuotapartes <= 0) {
-      log(`nada que rescatar: no hay ${FONDO} en el portafolio`);
+      log(`nada que rescatar por cuotapartes: no hay ${FONDO} concertado en el portafolio${cancelSubs ? " (las pendientes ya se cancelaron arriba)" : ""}`);
       return;
     }
     // Estimación en ARS de lo que vuelve — solo para MEDIR la acreditación
