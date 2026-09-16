@@ -1603,6 +1603,26 @@ async function iolDetalle(numero) {
   return await r.json().catch(() => null);
 }
 
+/* Disponible operable REAL en IOL: bucket "inmediato" de saldos[]. OJO:
+ * cuenta.disponible netea los compromisos T+1 y puede dar negativo con la
+ * cuenta sana (medido 15/09: -$2,4M con $41k operables de verdad). */
+async function iolSaldoDisponible() {
+  const token = await iolToken();
+  const r = await fetch("https://api.invertironline.com/api/v2/estadocuenta", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!r.ok) throw new Error(`estadocuenta ${r.status}`);
+  const j = await r.json().catch(() => null);
+  for (const c of j?.cuentas || []) {
+    const tipo = String(c.tipo || "").toLowerCase();
+    if (!(tipo.includes("argentina") && tipo.includes("peso"))) continue;
+    const inm = (Array.isArray(c.saldos) ? c.saldos : []).find((s) => String(s?.liquidacion ?? "").toLowerCase().includes("inmediato"));
+    if (inm) return Number(inm.disponible) || Number(inm.disponibleOperar) || 0;
+    return Number(c.disponible) || 0;
+  }
+  return 0;
+}
+
 async function iolEstado(numero) {
   const j = await iolDetalle(numero);
   return String(j?.estadoActual ?? j?.estado ?? "") || null;
@@ -1814,6 +1834,26 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
     if (enCorteReal()) {
       log(`[bot ${tk}] corte ${CORTE_REAL_HHMM}: sin órdenes reales nuevas hasta mañana (el saldo queda quieto para el barrido FCI)`);
       return;
+    }
+    /* CHEQUEO DE SALDO REAL (16/09, "viene fallando" de LP): el disponible
+     * interno (cap − comprometido) puede decir que queda resto cuando IOL ya
+     * no lo tiene (escrows de pendientes, liquidaciones T+1). Pedir la orden
+     * para que IOL la rechace era puro ruido: FALLO por Telegram cada 6h por
+     * papel y cupo de API quemado. El saldo real ajusta la cantidad ANTES de
+     * colocar; si no da ni para 1 papel, la señal se saltea con log y listo
+     * (se reevalúa sola en la próxima pasada). */
+    const saldoReal = await iolSaldoDisponible().catch(() => null);
+    if (saldoReal != null) {
+      const qMax = Math.floor((saldoReal * 0.985) / precioUnidad);
+      if (qMax < 1) {
+        log(`[bot ${tk}] sin saldo real en IOL (${pesos(saldoReal)} disponibles): señal salteada sin colocar`);
+        return;
+      }
+      if (qMax < qty) {
+        log(`[bot ${tk}] saldo real recorta la orden: ${qty} → ${qMax} papeles`);
+        qty = qMax;
+        fila.qty = qMax;
+      }
     }
     let colocada = false;
     for (let intento = 0; intento < 2 && !colocada; intento++) {
