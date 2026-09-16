@@ -348,6 +348,15 @@ async function loadContext() {
 
 /* ─────────────── Evaluadores ─────────────── */
 
+/* ANTI-FANTASMA de alertas (16/09/2026): el pre-market de MtR puede abrir
+ * con puntas basura (DLR NOV26 mostró 1629,5×1640 a las 10:00 — niveles de
+ * ENE27 — y el punto medio 1634,75 disparó en falso los TRES tramos del
+ * desarme de LP; el lunes 14 igual, a 1640,5). Mismo remedio que el bot
+ * (01/09): un cruce dispara SOLO si sobrevive dos pasadas separadas ≥60s.
+ * Un glitch de libro no sobrevive dos lecturas; un cruce real sí. */
+const alertCand = new Map();
+const ALERT_CONFIRM_MS = 60 * 1000;
+
 async function evalPriceAlerts(users, fut) {
   const subs = users.filter((u) => prefOn(u.prefs, "price_alerts", true));
   if (!subs.length) return;
@@ -368,7 +377,12 @@ async function evalPriceAlerts(users, fut) {
     const price = fut.price[tk] != null ? fut.price[tk] : (d912 && d912[a.ticker] ? d912[a.ticker].c : null);
     if (price == null) continue;
     const level = Number(a.price);
-    if (!(a.dir === "up" ? price >= level : price <= level)) continue;
+    if (!(a.dir === "up" ? price >= level : price <= level)) { alertCand.delete(a.id); continue; }
+    // Confirmación doble: primera lectura cruzada solo anota candidato.
+    const cand = alertCand.get(a.id);
+    if (!cand) { alertCand.set(a.id, Date.now()); continue; }
+    if (Date.now() - cand < ALERT_CONFIRM_MS) continue;
+    alertCand.delete(a.id);
     const { data: claimed } = await supabase.from("price_alerts")
       .update({ triggered_at: new Date().toISOString() }).eq("id", a.id).is("triggered_at", null).select("id");
     if (!claimed || !claimed.length) continue;
