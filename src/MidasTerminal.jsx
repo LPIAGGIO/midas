@@ -14276,6 +14276,14 @@ function computeLiquidityBreakdown(positions, fx, valuationCurrency, windowKey, 
       // a manejar con cash_movement automático en Fase 2).
       if (new Date(maturityDate + "T12:00:00") < today) continue;
 
+      /* TOMADORA (capital < 0): la plata prestada YA entró al cash de hoy
+       * como movimiento deposit del import — restarle además la deuda acá
+       * la cuenta DOS veces y el CI muestra el descubierto como si la
+       * caución no existiera (16/09: CI −116,8M con una tomadora de
+       * −59,9M tomada ESE MISMO día para cubrirlo). La devolución pega al
+       * vencimiento: entra recién en T1 y ventanas superiores. */
+      if ((Number(p.quantity) || 0) < 0 && windowKey === "CI") continue;
+
       const devengado = caucionValueDevengado(p, todayIso);
       if (devengado == null || !Number.isFinite(devengado)) continue;
       const cur = p.currency || "ARS";
