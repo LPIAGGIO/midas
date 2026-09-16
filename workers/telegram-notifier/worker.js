@@ -1005,10 +1005,39 @@ async function buildMorningBrief(userId) {
   for (const [sym, nom] of ASIA) { const q = await yahooBrief(sym); if (q) asia.push(`${nom} ${briefPct(q.pct)}`); }
   for (const [sym, nom] of USA) { const q = await yahooBrief(sym); if (q) usa.push(`${nom} ${briefPct(q.pct)}`); }
 
+  // (4) Macro local + global (pedido LP 16/09, inspirado en el mail diario de
+  // IOL): dólares, riesgo país, 10Y, BTC y Merval. Bovespa/EuroStoxx/soja
+  // quedaron afuera a propósito — no tocan su operatoria.
+  const macro = [];
+  try {
+    const r = await fetch("https://dolarapi.com/v1/dolares", { headers: YA_UA });
+    if (r.ok) {
+      const by = {}; for (const d of await r.json()) by[d.casa] = d;
+      const fInt = (x) => (x == null ? "—" : Math.round(Number(x)).toLocaleString("es-AR"));
+      const linea = [["oficial", "Oficial"], ["bolsa", "MEP"], ["contadoconliqui", "CCL"], ["blue", "Blue"]]
+        .map(([k, nom]) => (by[k] ? `${nom} ${fInt(by[k].venta)}` : null)).filter(Boolean).join(" · ");
+      if (linea) macro.push(linea);
+    }
+  } catch { /* sin dólares */ }
+  try {
+    const r = await fetch("https://mercados.ambito.com//riesgopais/variacion", { headers: YA_UA });
+    const j = r.ok ? await r.json() : null;
+    const v = Number(String(j?.ultimo || "").replace(/\./g, "").replace(",", "."));
+    if (Number.isFinite(v) && v > 0) macro.push(`Riesgo país ${Math.round(v)}`);
+  } catch { /* sin riesgo país */ }
+  // ^TNX cotiza la tasa ×10 (49,8 = 4,98%).
+  const qTnx = await yahooBrief("^TNX");
+  if (qTnx) macro.push(`10Y ${(qTnx.px / 10).toFixed(2)}%`);
+  const qBtc = await yahooBrief("BTC-USD");
+  if (qBtc) macro.push(`BTC ${briefPct(qBtc.pct)}`);
+  const qMerv = await yahooBrief("^MERV");
+  if (qMerv) macro.push(`Merval ${briefPct(qMerv.pct)}`);
+
   return `<b>Brief 9AM</b> — panorama pre-apertura\n\n` +
     `<b>Tu cartera (subyacente USA, cierre de ayer${filas.some((f) => f.includes("pre ")) ? " y pre-market" : ""})</b>\n${filas.join("\n")}\n\n` +
     (asia.length ? `<b>Asia (cerrado)</b>\n${asia.join(" · ")}\n\n` : "") +
     (usa.length ? `<b>USA (futuros ahora)</b>\n${usa.join(" · ")}\n\n` : "") +
+    (macro.length ? `<b>Macro</b>\n${macro.join(" · ")}\n\n` : "") +
     `BYMA abre 10:30.`;
 }
 
