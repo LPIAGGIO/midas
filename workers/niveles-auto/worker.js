@@ -1896,6 +1896,9 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
 
 // Candidatos a fill/salida esperando su segunda lectura (anti-fantasma).
 const fillCand = new Map();
+// Confirmación de SALIDAS (stop/trailing/target): 10 min — ver nota de la
+// recalibración del 16/09 en el punto de uso.
+const SALIDA_CONFIRM_MS = Number(process.env.IOL_BOT_SALIDA_CONFIRM_MS || 10 * 60 * 1000);
 // Trades reales cuyo subyacente cruzó el nivel pero IOL aún no confirma la
 // ejecución local — para loguear el desfasaje UNA vez y no cada pasada.
 const cruceSinFill = new Set();
@@ -2202,7 +2205,14 @@ async function paperPass() {
       log(`[bot ${t.ticker}] ${reason} tocado (US$${Number(p).toFixed(2)}) — espero confirmación antes de cerrar`);
       continue;
     }
-    if (Date.now() - candSal < 150000) continue;
+    /* RECALIBRACIÓN LP 16/09/2026 (discrecional, asentada en decision log):
+     * las SALIDAS confirman a los 10 minutos, no 2,5. El stop de MELI se
+     * confirmó en 3 min en plena lavada pre-Fed y el papel rebotó +2% en la
+     * hora ($51k de contrafactual); con 10 min, un flush tiene que
+     * SOSTENERSE para sacarte. Costo aceptado: ~7 min más de slippage en
+     * las caídas reales. Las entradas quedan en 150s (perder un fill es
+     * barato; perder una posición en un latigazo no). */
+    if (Date.now() - candSal < SALIDA_CONFIRM_MS) continue;
     fillCand.delete("exit_" + t.id);
 
     // Salida en pesos contra la punta compradora (se vende al bid).
