@@ -1025,9 +1025,11 @@ async function buildMorningBrief(userId) {
     const v = Number(String(j?.ultimo || "").replace(/\./g, "").replace(",", "."));
     if (Number.isFinite(v) && v > 0) macro.push(`Riesgo país ${Math.round(v)}`);
   } catch { /* sin riesgo país */ }
-  // ^TNX cotiza la tasa ×10 (49,8 = 4,98%).
+  // ^TNX suele cotizar la tasa ×10 (49,8 = 4,98%) pero a veces la serie
+  // diaria viene ya en puntos (4,98): el brief del 17/09 mostró "0.50%" por
+  // dividir dos veces. Heurística: >15 es formato ×10, si no va directo.
   const qTnx = await yahooBrief("^TNX");
-  if (qTnx) macro.push(`10Y ${(qTnx.px / 10).toFixed(2)}%`);
+  if (qTnx) macro.push(`10Y ${(qTnx.px > 15 ? qTnx.px / 10 : qTnx.px).toFixed(2)}%`);
   const qBtc = await yahooBrief("BTC-USD");
   if (qBtc) macro.push(`BTC ${briefPct(qBtc.pct)}`);
   const qMerv = await yahooBrief("^MERV");
