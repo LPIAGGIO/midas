@@ -5324,13 +5324,10 @@ function ImportacionesView() {
      * MOVIMIENTOS (eso funciona); las POSICIONES vienen de la Matriz y de
      * la foto del broker hasta que la Fase 2 se termine con sus tests. */
     const DERIVACION_POSICIONES_OFF = true;
-    if (DERIVACION_POSICIONES_OFF) {
-      setImporting(false);
-      setResult({ ok: newRows.length, applied: 0, warn: "Movimientos importados. La derivación de POSICIONES está deshabilitada (Fase 2 pendiente): el portfolio no se tocó." });
-      setParsed(null); reloadBatches(); reloadMovs();
-      return;
-    }
-    const err = await applyDerived(derived);
+    const derivedSeguro = DERIVACION_POSICIONES_OFF
+      ? { ...derived, positions: [], lots: [] }   // caja y FCI sí; posiciones no
+      : derived;
+    const err = await applyDerived(derivedSeguro);
     setImporting(false);
     if (err) { setResult({ err }); return; }
     setResult({ ok: newRows.length, applied: derived.positions.length + derived.lots.length + (derived.fciOps || []).length });
@@ -5357,11 +5354,14 @@ function ImportacionesView() {
   };
 
   // Reconstruir sin subir archivo (re-deriva del ledger actual).
-  // DESHABILITADO 17/09/2026 — misma razón que en el import: Fase 2
-  // incompleta, fabrica fantasmas. Ver nota larga arriba.
+  // 17/09/2026: solo CAJA y FCI — las POSICIONES no se derivan (Fase 2
+  // incompleta: no netea vencimientos, fabrica fantasmas).
   const reaplicar = async () => {
+    setApplying(true); setRebuildMsg(null);
+    const d = deriveFromLedger(movs);
+    const err = await applyDerived({ ...d, positions: [], lots: [] });
     setApplying(false);
-    setRebuildMsg("Derivación de posiciones deshabilitada (Fase 2 del Libro pendiente). Las posiciones se cargan desde la Matriz.");
+    setRebuildMsg(err ? "Error: " + err : "✓ Caja y FCI reconstruidos desde el libro (posiciones no se tocan: Fase 2 pendiente).");
   };
 
   const info = BROKER_IMPORT_INFO[broker];
