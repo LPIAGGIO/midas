@@ -113,6 +113,15 @@ function inRueda() {
   const p = artParts();
   return isBizDay(p.dow) && p.hour >= 10 && p.hour < 15;
 }
+// Rueda CONTINUA de futuros: desde 10:30. Entre 10:00 y 10:30 hay subasta y
+// las puntas se están armando — las señales de spread/curva leídas ahí son
+// ruido (queja de LP 17/09: "Octubre y Noviembre se juntaron" a las 10:02
+// con el libro a medio armar). Los avisos automáticos usan ESTA ventana;
+// los comandos manuales (/dolar) siguen con inRueda().
+function inRuedaContinua() {
+  const p = artParts();
+  return isBizDay(p.dow) && (p.hour > 10 || (p.hour === 10 && p.minute >= 30)) && p.hour < 15;
+}
 // Rueda de bonos BYMA: ~11-17 ART, lun-vie (para no disparar canje con precios stale).
 function inBymaHours() {
   const p = artParts();
@@ -518,7 +527,7 @@ function buildScalpingSignals(fut) {
 }
 async function evalScalping(users, fut) {
   const subs = users.filter((u) => prefOn(u.prefs, "scalping_dlr", false));
-  if (!subs.length || !inRueda()) return;
+  if (!subs.length || !inRuedaContinua()) return;
   const sigs = buildScalpingSignals(fut);
   if (!sigs.length) return;
   for (const u of subs) {
