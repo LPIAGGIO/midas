@@ -11748,7 +11748,7 @@ function TotalCard({ positions, fx, bondPrices, futurePrices, stockPrices, fciPr
 
       // Valor "ayer" de la posición (para % vs cierre anterior).
       // Aproximamos como valor_actual - pnl_diario en la misma moneda.
-      const valNow = positionValueAtMarket(p, bondPrices, futurePrices, stockPrices, fciPrices);
+      const valNow = positionValueAtMarket(p, bondPrices, futurePrices, stockPrices, fciPrices, futureAdjLookup);
       if (valNow?.value != null) {
         const valNowConv = convertValue(valNow.value, cur, valuationCurrency, fx);
         if (valNowConv != null) {
@@ -13113,7 +13113,24 @@ function computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices) {
   // al patrimonio multiplicados por 100 (10/09/2026).
   const mult = getFutureMultiplier(g.operations?.[0]);
   const tk = (g.ticker || "").toUpperCase().trim();
-  let tc = futureAdjLookup?.tickerConfirmed?.get(tk) || null;
+
+  // FIX 17/09/2026 - FUTUROS DE COCOS (LIBRO): LA TABLA DE ADJUSTMENTS NO MANDA.
+  //
+  // En Cocos el ajuste diario entra a la caja por la cuenta corriente importada
+  // ("Credito/Debito Indice" del Libro), nunca por la confirmacion manual de
+  // futures_daily_adjustments. Pero un confirmado VIEJO del mismo ticker (de la
+  // epoca de acreditacion manual) dejaba `tc` clavado en esa fecha: los lotes
+  // comprados DESPUES quedaban basados en su precio de ENTRADA, y la tenencia
+  // volvia a restar P&L cuyo cash el Libro ya habia debitado. Medido 17/09
+  // contra la foto de Cocos: tenencia Midas $138,0M vs Cocos $142,7M = -4,66M,
+  // exactamente el P&L abierto de 500 DLRNOV26 (avg 1585,42 vs settle 1576)
+  // contado dos veces. Para grupos 100% cocos la base es SIEMPRE el ultimo
+  // settle del feed (la rama de abajo); IOL no opera futuros, y un futuro
+  // manual de otro broker sigue usando sus confirmados.
+  const esLibroCocos =
+    (g.operations || []).length > 0 &&
+    (g.operations || []).every((op) => !op || (op.broker || "") === "cocos");
+  let tc = esLibroCocos ? null : (futureAdjLookup?.tickerConfirmed?.get(tk) || null);
 
   // FIX 24/08/2026 - EL ENCABEZADO RESTABA ~25M QUE YA ESTABAN EN LA CAJA.
   //
@@ -13138,7 +13155,15 @@ function computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices) {
     // pasa a ser el de HOY, asi que usarlo de base compara hoy contra hoy.
     // `reference` es el settle del dia anterior y no rola — es la base
     // correcta, y asi lo calcula Matriz.
-    const settle = Number(futurePrices?.[tk]?.reference);
+    let settle = Number(futurePrices?.[tk]?.reference);
+    // (solo Libro/cocos) Feed sin `reference`: caemos al settlement, que
+    // compara hoy contra hoy y aporta ~0 para lo viejo. Mejor perder el
+    // ajuste del dia que volver a la base de entrada y repetir el doble
+    // conteo que el fix del 17/09 elimina.
+    if (esLibroCocos && !(Number.isFinite(settle) && settle > 0)) {
+      const st = Number(futurePrices?.[tk]?.settlement);
+      if (Number.isFinite(st) && st > 0) settle = st;
+    }
     if (Number.isFinite(settle) && settle > 0) {
       // Corte = ultimo dia habil. Un lote comprado HOY todavia no settleo, asi
       // que su base sigue siendo el precio de entrada.
@@ -13593,7 +13618,7 @@ function positionFutureNotional(p, bondPrices, futurePrices) {
  * Si todavía no hay precio actual (current_price null y no hay data912
  * para futuros), el P&L es 0 (vos no perdiste ni ganaste nada todavía).
  */
-function positionFuturePnL(p, bondPrices, futurePrices) {
+function positionFuturePnL(p, bondPrices, futurePrices, futureAdjLookup) {
   if (p.instrument_type !== "future") return { value: 0, source: "cost" };
   const qty = Number(p.quantity) || 0;
   if (qty === 0 || p.entry_price == null) return { value: 0, source: "cost" };
@@ -13602,6 +13627,22 @@ function positionFuturePnL(p, bondPrices, futurePrices) {
   // Si no hay precio actual, asumimos que el contrato sigue valuado a entry
   // → P&L = 0.
   if (!resolved) return { value: 0, source: "cost" };
+
+  // Con futureAdjLookup a mano, el "valor" del futuro es su P&L NO ACREDITADO
+  // settle-based (computeFutureUncreditedPnl), el mismo criterio que
+  // computePortfolioTotals: todo lo anterior al ultimo settle ya esta en la
+  // caja (adjustments confirmados o Credito/Debito Indice del Libro) y
+  // sumarlo aca lo cuenta dos veces. Sin lookup queda el MTM contra entry
+  // (legacy, para callers que valuan fuera del contexto de la caja).
+  if (futureAdjLookup) {
+    const sign = p.operation_type === "sell" ? -1 : 1;
+    const unc = computeFutureUncreditedPnl(
+      { ticker: p.ticker, netQty: sign * qty, currentPrice: resolved.price, operations: [p] },
+      futureAdjLookup,
+      futurePrices
+    );
+    if (unc != null) return { value: unc, source: resolved.source };
+  }
 
   const direction = p.operation_type === "sell" ? -1 : 1;
   const pnl = direction * qty * getFutureMultiplier(p) * (resolved.price - Number(p.entry_price));
@@ -13755,12 +13796,13 @@ function calcSuggestedFutureCommission(ticker, qty, price) {
  *
  *   - Cauciones: capital + intereses devengados prorata a HOY.
  *   - Bonos / ONs / Acciones / CEDEARs / FCI: cantidad × precio actual.
- *   - Futuros: solo el P&L mark-to-market (NO el notional).
+ *   - Futuros: solo el P&L mark-to-market (NO el notional). Con
+ *     futureAdjLookup, solo el P&L NO ACREDITADO (lo demás ya está en caja).
  *   - Opciones: cantidad × 100 × prima.
  *
  * Retorna `{ value, source }` o null si no se puede valuar.
  */
-function positionValueAtMarket(p, bondPrices, futurePrices, stockPrices, fciPrices) {
+function positionValueAtMarket(p, bondPrices, futurePrices, stockPrices, fciPrices, futureAdjLookup) {
   // Cauciones: devengamiento prorata lineal sobre el capital colocado.
   // El valor "a mercado" hoy es capital + intereses corridos. Eso se
   // refleja directamente en TOTAL CARTERA. Y el P&L de la caución
@@ -13775,7 +13817,7 @@ function positionValueAtMarket(p, bondPrices, futurePrices, stockPrices, fciPric
   // Futuros: el "valor" que impacta en cartera es el P&L mark-to-market.
   // El notional NO se incluye (es exposición, no wealth real).
   if (p.instrument_type === "future") {
-    return positionFuturePnL(p, bondPrices, futurePrices);
+    return positionFuturePnL(p, bondPrices, futurePrices, futureAdjLookup);
   }
   const resolved = resolvePositionPrice(p, bondPrices, futurePrices, stockPrices, fciPrices);
   if (!resolved) return null;
@@ -13992,7 +14034,7 @@ function computePortfolioTotals(positions, fx, valuationCurrency, bondPrices, fu
 
   // ── (3) INDIVIDUALES: loop simple (caucion, fci, usd, crypto, option) ──
   for (const p of individualPositions) {
-    const marketRes = positionValueAtMarket(p, bondPrices, futurePrices, stockPrices, fciPrices);
+    const marketRes = positionValueAtMarket(p, bondPrices, futurePrices, stockPrices, fciPrices, futureAdjLookup);
     const cost = positionValueAtCost(p);
 
     // Una posicion VENDIDA es un pasivo y vale NEGATIVO. positionValueAtMarket
@@ -23475,7 +23517,7 @@ function PortfolioSummaryWidget({ expanded }) {
       if (conv == null) continue;
       pnlInValuation += conv;
       hasAny = true;
-      const valNow = positionValueAtMarket(p, bondPricesState.prices, futurePricesState.prices, stockPricesState.prices, fciPricesState.prices);
+      const valNow = positionValueAtMarket(p, bondPricesState.prices, futurePricesState.prices, stockPricesState.prices, fciPricesState.prices, futureAdjLookup);
       if (valNow?.value != null) {
         const valNowConv = convertValue(valNow.value, cur, valuationCurrency, fx);
         if (valNowConv != null) prevValueInValuation += (valNowConv - conv);
@@ -44300,6 +44342,16 @@ function ConciliacionModule() {
   );
   const futurePrices = useFuturePrices(futureTickers)?.prices || {};
 
+  // Ajustes de futuros: la conciliacion valua los futuros por su P&L NO
+  // ACREDITADO (computeFutureUncreditedPnl), no por el de vida — lo ya
+  // acreditado esta en la caja, y aca se concilia la TENENCIA. Cocos los
+  // muestra a $0; lo que quede aca es solo el ajuste del dia sin liquidar.
+  const { pendingAdjustments, confirmedAdjustments } = useFutureAdjustments(positions, futurePrices);
+  const futureAdjLookup = useMemo(
+    () => buildFutureAdjLookup(pendingAdjustments, confirmedAdjustments),
+    [pendingAdjustments, confirmedAdjustments]
+  );
+
   const [broker, setBroker] = useState("cocos");
   const [ref, setRef] = useState({});          // { "cocos|AO28": 76146840 }
 
@@ -44337,7 +44389,16 @@ function ConciliacionModule() {
       if (!g || g.isClosed) continue;
       const q = Number(g.netQty);
       if (!Number.isFinite(q) || Math.abs(q) < 1e-9) continue;
-      const vMidas = Number(g.valueAtMarket ?? g.valueAtCost);
+      let vMidas = Number(g.valueAtMarket ?? g.valueAtCost);
+      // Futuros: g.valueAtMarket trae el P&L de VIDA contra el PPP, pero lo
+      // ya acreditado (Credito/Debito Indice del Libro) esta en la caja, no
+      // en la tenencia. Medido 17/09/2026: la tenencia daba $138,0M contra
+      // $142,7M de la foto de Cocos — el P&L abierto de 500 DLRNOV26
+      // contado dos veces. Se concilia con el NO acreditado, como el header.
+      if (g.instrument_type === "future") {
+        const unc = computeFutureUncreditedPnl(g, futureAdjLookup, futurePrices);
+        vMidas = unc == null ? 0 : unc;
+      }
       const clave = `${broker}|${g.ticker}`;
       // Se limpia antes de parsear: parseAmountString devuelve 0 —no null— ante
       // cualquier cosa que no entienda, y pegar el importe con el signo de peso
@@ -44359,7 +44420,7 @@ function ConciliacionModule() {
       });
     }
     return out.sort((a, b) => Math.abs(b.vMidas || 0) - Math.abs(a.vMidas || 0));
-  }, [positions, broker, ref, bondPrices, futurePrices, fciPrices, stockPrices]);
+  }, [positions, broker, ref, bondPrices, futurePrices, fciPrices, stockPrices, futureAdjLookup]);
 
   const tot = useMemo(() => {
     let midas = 0, brokerT = 0, cargadas = 0, aCosto = 0, valorACosto = 0;
