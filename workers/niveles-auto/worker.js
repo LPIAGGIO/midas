@@ -1175,7 +1175,12 @@ const CAP_REAL = Number(process.env.IOL_BOT_CAP_REAL || 2000000);
  * 1% + tope 25% con $2M ("el freno de perdidas es el stop; el tope acota el
  * gap nocturno": 35% x gap de -10% = -3,5% del capital, aceptado). */
 const RISK_REAL = 0.015;
-const MAX_POS_PCT_REAL = 0.35;
+/* 16/09/2026 (LP, junto con el TP parcial): tope por posición 35% → 20%.
+ * Con cap $7M: posiciones de ~$1,4M y CINCO slots llenos en vez de ~3 de
+ * $2,4M — más señales distintas operadas, muestra que crece más rápido
+ * para validar, menos impacto por gap de un solo papel. El riesgo por
+ * trade sigue en 1,5% (el tope solo recorta los de stop corto). */
+const MAX_POS_PCT_REAL = Number(process.env.IOL_BOT_MAX_POS_PCT || 0.20);
 const MAX_POS_REAL = 5;
 const MAX_ENTRADAS_DIA_REAL = 5;
 
