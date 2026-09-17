@@ -4533,6 +4533,19 @@ function ImportCuentaCorrienteModal({ existingComprobantes, onDone, onClose }) {
 //
 // El import diario de la CC (applyDerived) nunca los toco -solo borra
 // source='derivado_libro'-, asi que el agujero estaba solo en el wipe.
+//
+// FIX 17/09/2026 - EL WIPE SE LLEVO EL HISTORICO RECONSTRUIDO.
+//
+// Desde que la derivacion de posiciones quedo apagada (fabricaba fantasmas por
+// no netear vencimientos), el historico de Cocos vive en las filas
+// source='historico_libro' + 'ajuste_neteo' que genera
+// research/reconstruir-historico. Un "Borrar todo" + reimportar las barria y la
+// app NO las repone: applyDerived solo reconstruye caja y FCI. Esa noche la
+// cartera de Cocos quedo en dos filas de FCI.
+//
+// Se preservan junto con csv_matriz. Para rehacerlas a proposito hay que correr
+// el reconstructor, no reimportar.
+const FUENTES_IRRECUPERABLES = new Set(["historico_libro", "ajuste_neteo"]);
 async function borrarPosicionesCocos(userId) {
   const { data: candidatos } = await supabase
     .from("positions")
@@ -4540,9 +4553,10 @@ async function borrarPosicionesCocos(userId) {
     .eq("user_id", userId)
     .eq("broker", "cocos");
   const preservar = (candidatos || [])
-    .filter((p) => p?.extra?.source === "csv_matriz" &&
-      (p.instrument_type === "option" ||
-       String(p.ticker || "").toUpperCase().startsWith("ORO")))
+    .filter((p) => FUENTES_IRRECUPERABLES.has(p?.extra?.source) ||
+      (p?.extra?.source === "csv_matriz" &&
+       (p.instrument_type === "option" ||
+        String(p.ticker || "").toUpperCase().startsWith("ORO"))))
     .map((p) => p.id);
   let q = supabase.from("positions").delete().eq("user_id", userId).eq("broker", "cocos");
   if (preservar.length) q = q.not("id", "in", "(" + preservar.join(",") + ")");
