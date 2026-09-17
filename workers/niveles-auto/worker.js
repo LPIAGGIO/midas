@@ -1899,6 +1899,9 @@ const fillCand = new Map();
 // Confirmación de SALIDAS (stop/trailing/target): 10 min — ver nota de la
 // recalibración del 16/09 en el punto de uso.
 const SALIDA_CONFIRM_MS = Number(process.env.IOL_BOT_SALIDA_CONFIRM_MS || 10 * 60 * 1000);
+// TP PARCIAL (recalibración LP 16/09): fracción del camino al target donde se
+// vende la MITAD de la posición. 0.5 = a mitad de camino. 0 lo apaga.
+const TP_PARCIAL_FRAC_CAMINO = Number(process.env.IOL_BOT_TP_PARCIAL ?? 0.5);
 // Trades reales cuyo subyacente cruzó el nivel pero IOL aún no confirma la
 // ejecución local — para loguear el desfasaje UNA vez y no cada pasada.
 const cruceSinFill = new Set();
@@ -2189,6 +2192,71 @@ async function paperPass() {
           pnl_usd_abierto: Math.round(pnlUsdAb * 100) / 100,
           marcado_at: new Date().toISOString(),
         }).eq("id", t.id);
+      }
+    }
+
+    /* TP PARCIAL (recalibración LP 16/09, "perdimos por codiciosos"): al
+     * alcanzar el 50% del camino al target se vende la MITAD y el resto
+     * sigue con el trailing hasta el target o el stop. El caso que lo parió:
+     * ORCL tocó su target en el subyacente (146,52 vs 146,08) y MRVL llegó a
+     * +6% de un target de +9% sin que el sistema cobrara un peso. La mitad
+     * asegurada recicla capital (más entradas, más volumen) y baja la
+     * varianza; la otra mitad conserva la cola derecha del trailing.
+     * Confirmación corta (150s): asegurar ganancia no necesita los 10 min. */
+    if (TP_PARCIAL_FRAC_CAMINO > 0 && t.qty >= 2 && !String(t.regla_salida || "").includes("tp50")) {
+      const nivelTp = entry + TP_PARCIAL_FRAC_CAMINO * (Number(t.target) - entry);
+      if (p >= nivelTp && p < Number(t.target)) {
+        const candTp = fillCand.get("tp_" + t.id);
+        if (!candTp) {
+          fillCand.set("tp_" + t.id, Date.now());
+          log(`[bot ${t.ticker}] TP parcial tocado (US$${Number(p).toFixed(2)} >= ${nivelTp.toFixed(2)}) — espero confirmación`);
+        } else if (Date.now() - candTp >= 150000) {
+          fillCand.delete("tp_" + t.id);
+          const qtyTp = Math.floor(t.qty / 2);
+          const teoricoTp = Math.round(p * rArs);
+          const bidTp = f.arsBid[tkU];
+          const pxArsTp = bidTp > 0 ? Math.min(teoricoTp, bidTp) : teoricoTp;
+          let ordenTp = null, tpOk = true;
+          if (MODO_REAL && t.modo !== "shadow") {
+            try { ordenTp = await iolOrden("venta", t.ticker, qtyTp, pxArsTp); }
+            catch (e) { tpOk = false; log(`[bot ${t.ticker}] TP parcial: la venta real falló (${e.message}) — la posición sigue entera, reintento en la próxima pasada`); }
+          }
+          if (tpOk) {
+            const pxArsEntTp = Number(t.px_ars_entrada);
+            const intradiaTp = t.entry_ts ? diaAr(t.entry_ts) === diaAr(new Date()) : false;
+            const feesTp = feePunta(pxArsEntTp * qtyTp, false) + feePunta(pxArsTp * qtyTp, intradiaTp);
+            const pnlTp = (pxArsTp - pxArsEntTp) * qtyTp - feesTp;
+            await supabase.from("paper_iol_trades").insert({
+              ticker: t.ticker, sym: t.sym, senal: t.senal, score: t.score, rr: t.rr,
+              status: "closed", qty: qtyTp,
+              entry_limit: t.entry_limit, entry_price: t.entry_price, entry_ts: t.entry_ts,
+              stop: t.stop, stop_inicial: t.stop_inicial, target: t.target, r_value: t.r_value,
+              exit_price: p, exit_ts: new Date().toISOString(), exit_reason: "tp_parcial",
+              modo: t.modo, perfil: t.perfil, ratio: t.ratio,
+              px_ars_entrada: pxArsEntTp, px_ars_salida: pxArsTp,
+              fees_ars: Math.round(feesTp), pnl_ars: Math.round(pnlTp),
+              intradia: intradiaTp, veredicto: pnlTp > 0 ? "acierto" : "error",
+              regla_salida: "tp50_hijo",
+              pnl_pct: Math.round((pnlTp / (pxArsEntTp * qtyTp)) * 10000) / 100,
+              broker_order_id: ordenTp,
+              nota_sim: `TP parcial: vendió ${qtyTp} (la mitad) a ${pesos(pxArsTp)} al ${Math.round(TP_PARCIAL_FRAC_CAMINO * 100)}% del camino al target. El resto sigue con trailing.`,
+            });
+            await supabase.from("paper_iol_trades").update({
+              qty: t.qty - qtyTp,
+              regla_salida: String(t.regla_salida || "trailing_2r") + "+tp50",
+            }).eq("id", t.id);
+            t.qty = t.qty - qtyTp;
+            t.regla_salida = String(t.regla_salida || "trailing_2r") + "+tp50";
+            log(`[${t.modo === "shadow" ? "shadow" : "bot"} ${t.ticker}] TP PARCIAL: vendió ${qtyTp} × ${pesos(pxArsTp)} · P&L +/-${pesos(Math.abs(pnlTp))} asegurado · quedan ${t.qty} corriendo`);
+            if (t.modo !== "shadow") await tgEspejo(
+              `<b>BOT · TP PARCIAL ${t.ticker}</b>${MODO_REAL ? " (IOL real: venta enviada a tu cuenta)" : ""}\n` +
+              `<b>VENDE ${qtyTp} × ${t.ticker}</b> (la mitad) a ~${pesos(pxArsTp)} (US${Number(p).toFixed(2)}) — mitad de camino al target.\n` +
+              `P&L asegurado: ${pnlTp >= 0 ? "+" : "-"}${pesos(Math.abs(pnlTp))}. Quedan ${t.qty} corriendo con trailing.\n\n` +
+              `Si espejaste en Cocos: vendé la mitad ahora; el resto queda con la venta límite del target.`);
+          }
+        }
+      } else {
+        fillCand.delete("tp_" + t.id);
       }
     }
 
