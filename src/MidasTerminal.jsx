@@ -5316,6 +5316,20 @@ function ImportacionesView() {
     }
     const { data: fresh } = await supabase.from("libro_movimientos").select("*").eq("user_id", user.id);
     const derived = deriveFromLedger(fresh || []);
+    /* DERIVACIÓN DE POSICIONES DESHABILITADA (17/09/2026). La Fase 2 del
+     * Libro está incompleta: no netea vencimientos de letras ni rescates de
+     * FCI, así que fabrica tenencias fantasma (S30A6/S29Y6 cobradas
+     * aparecían como vivas) y duplica futuros contra la Matriz. Hoy borró
+     * y reemplazó mal todo el portfolio de LP. El Libro sigue importando
+     * MOVIMIENTOS (eso funciona); las POSICIONES vienen de la Matriz y de
+     * la foto del broker hasta que la Fase 2 se termine con sus tests. */
+    const DERIVACION_POSICIONES_OFF = true;
+    if (DERIVACION_POSICIONES_OFF) {
+      setImporting(false);
+      setResult({ ok: newRows.length, applied: 0, warn: "Movimientos importados. La derivación de POSICIONES está deshabilitada (Fase 2 pendiente): el portfolio no se tocó." });
+      setParsed(null); reloadBatches(); reloadMovs();
+      return;
+    }
     const err = await applyDerived(derived);
     setImporting(false);
     if (err) { setResult({ err }); return; }
@@ -5343,11 +5357,11 @@ function ImportacionesView() {
   };
 
   // Reconstruir sin subir archivo (re-deriva del ledger actual).
+  // DESHABILITADO 17/09/2026 — misma razón que en el import: Fase 2
+  // incompleta, fabrica fantasmas. Ver nota larga arriba.
   const reaplicar = async () => {
-    setApplying(true); setRebuildMsg(null);
-    const err = await applyDerived(deriveFromLedger(movs));
     setApplying(false);
-    setRebuildMsg(err ? "Error: " + err : "✓ Portfolio reconstruido desde el libro. Andá a Portfolio para verlo.");
+    setRebuildMsg("Derivación de posiciones deshabilitada (Fase 2 del Libro pendiente). Las posiciones se cargan desde la Matriz.");
   };
 
   const info = BROKER_IMPORT_INFO[broker];
