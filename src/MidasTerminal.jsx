@@ -9836,6 +9836,34 @@ function useFuturePrices(tickers) {
  *   - skip(adjustmentId): marca como skipped sin generar movement.
  *   - refresh(): recarga + intenta generar ajustes nuevos.
  */
+/* APAGADO 18/09/2026 - LA CAPA DE AJUSTES DUPLICABA LA CUENTA CORRIENTE.
+ *
+ * El ajuste diario de futuros NO es una cuenta pendiente: Matba lo acredita o
+ * lo debita todos los dias y Cocos lo lista en la CC como "Credito Indice" /
+ * "Debito Indice". O sea que ya paso por caja y ya esta en el saldo.
+ *
+ * Medido el 18/09 sobre el DLR NOV26: el generador propuso 32 ajustes por
+ * -$9.956.000 entre el 04/08 y el 17/09; el libro, en la misma ventana, tiene
+ * +$22.211.500 de Credito Indice y -$31.810.500 de Debito Indice, neto
+ * -$9.599.000. Es el mismo dinero con $357.000 de diferencia (el libro llega
+ * al 16/09 e incluye los otros vencimientos de DLR). Confirmar el banner
+ * habria contado esos -$9,6M dos veces.
+ *
+ * Ya existia un filtro parcial: el display descartaba los ajustes de futuros
+ * con extra.source='derivado_libro', por este mismo motivo. La reconstruccion
+ * del historico del 17/09 escribe las filas con source='historico_libro', que
+ * el filtro no contemplaba, y por eso reaparecio el banner. Arreglarlo por
+ * nombre de source seria otro parche sobre la misma idea equivocada.
+ *
+ * Decision de LP: subir la CC de Cocos alcanza, esta capa sobra. Se apaga el
+ * hook entero (banner + modal + lectura). El worker futures-settlement del
+ * VPS quedo eliminado de pm2 el mismo dia para que no regenere de noche.
+ *
+ * El codigo queda por si algun broker que NO liquide diario lo necesita; para
+ * revivirlo hay que agregar antes el filtro que saltee las fechas ya cubiertas
+ * por movimientos de Indice del libro. */
+const AJUSTES_FUTUROS_OFF = true;
+
 function useFutureAdjustments(positions, futurePrices) {
   const { user } = useAuth();
   const [pendingAdjustments, setPendingAdjustments] = useState([]);
@@ -10412,6 +10440,18 @@ function useFutureAdjustments(positions, futurePrices) {
     },
     [user, pendingAdjustments]
   );
+
+  if (AJUSTES_FUTUROS_OFF) {
+    return {
+      pendingAdjustments: [],
+      confirmedAdjustments: [],
+      loading: false,
+      error: null,
+      confirm: async () => {},
+      confirmGroup: async () => {},
+      refresh: () => {},
+    };
+  }
 
   return {
     pendingAdjustments,
