@@ -29081,7 +29081,7 @@ const EJEC_RATIOS = {
   CRM: 18, ORCL: 3, AVGO: 39, MU: 5, GOOGL: 58, NU: 2, RKLB: 12, TQQQ: 25,
   ASTS: 15, ADBE: 44, VIST: 3, CRWV: 27, IREN: 12, RGTI: 2, QCOM: 11, MCD: 24,
   NBIS: 27, IBM: 15, OKLO: 28, CEG: 45, UNH: 33, XP: 4, NKE: 12, UPST: 5,
-  ARM: 27, ASML: 146, RIOT: 3, COPX: 14, HUT: 5, PAGS: 3, NIO: 4, NOW: 171,
+  ARM: 27, ASML: 146, RIOT: 3, COPX: 14, HUT: 5, PAGS: 3, NIO: 4, NOW: 172,
   SNDK: 170, QCOM_: 11,
 };
 const EJEC_CORE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "KO", "MELI", "NFLX", "AMD", "GLOB", "INTC", "MSTR"];
@@ -29089,6 +29089,19 @@ const EJEC_CORE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "KO", "MELI", "NFLX",
 // es dato podrido (pata stale / cruce raro), no oportunidad. Idem spread.
 const EJEC_MAX_DEV = 4;     // % de desvio maximo plausible
 const EJEC_MAX_SPREAD = 6;  // % de spread maximo por pata
+// MEDIDO 19/09/2026 sobre 1,75M snapshots de cedear_fv_log (71 ruedas, 209
+// simbolos, research/ccl-dispersion/): estos dos filtros atajan el dato
+// podrido GROSERO pero NO la pata rancia silenciosa, que es el 16% de los
+// casos y cae dentro del rango "sano". Tres ruedas enteras del estudio
+// (19/06, 03/07, 07/09) tenian el feed del subyacente congelado y habrian
+// sido las tres observaciones mas "rentables" de la muestra. De ahi el
+// filtro de frescura de abajo: sin el, el ranking se llena de mentiras.
+const EJEC_STALE_TICKS = 3; // refrescos seguidos sin cambiar = pata rancia (90s)
+// Simbolos con dato no confiable para este calculo, medidos en el mismo
+// estudio. BKNG: el ratio derivado oscila +/-2% (693-721), no converge a un
+// entero. BIOX: subyacente rancio el 97,3% del tiempo. Se excluyen hasta
+// tener dato limpio; no es que no coticen, es que no se pueden medir.
+const EJEC_EXCLUIDOS = new Set(["BKNG", "BIOX"]);
 const ejecMedian = (arr) => { const a = arr.filter(Number.isFinite).sort((x, y) => x - y); if (!a.length) return null; const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
 
 function EjecucionInteligenteModule() {
@@ -29099,6 +29112,10 @@ function EjecucionInteligenteModule() {
   const [q, setQ] = useState("");
   const [tick, setTick] = useState(0);
   const [sort, setSort] = useState({ key: "edge", dir: "desc" });
+  // Frescura: cuantos refrescos seguidos lleva cada pata sin moverse. Una pata
+  // congelada mientras la otra se mueve fabrica un desvio que no existe, y cae
+  // dentro de los limites de sanidad, asi que ningun umbral de magnitud lo ataja.
+  const frescura = useRef({});   // sym -> { cPx, uPx, cQuieto, uQuieto }
 
   useEffect(() => {
     let mounted = true;
@@ -29114,6 +29131,19 @@ function EjecucionInteligenteModule() {
         if (!mounted) return;
         const cm = {}; for (const x of cArr) if (x?.symbol) cm[String(x.symbol).toUpperCase()] = x;
         const um = {}; for (const x of uArr) if (x?.symbol) um[String(x.symbol).toUpperCase()] = x;
+        const f = frescura.current;
+        for (const sym of Object.keys(cm)) {
+          const c = cm[sym], u = um[sym];
+          if (!u) continue;
+          const cPx = Number(c?.c) || Number(c?.px_bid) || null;
+          const uPx = Number(u?.c) || Number(u?.px_bid) || null;
+          const prev = f[sym] || { cPx: null, uPx: null, cQuieto: 0, uQuieto: 0 };
+          f[sym] = {
+            cPx, uPx,
+            cQuieto: (cPx != null && cPx === prev.cPx) ? prev.cQuieto + 1 : 0,
+            uQuieto: (uPx != null && uPx === prev.uPx) ? prev.uQuieto + 1 : 0,
+          };
+        }
         setCed(cm); setUsa(um); setLastFetch(new Date()); setLoading(false);
       } catch { if (mounted) setLoading(false); }
     };
@@ -29145,6 +29175,15 @@ function EjecucionInteligenteModule() {
       if (!cMid || !uMid) continue;
       const ratio = EJEC_RATIOS[sym];
       if (!ratio) continue; // solo papeles con ratio conocido (sin derivar a ciegas)
+      if (EJEC_EXCLUIDOS.has(sym)) continue; // ratio o dato no confiable (ver la constante)
+      // Pata rancia: si una de las dos no se mueve hace 3 refrescos y la otra
+      // si, el desvio que sale de compararlas es ficticio. Se descarta.
+      const fr = frescura.current[sym];
+      if (fr) {
+        const cRancia = fr.cQuieto >= EJEC_STALE_TICKS && fr.uQuieto < EJEC_STALE_TICKS;
+        const uRancia = fr.uQuieto >= EJEC_STALE_TICKS && fr.cQuieto < EJEC_STALE_TICKS;
+        if (cRancia || uRancia) continue;
+      }
       const cclImplMid = ratio * cMid / uMid;
       const devPct = (cclImplMid / ref - 1) * 100;
       const cSpread = (cBid && cAsk) ? (cAsk - cBid) / cMid * 100 : null;
