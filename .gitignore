@@ -9,3 +9,6 @@ built-check.js
 # Config local del preview (no aporta al repo)
 .claude/
 *.bak
+
+# Jarvis: foto local de restarts para medir delta, no va al repo
+workers/jarvis/.workers-snapshot.json
