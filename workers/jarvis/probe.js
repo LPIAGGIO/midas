@@ -32,6 +32,7 @@ for (const f of [".env", "../../.env.local", "../../.env"]) {
 import { workersStatus, workerLogs } from "./lib/skills.js";
 import { mercadoGlobal } from "./lib/mercado.js";
 import { cartera, momentum, precio } from "./lib/cartera.js";
+import { bot } from "./lib/bot.js";
 import { hayCredenciales, esServiceKey } from "./lib/supa.js";
 
 const [, , cual, arg] = process.argv;
@@ -100,6 +101,18 @@ const casos = {
     }
   },
 
+  async bot() {
+    const r = await bot();
+    mostrar("bot", r);
+    if (r.ok) {
+      console.log(`
+${"libro".padEnd(9)}${"cerr".padStart(6)}${"abie".padStart(6)}${"pend".padStart(6)}${"realizado".padStart(14)}${"sin realizar".padStart(14)}`);
+      for (const [n, l] of [["real", r.real], ["sombra", r.shadow]]) {
+        console.log(n.padEnd(9) + String(l.cerrados).padStart(6) + String(l.abiertos).padStart(6) + String(l.pendientes).padStart(6) + Math.round(l.realizado).toLocaleString("es-AR").padStart(14) + Math.round(l.noRealizado).toLocaleString("es-AR").padStart(14));
+      }
+    }
+  },
+
   async precio() {
     const r = await precio(arg || "MU");
     mostrar(`precio ${arg || "MU"}`, r);
@@ -118,5 +131,5 @@ console.log(
     : "Supabase: SIN credenciales en el entorno"
 );
 
-const elegido = cual && casos[cual] ? [cual] : ["workers", "momentum", "global", "cartera"];
+const elegido = cual && casos[cual] ? [cual] : ["workers", "bot", "momentum", "global", "cartera"];
 for (const k of elegido) await casos[k]();
