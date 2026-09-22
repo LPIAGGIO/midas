@@ -14681,7 +14681,14 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
   // distinto). Los FCI sí consolidan: comprar más cuotapartes del mismo
   // ticker es ampliar la misma posición — el VCP es uno solo para todas
   // las cuotapartes del fondo.
-  const NO_CONSOLIDATE = new Set(["caucion", "option"]);
+  // Solo las CAUCIONES quedan sin consolidar: dos cauciones del mismo monto
+  // con distinto plazo o tasa son operaciones distintas y sumarlas no dice
+  // nada. Las OPCIONES salieron de esta lista el 22/09/2026: el ticker ya
+  // codifica strike y vencimiento (GFGC7400OC = call GGAL 7400 octubre), asi
+  // que recomprar 6 contra un lanzamiento de 6 TIENE que dar cero. Mientras
+  // estuvieron aca, la posicion cerrada seguia mostrandose como dos filas
+  // vivas, -6 y +6, y el usuario veia un short que ya no tenia.
+  const NO_CONSOLIDATE = new Set(["caucion"]);
 
   /**
    * Construye el detalle "neteado" de operaciones para mostrar en el
@@ -14939,9 +14946,18 @@ function consolidatePositions(positions, bondPrices, futurePrices, fciPrices, st
     }
 
     // Si es no-consolidable, le damos un groupKey único por id
+    // Un FUTURO se identifica por su ticker: DLRNOV26 es el mismo contrato
+    // venga la fila etiquetada en ARS o en USD-MEP. Meter la moneda en la
+    // clave hacia que un desajuste entre importadores partiera la posicion en
+    // dos filas que jamas se neteaban (22/09/2026: WTINOV26 aparecia como
+    // -44 en ARS y +40 en USD-MEP, o sea un short de 44 que ya estaba cerrado).
+    // En BONOS la moneda SI distingue y por eso sigue en la clave: AL30D y
+    // AL30C son especies distintas en BYMA.
     const groupKey = NO_CONSOLIDATE.has(t)
       ? `${t}|${ticker}|${cur}|${p.id}`
-      : `${t}|${ticker}|${cur}`;
+      : t === "future"
+        ? `${t}|${ticker}`
+        : `${t}|${ticker}|${cur}`;
 
     if (!groups.has(groupKey)) {
       groups.set(groupKey, {
