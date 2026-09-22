@@ -1,0 +1,51 @@
+# Configuracion de la caja de Jarvis.
+#
+# Se aplica ADEMAS de sdkconfig.defaults y sdkconfig.defaults.esp32s3 del repo,
+# no en lugar de ellos:
+#
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;../jarvis.defaults" build
+#
+# Todos los simbolos de aca estan verificados contra el Kconfig real
+# (78/xiaozhi-esp32 main/Kconfig.projbuild y espressif/esp-sr Kconfig.projbuild),
+# no inventados a partir del nombre.
+
+# --- La placa -------------------------------------------------------------
+# La etiqueta de la caja dice V2. La config de V1 usa OTROS pines de audio y
+# ni siquiera tiene el codec ES8311: flashear la equivocada deja el microfono
+# o el parlante mudos sin dar ningun error. VERSION_2_0 ya es el default del
+# firmware, pero se deja explicito para que no dependa de un default que puede
+# cambiar entre versiones.
+CONFIG_BOARD_TYPE_WAVESHARE_ESP32_S3_TOUCH_LCD_1_85C=y
+CONFIG_VERSION_2_0=y
+
+# --- Idioma ---------------------------------------------------------------
+# El firmware viene en chino. Esto es solo la interfaz de la caja; lo que hable
+# Jarvis lo decide nuestro servidor.
+CONFIG_LANGUAGE_ES_ES=y
+
+# --- Wake word ------------------------------------------------------------
+# AFE = el modelo corre con cancelacion de eco y supresion de ruido. Es el
+# default para S3 con PSRAM y es lo que hace que se pueda interrumpir mientras
+# habla (la V2 de la placa tiene el circuito de AEC).
+CONFIG_USE_AFE_WAKE_WORD=y
+
+# "Jarvis", pre-entrenado por Espressif y gratis. Entrenar uno propio pide mas
+# de 500 personas grabando la palabra 15 veces cada una, y es servicio pago.
+# Hay que APAGAR el chino explicitamente: si quedan los dos, el modelo que gana
+# no es el que uno espera.
+CONFIG_SR_WN_WN9_JARVIS_TTS=y
+# CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS is not set
+
+# Manda el audio del wake word al servidor como primer mensaje del turno. Nos
+# sirve para verificar la voz de LP antes de hacerle caso a lo que sigue.
+CONFIG_WAKE_WORD_DATA=y
+
+# --- Nuestro servidor -----------------------------------------------------
+# Es LO UNICO que hay que tener bien de entrada: la caja pega aca al arrancar y
+# la respuesta le dice a que websocket ir. Si esta mal, no hay forma de que la
+# caja encuentre a Jarvis salvo volver a flashear.
+#
+# 192.168.110.11 es la IP de la notebook HOY. Se la da el router por DHCP:
+# RESERVARLA en el Ruijie por MAC antes de flashear, o un dia cualquiera la
+# caja se queda hablandole a una direccion que ya no es de nadie.
+CONFIG_OTA_URL="http://192.168.110.11:8098/xiaozhi/ota/"
