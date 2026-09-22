@@ -1133,20 +1133,45 @@ const BOT_TICKERS = String(process.env.IOL_BOT_TICKERS || "MU,SNDK,GGAL,NVDA,AMD
   .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 const BOT_UNIVERSO = new Set(BOT_TICKERS);
 
-// Reporta en <=3 dias? (cache 6h; sin dato o error = false: no bloquea)
+/* Reporta en <=3 dias?  (cache 6h)
+ * FALLA CERRADA desde el 22/09/2026. Antes cualquier problema —consulta caida,
+ * ticker sin fecha cargada, Yahoo sin responder cuando se poblo ticker_context—
+ * devolvia false y el bot ENTRABA igual, sin avisar. Un balance mueve 7,4%
+ * mediano; perderse una entrada no cuesta nada, entrar a ciegas contra un
+ * evento binario si. Ahora se distingue:
+ *   - hay fecha y esta lejos            -> no bloquea  (caso normal)
+ *   - no hay FILA para el ticker        -> no bloquea  (ETFs como GLD no reportan)
+ *   - hay fila pero earnings_date NULL  -> BLOQUEA + avisa (el feed fallo)
+ *   - la consulta tira error            -> BLOQUEA + avisa
+ * El aviso sale una vez por ticker cada 6h, para no inundar. */
 const _earnCache = new Map();
+const _earnAvisado = new Map();
 async function earningsCerca(tk) {
   const key = tk.toUpperCase();
   const hit = _earnCache.get(key);
   if (hit && Date.now() - hit.t < 6 * 3600 * 1000) return hit.v;
-  let v = false;
+  let v = false, motivo = null;
   try {
-    const { data } = await supabase.from("ticker_context").select("earnings_date").eq("ticker", key).maybeSingle();
-    if (data?.earnings_date) {
+    const { data, error } = await supabase.from("ticker_context")
+      .select("earnings_date").eq("ticker", key).maybeSingle();
+    if (error) { v = true; motivo = `la consulta fallo (${error.message})`; }
+    else if (!data) { v = false; }                       // sin fila: no cotiza earnings (ETF)
+    else if (!data.earnings_date) { v = true; motivo = "la fila existe pero no tiene fecha de balance"; }
+    else {
       const dias = (new Date(data.earnings_date + "T12:00:00") - Date.now()) / 86400000;
       v = dias >= -0.5 && dias <= 3;
     }
-  } catch { /* sin dato no bloquea */ }
+  } catch (e) { v = true; motivo = `excepcion (${e.message})`; }
+  if (motivo) {
+    log(`[bot ${key}] BLOQUEADA por falta de dato de earnings: ${motivo}`);
+    const ult = _earnAvisado.get(key) || 0;
+    if (Date.now() - ult > 6 * 3600 * 1000) {
+      _earnAvisado.set(key, Date.now());
+      tgEspejo(`<b>BOT · ${key} bloqueada</b>
+No puedo verificar si reporta balance: ${motivo}.
+No entro por las dudas. Si se repite, revisar el worker de contexto.`).catch(() => {});
+    }
+  }
   _earnCache.set(key, { v, t: Date.now() });
   return v;
 }
@@ -1716,8 +1741,16 @@ function deriva_check(t) {
 // minutos SALVO deriva grande (>=1,5%, ahi el limite quedo de verdad lejos
 // del nivel y esperar seria perder fills). El re-apoyo de una orden caida
 // ("nada") no espera turno: eso no es serrucho, es una orden que no existe.
-const RECOLOC_COOLDOWN_MS = 10 * 60 * 1000;
-const RECOLOC_DERIVA_URGENTE = 0.015;
+/* Recolocacion por deriva del CCL. Subidos el 22/09/2026: con 10 min de
+ * enfriamiento y umbral urgente de 1,5%, LAC termino la rueda del 22 con NUEVE
+ * recolocaciones oscilando entre 4.675 y 4.710 —puro serrucho del CCL, cero
+ * cambio de tesis— y MSTR con DIEZ. Cada recolocacion cancela y vuelve a poner,
+ * lo que manda la orden al FONDO DE LA COLA del libro: se pierde prioridad por
+ * antiguedad justo en los papeles mas cerca de entrar. El 22/09 el bot se llevo
+ * solo 4 de 299 LAC en el primer toque porque el precio paso por ahi un
+ * instante. Menos recolocaciones = mas antiguedad = mas fills. */
+const RECOLOC_COOLDOWN_MS = 45 * 60 * 1000;
+const RECOLOC_DERIVA_URGENTE = 0.030;
 const recolocadaEn = new Map();
 
 // AVISO DE ESPEJO en recolocaciones (11/09/2026, pedido de LP: "no me llego
