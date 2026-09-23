@@ -278,9 +278,27 @@ def generar(emocion, S, F, ms, out_dir, seed=7):
         # Pocos colores: LZW comprime mucho mejor y el decoder del ESP32 trabaja menos.
         frames.append(img.quantize(colors=48, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE))
 
+    # FONDO TRANSPARENTE. La primera version tenia el negro opaco y en la caja
+    # quedo un cuadrado negro sobre el tema claro (foto de LP, 22/09 23:56).
+    # gifdec respeta el indice transparente del GIF (gce.transparency -> opa 0),
+    # asi que se marca como transparente el indice del negro puro de cada frame.
+    # Los halos son azul oscuro, no negro, y sobreviven. disposal=2 limpia el
+    # frame anterior para que las particulas no dejen estela.
+    for i, fr in enumerate(frames):
+        pal = fr.getpalette()
+        negro = next((k for k in range(len(pal) // 3) if pal[3 * k:3 * k + 3] == [0, 0, 0]), None)
+        if negro is None:
+            # El cuantizador no dejo negro puro: se fuerza en el indice 0.
+            pal[0:3] = [0, 0, 0]
+            fr.putpalette(pal)
+            negro = 0
+        fr.info["transparency"] = negro
+        frames[i] = fr
+
     path = os.path.join(out_dir, f"{emocion}.gif")
     frames[0].save(path, save_all=True, append_images=frames[1:], loop=0,
-                   duration=ms, disposal=1, optimize=True)
+                   duration=ms, disposal=2, optimize=False,
+                   transparency=frames[0].info["transparency"])
     return os.path.getsize(path)
 
 

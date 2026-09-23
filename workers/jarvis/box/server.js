@@ -32,6 +32,8 @@ const PUERTO = Number(process.env.JARVIS_BOX_PORT || 8098);
 const HOST = process.env.JARVIS_BOX_HOST || "0.0.0.0";
 /** Como se ve el servidor desde la caja. Tiene que ser la IP de la PC en la LAN. */
 const PUBLICA = process.env.JARVIS_BOX_PUBLIC || null;
+/** Tema de la pantalla que se le pide a la caja al conectar: "dark" | "light" | "" (no tocar). */
+const TEMA = process.env.JARVIS_BOX_THEME ?? "dark";
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -157,6 +159,18 @@ wss.on("connection", (ws, req) => {
           session_id: id,
           audio_params: msg.audio_params || { format: "opus", sample_rate: 24000, channels: 1, frame_duration: 60 },
         }));
+        // Tema OSCURO. El firmware arranca en tema claro (fondo blanco) y la cara
+        // de particulas esta pensada para negro: la primera vez quedo un cuadrado
+        // negro sobre blanco. La caja expone `self.screen.set_theme` por MCP y
+        // Display::SetTheme lo persiste en NVS (display/theme), asi que alcanza
+        // con pedirlo una vez; se repite en cada hello por si se reflasheo la NVS.
+        if (msg.features?.mcp && TEMA) {
+          enviar(ws, {
+            type: "mcp",
+            payload: { jsonrpc: "2.0", id: 1, method: "tools/call",
+                       params: { name: "self.screen.set_theme", arguments: { theme: TEMA } } },
+          });
+        }
         decir(ws, "Good morning, sir.", "happy");
         break;
       }
@@ -177,11 +191,16 @@ wss.on("connection", (ws, req) => {
         log(`     abort sesion=${id} motivo=${msg.reason || "-"}`);
         break;
 
-      case "mcp":
+      case "mcp": {
         // La caja expone SUS PROPIAS tools (volumen, pantalla, bateria) por
-        // MCP. Aca despues se enchufan las skills de Jarvis.
-        log(`     mcp sesion=${id} metodo=${msg.payload?.method}`);
+        // MCP. Aca despues se enchufan las skills de Jarvis. Si es una
+        // RESPUESTA (sin method) mostramos result/error: asi se ve si el
+        // set_theme del hello fue aceptado.
+        const p = msg.payload || {};
+        if (p.method) log(`     mcp sesion=${id} metodo=${p.method}`);
+        else log(`     mcp sesion=${id} respuesta id=${p.id} ${p.error ? "ERROR " + JSON.stringify(p.error) : "result=" + JSON.stringify(p.result).slice(0, 120)}`);
         break;
+      }
 
       default:
         log(`     ${msg.type} sesion=${id} ${JSON.stringify(msg).slice(0, 120)}`);
