@@ -164,12 +164,20 @@ wss.on("connection", (ws, req) => {
         // negro sobre blanco. La caja expone `self.screen.set_theme` por MCP y
         // Display::SetTheme lo persiste en NVS (display/theme), asi que alcanza
         // con pedirlo una vez; se repite en cada hello por si se reflasheo la NVS.
-        if (msg.features?.mcp && TEMA) {
+        if (msg.features?.mcp) {
+          // El protocolo MCP de la caja pide `initialize` como primer request
+          // (docs/mcp-protocol.md, seccion 2) antes de cualquier tools/call.
           enviar(ws, {
             type: "mcp",
-            payload: { jsonrpc: "2.0", id: 1, method: "tools/call",
-                       params: { name: "self.screen.set_theme", arguments: { theme: TEMA } } },
+            payload: { jsonrpc: "2.0", id: 1, method: "initialize", params: { capabilities: {} } },
           });
+          if (TEMA) {
+            enviar(ws, {
+              type: "mcp",
+              payload: { jsonrpc: "2.0", id: 2, method: "tools/call",
+                         params: { name: "self.screen.set_theme", arguments: { theme: TEMA } } },
+            });
+          }
         }
         decir(ws, "Good morning, sir.", "happy");
         break;
