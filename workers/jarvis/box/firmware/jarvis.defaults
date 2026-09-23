@@ -29,11 +29,14 @@ CONFIG_LANGUAGE_ES_ES=y
 # habla (la V2 de la placa tiene el circuito de AEC).
 CONFIG_USE_AFE_WAKE_WORD=y
 
-# "Jarvis", pre-entrenado por Espressif y gratis. Entrenar uno propio pide mas
-# de 500 personas grabando la palabra 15 veces cada una, y es servicio pago.
-# Hay que APAGAR el chino explicitamente: si quedan los dos, el modelo que gana
-# no es el que uno espera.
-CONFIG_SR_WN_WN9_JARVIS_TTS=y
+# "Hey Nova" (WakeNet10, entrenado con VOCES REALES). Se eligio despues de que
+# "Jarvis" (wn9_jarvis_tts, entrenado con voces sinteticas) no reconociera la
+# voz de LP ni en el modo mas sensible (DET_MODE_90) — medido el 22/09/2026.
+# Los modelos con sufijo _tts son sinteticos y quisquillosos con acentos.
+# Entrenar uno propio pide +500 personas grabando 15 veces, y es pago.
+# Hay que APAGAR el chino explicitamente: si quedan dos, gana el que no queres.
+CONFIG_SR_WN_WN10_HEYNOVA=y
+# CONFIG_SR_WN_WN9_JARVIS_TTS is not set
 # CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS is not set
 
 # Manda el audio del wake word al servidor como primer mensaje del turno. Nos

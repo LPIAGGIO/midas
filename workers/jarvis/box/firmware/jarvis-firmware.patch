@@ -1,0 +1,35 @@
+diff --git a/main/audio/engines/afe_audio_engine.cc b/main/audio/engines/afe_audio_engine.cc
+index 3823d10..4af6eb6 100644
+--- a/main/audio/engines/afe_audio_engine.cc
++++ b/main/audio/engines/afe_audio_engine.cc
+@@ -158,6 +158,11 @@ bool AfeAudioEngine::Initialize(AudioCodec* codec, int frame_duration_ms,
+         afe_config->vad_model_name = vad_model_name;
+     }
+     afe_config->wakenet_init = wake_detector_ == WakeDetector::kWakeNet;
++    // JARVIS: DET_MODE_90 es el modo "Normal" de ESP-SR, el umbral mas bajo
++    // (mas sensible). El modelo wn9_jarvis_tts esta entrenado con voces
++    // sinteticas en ingles y no reconocia "yarvis" dicho por LP; esto le da la
++    // mayor chance posible antes de mover la deteccion al servidor.
++    afe_config->wakenet_mode = DET_MODE_90;
+     afe_config->wakenet_model_name = nullptr;
+     afe_config->wakenet_model_name_2 = nullptr;
+     if (wake_detector_ == WakeDetector::kWakeNet && models_ != nullptr) {
+diff --git a/main/boards/waveshare/esp32-s3-touch-lcd-1.85c/esp32-s3-touch-lcd-1.85c.cc b/main/boards/waveshare/esp32-s3-touch-lcd-1.85c/esp32-s3-touch-lcd-1.85c.cc
+index a4e1b90..13758b2 100644
+--- a/main/boards/waveshare/esp32-s3-touch-lcd-1.85c/esp32-s3-touch-lcd-1.85c.cc
++++ b/main/boards/waveshare/esp32-s3-touch-lcd-1.85c/esp32-s3-touch-lcd-1.85c.cc
+@@ -401,6 +401,14 @@ public:
+         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+         return &backlight;
+     }
++
++    // JARVIS: la caja vive enchufada por USB, no a bateria. El firmware pide
++    // LOW_POWER (WIFI_PS_MAX_MODEM) en reposo y el AP Ruijie la desasocia por
++    // inactividad (reason 4) cada tanto. Sin ahorro de energia la radio queda
++    // despierta y la conexion se mantiene.
++    virtual void SetPowerSaveLevel(PowerSaveLevel level) override {
++        WifiBoard::SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
++    }
+ };
+ 
+ DECLARE_BOARD(CustomBoard);
