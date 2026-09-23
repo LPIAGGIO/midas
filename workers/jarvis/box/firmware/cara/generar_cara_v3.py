@@ -140,25 +140,25 @@ def cabeza(emocion, S):
     Z = craneo.copy()
     Z += elipsoide(X, Y, c, c - 40 * u, 48 * u, 34 * u, 7 * u)              # frente
     for sx in (-1, 1):
-        Z += elipsoide(X, Y, c + sx * 44 * u, c + 6 * u, 20 * u, 16 * u, 6 * u)   # pomulos
-    Z += elipsoide(X, Y, c, c + 72 * u, 20 * u, 14 * u, 6 * u)              # menton
+        Z += elipsoide(X, Y, c + sx * 44 * u, c + 6 * u, 20 * u, 16 * u, 9 * u)   # pomulos
+    Z += elipsoide(X, Y, c, c + 72 * u, 20 * u, 14 * u, 8 * u)              # menton
     for sx in (-1, 1):                                                       # arcos de las cejas
         dy = ceja_dy - (ceja_asim if sx == 1 else 0.0)
-        Z += elipsoide(X, Y, c + sx * 30 * u, c - 30 * u + dy, 20 * u, 5 * u, 6 * u, rot=-sx * ceja_rot, p=2.4)
-    Z += elipsoide(X, Y, c, c + 4 * u, 6 * u, 26 * u, 10 * u, p=2.2)         # tabique
-    Z += elipsoide(X, Y, c, c + 24 * u, 10 * u, 7 * u, 8 * u)                # punta de la nariz
+        Z += elipsoide(X, Y, c + sx * 30 * u, c - 30 * u + dy, 20 * u, 5 * u, 9 * u, rot=-sx * ceja_rot, p=2.4)
+    Z += elipsoide(X, Y, c, c + 4 * u, 6 * u, 26 * u, 14 * u, p=2.2)         # tabique
+    Z += elipsoide(X, Y, c, c + 24 * u, 10 * u, 7 * u, 11 * u)               # punta de la nariz
     by = c + 44 * u
-    Z += elipsoide(X, Y, c, by - 3 * u - boca_ap * 0.5, 20 * u * boca_w, 3.5 * u, 6 * u, p=2.4)   # labio sup
-    Z += elipsoide(X, Y, c, by + 6 * u + boca_ap * 0.5, 17 * u * boca_w, 4.5 * u, 7 * u, p=2.4)   # labio inf
+    Z += elipsoide(X, Y, c, by - 3 * u - boca_ap * 0.5, 20 * u * boca_w, 3.5 * u, 8 * u, p=2.4)   # labio sup
+    Z += elipsoide(X, Y, c, by + 6 * u + boca_ap * 0.5, 17 * u * boca_w, 4.5 * u, 9 * u, p=2.4)   # labio inf
 
     # --- hundimientos (restan): cuencas, boca abierta, bajo nariz, bajo labio
     for sx in (-1, 1):
         ap = 0.15 if (emocion == "winking" and sx == 1) else ojo_ap
-        Z -= elipsoide(X, Y, c + sx * 30 * u, c - 17 * u, 12.5 * u, 7 * u * ap + 1.5 * u, 15 * u, p=2.4)
+        Z -= elipsoide(X, Y, c + sx * 30 * u, c - 17 * u, 12.5 * u, 7 * u * ap + 1.5 * u, 22 * u, p=2.4)
     if boca_ap > 0:
         Z -= elipsoide(X, Y, c, by + 1.5 * u, 14 * u * boca_w, boca_ap * 0.5, 14 * u, p=2.4)
-    Z -= elipsoide(X, Y, c, c + 34 * u, 8 * u, 3 * u, 5 * u)                 # bajo la nariz
-    Z -= elipsoide(X, Y, c, by + 14 * u, 12 * u, 3 * u, 4 * u)               # bajo el labio
+    Z -= elipsoide(X, Y, c, c + 34 * u, 8 * u, 3 * u, 7 * u)                 # bajo la nariz
+    Z -= elipsoide(X, Y, c, by + 14 * u, 12 * u, 3 * u, 6 * u)               # bajo el labio
 
     # --- comisuras: arrastre vertical suave de la zona de la boca ------------
     if comisura:
@@ -177,7 +177,7 @@ def cabeza(emocion, S):
 def iluminar(Z, sil, S):
     """Lambert desde arriba-izquierda + luz de contorno. Devuelve luminancia 0..1."""
     gy, gx = np.gradient(Z)
-    nx, ny, nz = -gx, -gy, np.ones_like(Z) * 1.6
+    nx, ny, nz = -gx, -gy, np.ones_like(Z) * 1.15
     norm = np.sqrt(nx * nx + ny * ny + nz * nz)
     nx, ny, nz = nx / norm, ny / norm, nz / norm
     luz = np.array([-0.45, -0.7, 0.55]); luz /= np.linalg.norm(luz)
@@ -196,9 +196,9 @@ def densidad(emocion, S):
     borde = np.clip(np.sqrt(gx * gx + gy * gy) * 6.0, 0, 1)
     # gamma alto = mas contraste: lo iluminado junta puntos, la sombra queda casi
     # vacia (asi es la referencia). Con 1.6 la frente quedaba pareja y densa.
-    D = (L ** 2.4) * 1.0 + borde * 0.5
+    D = (L ** 3.0) + borde * 0.8
     # dejar apenas puntos tenues en toda la silueta (piel)
-    D = D + sil * 0.02
+    D = D + sil * 0.008
     return np.clip(D, 0, None) * sil
 
 
@@ -223,8 +223,11 @@ def animar(emocion, home, peso, fase, dirn, S, f, F):
     esc, off = 1.0, np.zeros(2)
     # En la hoja de contacto las 21 caras quedaron grises: la base 0.30 era muy
     # baja. Se sube el piso y se mantiene el rango hacia las luces.
-    brillo = 0.55 + 0.6 * peso
-    rad = (0.95 + 0.7 * peso) * u        # puntos mas finos, como la referencia
+    # LP (23/09): "los puntos tienen que ser mas chiquitos, menos de la mitad".
+    # Nucleos de ~0.5-0.8 px (con supermuestreo 2x quedan como puntos de 1 px
+    # nitidos) y mas particulas para no perder cobertura. Casi blancos.
+    brillo = 0.7 + 0.5 * peso
+    rad = (0.42 + 0.3 * peso) * u
     if emocion == "neutral":
         esc = 1.0 + 0.012 * math.sin(t)
     elif emocion in ("happy", "laughing", "funny", "delicious", "confident", "winking", "cool", "relaxed", "silly"):
@@ -274,10 +277,10 @@ def render_frame(S, pos, brillo, rad, extra, base, glow, ss=2):
     d = ImageDraw.Draw(img)
     P, R = pos * ss, rad * ss
     for (x, y), b, r in zip(P, brillo, R):
-        rr = r * 2.2; bb = min(1.0, b) * 0.8
+        rr = r * 1.6; bb = min(1.0, b) * 0.45
         d.ellipse([x - rr, y - rr, x + rr, y + rr], fill=tuple(int(v * bb) for v in glow))
     for (x, y, b, r) in extra:
-        rr = r * ss * 2.2
+        rr = r * ss * 1.6
         d.ellipse([x * ss - rr, y * ss - rr, x * ss + rr, y * ss + rr], fill=tuple(int(v * min(1.0, b)) for v in glow))
     for (x, y), b, r in zip(P, brillo, R):
         bb = min(1.0, b)
@@ -337,8 +340,8 @@ def generar_emergence(S, F, ms, n, out_dir, seed=99):
         k = min(1.0, t / 0.7); k = k * k * (3 - 2 * k)
         ruido = np.stack([np.sin(t * 6 + fase), np.cos(t * 5 + fase * 1.3)], axis=1) * (1 - k) * 6
         pos = inicio * (1 - k) + home * k + ruido
-        brillo = np.clip(0.3 + 0.7 * k * (0.45 + 0.55 * peso) + 0.1 * np.sin(fase + t * 9), 0.12, 1.2)
-        rad = (1.1 + 0.9 * peso * k) * (S / 240.0)
+        brillo = np.clip(0.35 + 0.85 * k * (0.5 + 0.5 * peso) + 0.1 * np.sin(fase + t * 9), 0.12, 1.2)
+        rad = (0.45 + 0.35 * peso * k) * (S / 240.0)
         frames.append(render_frame(S, pos, brillo, rad, [], BASE, glow))
     return a_gif(frames, os.path.join(out_dir, "robot_2.gif"), ms)
 
@@ -359,7 +362,7 @@ def main():
     ap.add_argument("--size", type=int, default=240)
     ap.add_argument("--frames", type=int, default=18)
     ap.add_argument("--ms", type=int, default=75)
-    ap.add_argument("--n", type=int, default=3000)
+    ap.add_argument("--n", type=int, default=5000)
     ap.add_argument("--colors", type=int, default=COLORES)
     ap.add_argument("--solo", nargs="*")
     ap.add_argument("--debug", action="store_true", help="exporta los mapas de luz y densidad")
