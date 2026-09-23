@@ -35,7 +35,11 @@ CONFIG_USE_AFE_WAKE_WORD=y
 # Los modelos con sufijo _tts son sinteticos y quisquillosos con acentos.
 # Entrenar uno propio pide +500 personas grabando 15 veces, y es pago.
 # Hay que APAGAR el chino explicitamente: si quedan dos, gana el que no queres.
-CONFIG_SR_WN_WN10_HEYNOVA=y
+# PRUEBA DEL DETECTOR (22/09 noche): "Hi ESP" es el modelo con voces reales mas
+# entrenado del catalogo 2.4.7. NO es el nombre final; sirve para saber si el
+# microfono+pipeline reconocen la voz de LP. Nova no existe en esp-sr 2.4.7.
+CONFIG_SR_WN_WN9_HIESP=y
+# CONFIG_SR_WN_WN10_HEYNOVA is not set (no existe en la version instalada)
 # CONFIG_SR_WN_WN9_JARVIS_TTS is not set
 # CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS is not set
 
