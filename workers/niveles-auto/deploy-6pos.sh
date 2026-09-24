@@ -16,7 +16,11 @@ set -u
 VPS="midas@149.50.148.172"
 SSH="ssh -p 5008 -i $HOME/.ssh/id_ed25519 -o ConnectTimeout=20 $VPS"
 
-hora=$(TZ=America/Argentina/Buenos_Aires date +%H%M)
+# OJO: Git Bash en Windows NO resuelve nombres Olson (TZ=America/Argentina/...
+# devuelve GMT sin avisar). El 24/09 eso hizo pasar la puerta a las 14:34 ART
+# creyendo que eran las 17:34: tres reinicios con el mercado abierto. Se usa
+# el formato POSIX, que si funciona: ART3 = UTC-3.
+hora=$(TZ='ART3' date +%H%M)
 echo "hora ART: ${hora:0:2}:${hora:2:2}"
 if [ "$hora" -lt 1705 ] && [ "${FORZAR:-0}" != "1" ]; then
   echo "FALLO: mercado abierto (cierra 17:00). No se reinicia el bot. FORZAR=1 para saltear."
