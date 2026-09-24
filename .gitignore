@@ -12,3 +12,15 @@ built-check.js
 
 # Jarvis: foto local de restarts para medir delta, no va al repo
 workers/jarvis/.workers-snapshot.json
+
+# Series de precios y caches del backtest: se vuelven a bajar con download_hist.js
+research/backtest-5y/data/
+research/backtest-5y/data-1m/
+research/backtest-5y/signals*.json
+research/backtest-5y/results*.json
+research/backtest-5y/verificacion.json
+research/backtest-5y/*.bak*
+research/universo-bot/panel-crudo.json
+research/universo-bot/datos.json
+research/universo-bot/atr.json
+research/universo-bot/universo-ampliado.json

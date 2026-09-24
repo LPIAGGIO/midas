@@ -320,7 +320,7 @@ async function main() {
   } catch (e) { log("[iol_quotes respaldo]", e.message); }
 
   // Cola manual pendiente, colapsando duplicados por usuario+ticker.
-  const { data: queue } = await supabase.from("tv_analysis_queue").select("*").eq("status", "pending").limit(LIMITE_COLA);
+  const { data: queue } = await supabase.from("tv_analysis_queue").select("*").eq("status", "pending").limit(20);
   const seen = new Set();
   const jobs = [];
   for (const q of queue || []) {
@@ -553,16 +553,11 @@ async function main() {
         }
         if (BOT_UNIVERSO.has(tk.toUpperCase()) && modo !== "local_ars" && sc.score >= 7 && rr != null && rr >= 2 && !contraTendencia && regimenOk && stopLvl && stopLvl > 0 && stopLvl < buyZone.hi && sellZone) {
           if (await earningsCerca(tk)) { botDescarte(tk, buyZone.hi, ["earnings en 3 dias o menos"]); }
-          else (candDesde = candDesde || Date.now(), CANDIDATOS_REAL).push({
-            symUsa, tk, entry: buyZone.hi, stop: stopLvl, target: sellZone.lo,
-            score: sc.score, rr, atr,
-            // Holgura = cuantos ATR hay entre la compra y el stop. Es el
-            // criterio de ranking (ver ejecutarPorRanking).
-            holgura: atr > 0 ? (buyZone.hi - stopLvl) / atr : 0,
-            senal: `score ${sc.score}/10 · R:R ${fmt1(rr)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}` +
-              (regime === "mixto" ? " · regimen mixto (media posicion)" : ""),
-            riskMult: regime === "mixto" ? 0.5 : 1,
-          });
+          else
+          await paperSignal(symUsa, tk, buyZone.hi, stopLvl, sellZone.lo, sc.score, rr,
+            `score ${sc.score}/10 · R:R ${fmt1(rr)} · ${zoneTag(buyZone, sc)}${sigTxt} · tendencia ${estr}` +
+            (regime === "mixto" ? " · regimen mixto (media posicion)" : ""),
+            regime === "mixto" ? 0.5 : 1).catch((e) => log(`[paper ${tk}] ${e.message}`));
         }
         /* LIBRO SOMBRA (A/B sin filtro, pedido de LP 04/09/2026): opera TODO
          * soporte con stop y target validos — sin exigir score, R:R, tendencia,
@@ -669,94 +664,6 @@ async function main() {
       log(`${tk} ERROR: ${e.message}`);
     }
   }
-  /* El ranking corre cuando el barrido termino, no en cada tanda: si se
-   * ejecutara por pasada compararia 60 vecinos de tanda en vez del universo. */
-  let quedan = 0;
-  try {
-    const { count } = await supabase.from("tv_analysis_queue")
-      .select("id", { count: "exact", head: true }).eq("status", "pending");
-    quedan = count ?? 0;
-  } catch (e) { log("[bot] no pude contar la cola:", e.message); }
-  const vencido = candDesde > 0 && Date.now() - candDesde > RANKING_MAX_ESPERA_MS;
-  if (!quedan || vencido) {
-    if (vencido && quedan) log(`[bot] ranking forzado: quedan ${quedan} en cola pero ya pasaron 20 minutos`);
-    await ejecutarPorRanking();
-  } else if (CANDIDATOS_REAL.length) {
-    log(`[bot] barrido en curso: ${CANDIDATOS_REAL.length} candidatos juntados, faltan ${quedan} papeles. El ranking espera.`);
-  }
-}
-
-/* --------- Ejecucion por RANKING ---------
- *
- * Antes cada senal que pasaba el gate se ejecutaba en el acto, adentro del loop
- * de analisis. Con 48 papeles eso ya estaba mal (el cupo se lo llevaba el que
- * cayera primero en BOT_TICKERS, o sea el orden alfabetico); con el universo
- * entero de CEDEARs seria directamente absurdo. Ahora el ciclo junta TODOS los
- * candidatos, los ordena, y recien despues ejecuta de mejor a peor hasta que
- * los topes de paperSignal lo corten.
- *
- * POR QUE SE ORDENA POR HOLGURA DEL STOP Y NO POR SCORE. Medido sobre el
- * backtest de 5 anios (61 trades, results.json / corteSalida):
- *
- *     salida por target        16 trades   +$1.231.700
- *     salida por stop          36 trades   -$1.707.305
- *
- * El 59% de los trades muere en el stop y ahi se va toda la plata. Con stops a
- * 0,60 sigmas la probabilidad teorica de que el ruido toque el stop es 55%: los
- * numeros coinciden, o sea que la causa de muerte es el RUIDO, no la tesis. El
- * score, en cambio, no predice — por corte da 34% / 31% / 71% / 33% de win
- * (score >=7 / >=8 / >=9 / =10), sin monotonia y con n de 7 y 3 en los dos
- * ultimos. Por eso el score va ULTIMO, de desempate, y manda la holgura.
- *
- * Elegir por holgura no ensancha el stop de nadie ni cambia el sizing: entre
- * varios candidatos validos se queda con el que menos probabilidad tiene de que
- * lo saquen por ruido. Es gratis, y solo sirve si hay de donde elegir — que es
- * justamente lo que aporta el universo grande.
- *
- * NO HAY COLA PERSISTIDA, A PROPOSITO. Los que quedan afuera no se guardan para
- * ejecutarlos despues: cuando se libera un lugar, la pasada siguiente vuelve a
- * evaluar todo y entra el mejor candidato VIGENTE. Una cola guardada mandaria
- * la orden con los niveles de hace horas, que es operar informacion vieja. La
- * cola existe, pero se recalcula sola en cada pasada.
- */
-async function ejecutarPorRanking() {
-  const crudos = CANDIDATOS_REAL.splice(0);   // se vacia: el barrido que viene arranca limpio
-  candDesde = 0;
-  if (!crudos.length) return;
-  // Un papel puede analizarse dos veces dentro del mismo barrido (se re-encola
-  // si fallo): vale la lectura mas nueva, que es la ultima que se empujo.
-  const porTk = new Map();
-  for (const c of crudos) porTk.set(c.tk, c);
-  const cands = [...porTk.values()];
-  const orden = RANKING_ORDEN[RANKING_CRITERIO];
-  if (orden) cands.sort(orden);
-
-  const entraron = [], espera = [];
-  for (const c of cands) {
-    // paperSignal sigue siendo la UNICA autoridad sobre capital, cupo diario y
-    // maximo de posiciones: devuelve true solo si dejo la orden colocada.
-    let ok = false;
-    try {
-      ok = await paperSignal(c.symUsa, c.tk, c.entry, c.stop, c.target, c.score, c.rr, c.senal, c.riskMult);
-    } catch (e) { log(`[bot ${c.tk}] ${e.message}`); }
-    (ok ? entraron : espera).push(c);
-  }
-
-  log(`[bot] ranking: ${cands.length} candidatos, ${entraron.length} colocados, ${espera.length} en espera`);
-  if (!MODO_REAL) return;
-  const linea = (c, i) => `${String(i + 1).padStart(2)}. <b>${c.tk}</b> · stop a ${c.holgura.toFixed(2)} ATR · R:R ${fmt1(c.rr)} · score ${c.score}/10`;
-  const TOPE = 12;
-  await tgEspejo(
-    `<b>BOT · ranking de la pasada</b>\n` +
-    `${cands.length} candidato${cands.length === 1 ? "" : "s"} pasaron el filtro. Orden: ${orden ? RANKING_CRITERIO : "el del barrido (ningun criterio sobrevivio fuera de muestra todavia)"}.\n\n` +
-    (entraron.length
-      ? `<b>ORDEN COLOCADA (${entraron.length})</b>\n` + entraron.map(linea).join("\n") + "\n\n"
-      : `<b>No entro ninguno</b> (sin cupo libre o sin capital).\n\n`) +
-    (espera.length
-      ? `<b>EN ESPERA (${espera.length})</b>\n` + espera.slice(0, TOPE).map((c, i) => linea(c, entraron.length + i)).join("\n") +
-        (espera.length > TOPE ? `\n... y ${espera.length - TOPE} mas` : "") +
-        `\n\nCuando se libere un lugar, la proxima pasada los vuelve a evaluar y entra el mejor que siga vigente.`
-      : ""));
 }
 
 /* ───────── Feedback loop: medir qué hizo el precio después de cada nivel ───────── */
@@ -1304,48 +1211,6 @@ const MAX_POS_PCT_REAL = Number(process.env.IOL_BOT_MAX_POS_PCT || 0.20);
  * MAS posiciones simultaneas. Con 9M de capital y el tope por posicion en
  * $1,4M (= 9M x 0,1556), entran 6 en vez de 5. El tamaño por trade NO cambia,
  * asi el track record desde el 04/09 sigue siendo comparable. */
-/* Candidatos REALES de la pasada. Se llenan mientras se analiza y se ejecutan
- * DESPUES, en bloque y por ranking (ver ejecutarPorRanking). Antes cada senal
- * se ejecutaba en el acto, con lo cual el cupo se lo llevaba el que aparecia
- * primero en BOT_TICKERS: orden alfabetico, no calidad. Con 48 papeles casi no
- * se notaba; con el universo entero de CEDEARs el sesgo seria enorme. */
-const CANDIDATOS_REAL = [];
-let candDesde = 0;   // cuando se junto el primer candidato de este barrido
-
-/* Papeles que main() analiza por pasada. Era 20 fijo, suficiente para 48
- * papeles (barrido completo en 3 pasadas de 1 minuto). Con el universo entero
- * de CEDEARs hacen falta tandas mas grandes, si no el barrido tarda 15 minutos
- * y -lo que importa- el ranking termina comparando 20 vecinos de tanda en vez
- * del universo. Yahoo aguanta 60 por pasada sin protestar. */
-const LIMITE_COLA = Number(process.env.BOT_QUEUE_LIMIT || 60);
-
-/* El ranking necesita el universo ENTERO sobre la mesa: espera a que la cola
- * se vacie. Este es el tope de seguridad por si nunca se vacia (papeles que
- * fallan y se re-encolan): pasado este tiempo ejecuta con lo que tenga. */
-const RANKING_MAX_ESPERA_MS = 20 * 60 * 1000;
-
-/* CON QUE CRITERIO se reparte el cupo entre candidatos que compiten.
- *
- * "llegada" (default) = el orden en que salieron del barrido, o sea lo que
- * hacia el bot antes. Es el default A PROPOSITO: el 24/09/2026 medi el A/B en
- * el backtest de 5 anios sobre el universo de 298 papeles y el ranking por
- * holgura del stop MEJORA en muestra (gold -1,46% -> -0,71% mensual; cocos
- * Sharpe 0,42 -> 1,21) pero se DESTRUYE fuera de muestra (gold +4,14% ->
- * -3,71%; win 33,1% -> 26,5%). Es el mismo patron del piso sigma quirurgico
- * que ya habiamos descartado. Hasta que un criterio sobreviva fuera de
- * muestra, el cupo se reparte como antes y no se le agrega una conviccion que
- * los datos no respaldan.
- *
- * Lo que SI cambia (y no depende del criterio) es que ahora el bot junta todos
- * los candidatos del barrido antes de ejecutar, en vez de ejecutar al vuelo: el
- * ranking se ve entero en el aviso y ningun candidato se pierde sin registro. */
-const RANKING_CRITERIO = String(process.env.IOL_BOT_RANKING || "llegada").toLowerCase();
-const RANKING_ORDEN = {
-  holgura: (a, b) => (b.holgura - a.holgura) || (b.rr - a.rr) || (b.score - a.score),
-  rr: (a, b) => (b.rr - a.rr) || (b.score - a.score),
-  score: (a, b) => (b.score - a.score) || (b.rr - a.rr),
-};
-
 const MAX_POS_REAL = Number(process.env.IOL_BOT_MAX_POS || 5);
 const MAX_ENTRADAS_DIA_REAL = Number(process.env.IOL_BOT_MAX_DIA || 5);
 
@@ -2070,7 +1935,6 @@ async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskM
     `Stop ${pesos(stop * rArs)} · Target ${pesos(target * rArs)}\n` +
     `score ${score}/10 · R:R ${Number(rr).toFixed(1)}\n\n` +
     `Para espejar en Cocos: limite ${pesos(tickPiso(precioUnidad))} (redondeado al tick, para ABAJO: quedarse afuera es mejor que pagar de mas), misma cantidad o proporcional. Te aviso si entra, si cierra o si se cancela.`);
-  return true;   // colocada. Los 15 `return` de arriba dan undefined: no entro.
 }
 
 // Candidatos a fill/salida esperando su segunda lectura (anti-fantasma).
