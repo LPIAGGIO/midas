@@ -40,7 +40,9 @@ sleep 90
 
 echo "== 4. verificacion =="
 salida=$($SSH 'pm2 jlist | node -e "const a=JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"));const p=a.find(p=>p.name===\"niveles-auto\");console.log(\"pm2:\",p.pm2_env.status,\"restarts\",p.pm2_env.restart_time)"; \
-  f=$(ls -t ~/.pm2/logs/niveles-auto-out-*.log | head -1); grep -E "MODO REAL ACTIVO" "$f" | tail -1 | cut -c1-400')
+  f=$(ls -t ~/.pm2/logs/niveles-auto-out-*.log | head -1); grep -E "MODO REAL ACTIVO" "$f" | tail -1 | sed -E "s/papeles [A-Z0-9, ]+ · /papeles (lista) · /"')
+# (la lista de papeles se colapsa: el 24/09 un cut -c1-400 dejaba "max 6
+#  posiciones" afuera de la linea y la verificacion fallaba en falso)
 echo "$salida"
 if echo "$salida" | grep -q "pm2: online" && echo "$salida" | grep -q 'capital REAL \$9\.000\.000' && echo "$salida" | grep -q "max 6 posiciones"; then
   echo "OK: bot online con capital \$9.000.000 y 6 posiciones. Las pendientes se recolocan solas a las 10:29."
