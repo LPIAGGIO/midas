@@ -1921,12 +1921,31 @@ async function avisarRecolocacion(t, nuevoPx, motivo) {
 async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskMult = 1, libro = "paper") {
   if (!BOT_UNIVERSO.has(String(tk).toUpperCase())) return;   // opera 3 papeles, no todo el tablero
   const esShadow = libro === "shadow";
-  const { data: exAll } = await supabase.from("paper_iol_trades").select("id,status,entry_limit,modo").eq("sym", sym).in("status", ["pending", "open"]);
+  const { data: exAll } = await supabase.from("paper_iol_trades").select("id,status,entry_limit,modo,broker_order_id").eq("sym", sym).in("status", ["pending", "open"]);
   const ex = (exAll || []).filter((t) => (t.modo === "shadow") === esShadow); // cada libro se deduplica solo
   if (ex.some((t) => t.status === "open")) return;          // ya hay posición en el papel (en este libro)
   const pend = ex.filter((t) => t.status === "pending");
   if (pend.some((t) => Math.abs(Number(t.entry_limit) - entry) / entry < 0.005)) return; // misma señal (rearme)
   if (pend.length) {
+    /* BUG 24/09/2026: la fila se daba por reemplazada pero la orden seguia VIVA
+     * en IOL. ORCL: el recorte por saldo re-entro aca con un nivel 0,52% mas
+     * alto, la fila de 18 × $74.800 (IOL 190232501) quedo "cancelled" en la
+     * base y la orden real siguio apoyada, sin stop ni vigilancia, a 0,4% de
+     * ejecutarse. Primero se baja en IOL; si sigue viva y no se pudo bajar, NO
+     * se reemplaza: mejor una senal vieja vigilada que dos ordenes reales. */
+    if (!esShadow) for (const p of pend) {
+      if (p.modo !== "real" || !p.broker_order_id) continue;
+      try {
+        await iolCancelar(p.broker_order_id);
+        log(`[bot ${tk}] orden IOL ${p.broker_order_id} cancelada antes de reemplazarla`);
+      } catch (e) {
+        const est = await iolEstado(p.broker_order_id).catch(() => null);
+        if (est && /pendiente|proceso|iniciada/i.test(est)) {
+          log(`[bot ${tk}] NO reemplazo la pendiente: la orden IOL ${p.broker_order_id} sigue viva y no pude cancelarla (${e.message})`);
+          return;
+        }
+      }
+    }
     await supabase.from("paper_iol_trades").update({
       status: "cancelled", exit_reason: "reemplazada por señal nueva", veredicto: "sin_fill",
       nota_sim: "reemplazada por una señal más fresca antes de llegar a ejecutarse",
@@ -2088,6 +2107,15 @@ const cruceSinFill = new Set();
 // de la API: la pasada corre cada 60s pero preguntar cada vez es al pedo).
 const FILL_IOL_CADA_MS = 2 * 60 * 1000;
 const fillIolCheck = new Map();
+/* Pendientes que la reconciliacion vio EJECUTADAS en IOL. BUG 24/09/2026: MU
+ * 1 × $337.850 se ejecuto a las 10:31 (el CEDEAR toco el limite en pesos por
+ * un movimiento del CCL) pero el subyacente en dolares nunca bajo al nivel:
+ * la reconciliacion decia "ejecutada, no tocar nada" y el chequeo de fills
+ * la saltaba porque el feed no habia tocado. Cinco horas comprado sin stop.
+ * Con esto, lo que IOL declara ejecutado se registra en la pasada siguiente
+ * sin esperar al feed ni a la confirmacion anti-fantasma (IOL ES la
+ * confirmacion). */
+const fillPorIol = new Set();
 async function paperPass() {
   await resolverModo();
   const { data: trades } = await supabase.from("paper_iol_trades").select("*").in("status", ["pending", "open"]);
@@ -2176,7 +2204,9 @@ async function paperPass() {
            * book y el real se pierde el fill que el paper si registra. */
           const viva = await ordenVivaDe(t);
           if (viva.estado === "ejecutada") {
-            // fill que el chequeo de fills todavia no proceso: no tocar nada
+            // fill que el chequeo de fills todavia no proceso: se marca para
+            // que lo registre aunque el feed no haya tocado el nivel.
+            fillPorIol.add(t.id);
           } else if (viva.estado === "nada") {
             const nuevo = await iolOrden("compra", t.ticker, t.qty, deberia);
             await supabase.from("paper_iol_trades").update({
@@ -2212,20 +2242,22 @@ async function paperPass() {
       // TOCADO el nivel en algún momento de la rueda, no que esté ahí ahora.
       const lim = Number(t.entry_limit);
       const bajo = p <= lim ? p : await minRueda(symU);
-      if (!(bajo <= lim)) { fillCand.delete(t.id); continue; }
+      if (!(bajo <= lim) && !fillPorIol.has(t.id)) { fillCand.delete(t.id); continue; }
       /* CONFIRMACIÓN ANTI-FANTASMA (01/09/2026): un tick basura del feed llenó
        * AMZN a US$226,88 cuando el mínimo real del día fue 251,93 — posición
        * fantasma, aviso de espejo incluido. Un glitch no sobrevive dos lecturas
        * separadas ≥150s (el cache de minRueda dura 120s, así que la segunda
        * lectura es fresca); un flush real sí, porque queda en el low del día.
        * Costo: el fill simulado se confirma ~2,5 min tarde. Aceptable. */
-      const cand = fillCand.get(t.id);
-      if (!cand) {
-        fillCand.set(t.id, Date.now());
-        log(`[bot ${t.ticker}] nivel tocado (US$${Number(bajo).toFixed(2)} <= ${lim}) — espero confirmación antes de dar el fill`);
-        continue;
+      if (!fillPorIol.has(t.id)) {   // con fill declarado por IOL no hay fantasma que descartar
+        const cand = fillCand.get(t.id);
+        if (!cand) {
+          fillCand.set(t.id, Date.now());
+          log(`[bot ${t.ticker}] nivel tocado (US$${Number(bajo).toFixed(2)} <= ${lim}) — espero confirmación antes de dar el fill`);
+          continue;
+        }
+        if (Date.now() - cand < 150000) continue;
       }
-      if (Date.now() - cand < 150000) continue;
       /* CONFIRMACIÓN CONTRA IOL (14/09/2026): en modo real el cruce del
        * subyacente NO es un fill. SPCX cruzó en dólares pero el CEDEAR local
        * nunca operó el límite: se avisó "ENTRO SPCX" con 0 ejecutado en IOL y
@@ -2234,7 +2266,7 @@ async function paperPass() {
       let fillIol = null;
       if (t.modo === "real" && t.broker_order_id) {
         const antesIol = fillIolCheck.get(t.id) || 0;
-        if (Date.now() - antesIol < FILL_IOL_CADA_MS) continue;
+        if (!fillPorIol.has(t.id) && Date.now() - antesIol < FILL_IOL_CADA_MS) continue;
         fillIolCheck.set(t.id, Date.now());
         const det = await iolDetalle(t.broker_order_id).catch(() => null);
         const estadoIol = String(det?.estadoActual ?? det?.estado ?? "");
@@ -2263,6 +2295,7 @@ async function paperPass() {
         fillIol = det;
       }
       fillCand.delete(t.id);
+      fillPorIol.delete(t.id);
       // Fill: la CONDICIÓN se evalúa en dólares (la tesis es sobre el papel),
       // el PRECIO se toma en pesos del papel local pagando la punta vendedora,
       // que es lo que cuesta de verdad cruzarse contra el book.

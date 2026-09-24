@@ -24,3 +24,4 @@ research/universo-bot/panel-crudo.json
 research/universo-bot/datos.json
 research/universo-bot/atr.json
 research/universo-bot/universo-ampliado.json
+workers/niveles-auto/worker-deploy.js
