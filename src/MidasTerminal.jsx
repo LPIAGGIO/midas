@@ -34280,6 +34280,57 @@ function CajaTiempoModule() {
   );
 }
 
+// Capital × días invertido en un instrumento: el costo del lote vivo (costo
+// promedio) integrado en el tiempo. Es la base de la TNA de P&L por
+// Instrumento (pedido de LP 28/09/2026): con varias compras y ventas,
+// "resultado / costo total" mezcla plata que estuvo 40 días con plata que
+// estuvo 2 y no dice qué rindió mejor. Esto pondera cada peso por el tiempo
+// que estuvo puesto. Una ida y vuelta en el mismo día cuenta 1 día (si no, la
+// TNA sería infinita). Devuelve null si hubo short (sobre capital no aplica).
+function pnlCapitalDias(ops, type, finISO) {
+  const dia = (iso) => Math.floor(new Date(String(iso).slice(0, 10) + "T12:00:00").getTime() / 86400000);
+  // Dentro del mismo día van primero las compras: en las idas y vueltas
+  // intradía (Compra/Venta Trading) el extracto a veces lista la venta antes y
+  // se leía como un short.
+  const esVenta = (o) => (o.operation_type === "sell" ? 1 : 0);
+  const ord = [...(ops || [])].filter((o) => o && o.entry_date).sort((a, b) =>
+    a.entry_date < b.entry_date ? -1 : a.entry_date > b.entry_date ? 1
+      : (esVenta(a) - esVenta(b)) || String(a.created_at || "").localeCompare(String(b.created_at || "")));
+  if (!ord.length) return null;
+  // Capital × días: cada día CON operaciones cuenta el máximo invertido ese día
+  // (así entra el capital de las operaciones intradía); los días sin
+  // operaciones cuentan lo que quedó puesto.
+  let qty = 0, cost = 0, capDias = 0, prevDia = null, k = 0;
+  while (k < ord.length) {
+    const d = dia(ord[k].entry_date);
+    if (prevDia != null && qty > 1e-9 && d - prevDia > 1) capDias += cost * (d - prevDia - 1);
+    let pico = qty > 1e-9 ? cost : 0;
+    while (k < ord.length && dia(ord[k].entry_date) === d) {
+      const o = ord[k++];
+      const q = Number(o.quantity) || 0, px = Number(o.entry_price) || 0;
+      if (o.operation_type === "sell") {
+        if (!(qty > 1e-9)) continue;   // venta sin tenencia previa: no suma capital
+        const venta = Math.min(q, qty);
+        cost -= cost * (venta / qty);
+        qty -= venta;
+        if (qty <= 1e-9) { qty = 0; cost = 0; }
+      } else {
+        qty += q;
+        cost += applyConventionToValue(type, q, px);
+        if (cost > pico) pico = cost;
+      }
+    }
+    capDias += pico;
+    prevDia = d;
+  }
+  if (qty > 1e-9 && finISO) {
+    const f = dia(finISO);
+    if (f > prevDia) capDias += cost * (f - prevDia);
+  }
+  const dias = finISO ? Math.max(1, dia(finISO) - dia(ord[0].entry_date)) : null;
+  return { capDias, dias };
+}
+
 function PnlPorInstrumentoModule() {
   const { positions, loading, error } = useUserPositions();
   const { movements: cashMovements } = useCashMovements();
@@ -34332,7 +34383,9 @@ function PnlPorInstrumentoModule() {
         currency: p.entry_currency || "ARS",
         buyQty: 0, buyNot: 0, sellQty: 0, sellNot: 0,
         first: null, last: null, realized: 0, total: 0, hasPnl: false, priceSource: null, ops: 0,
+        opsList: [],
       };
+      e.opsList.push(p);
       const qty = Number(p.quantity) || 0;
       const px = Number(p.entry_price) || 0;
       if (p.operation_type === "sell") { e.sellQty += qty; e.sellNot += qty * px; }
@@ -34454,6 +34507,23 @@ function PnlPorInstrumentoModule() {
       }
     } catch (err) { console.warn("[PnlPorInstrumento] caucion falló:", err); }
 
+    // TNA sobre capital × días (ver pnlCapitalDias). Solo contado: futuros y
+    // opciones no inmovilizan capital en la cuenta, cauciones van en su fila.
+    const hoyTna = getTodayStringAR();
+    for (const e of acc.values()) {
+      e.tna = null; e.dias = null;
+      if (!e.hasPnl || e.type === "caucion" || !CONS_CAPITAL_TYPES.has(e.type) || !e.opsList?.length) continue;
+      // Fin del período: hoy si sigue abierto; el vencimiento si la letra se
+      // cobró al vto con tenencia; si no, la última operación (T30J6 vendida
+      // entera el 09/06 no cuenta hasta su vto del 30/06).
+      const tenencia = e.buyQty - e.sellQty > 1e-9;
+      const fin = !tenencia ? e.last : e.matured ? (parseLetraMaturity(e.ticker) || e.last) : hoyTna;
+      const r = pnlCapitalDias(e.opsList, e.type, fin);
+      if (!r || !(r.capDias > 0)) continue;
+      e.dias = r.dias;
+      e.tna = (e.total / r.capDias) * 365 * 100;
+    }
+
     return Array.from(acc.values()).map((e) => ({
       ...e,
       pppBuy: e.buyQty > 0 ? e.buyNot / e.buyQty : null,
@@ -34465,7 +34535,14 @@ function PnlPorInstrumentoModule() {
   }, [positions, bondPrices, futurePrices, fciPrices, stockPrices, cashMovements]);
 
   const presentTypes = useMemo(() => Array.from(new Set(rows.map((r) => r.type))), [rows]);
-  const shown = typeFilter === "all" ? rows : rows.filter((r) => r.type === typeFilter);
+  // Orden por TNA: click en el encabezado → mayor a menor → menor a mayor → original.
+  const [ordenTna, setOrdenTna] = useState(null);
+  const filtradas = typeFilter === "all" ? rows : rows.filter((r) => r.type === typeFilter);
+  const shown = ordenTna == null ? filtradas : [...filtradas].sort((a, b) => {
+    const va = a.tna ?? (ordenTna === "desc" ? -Infinity : Infinity);
+    const vb = b.tna ?? (ordenTna === "desc" ? -Infinity : Infinity);
+    return ordenTna === "desc" ? vb - va : va - vb;
+  });
   const arsRows = shown.filter((r) => (r.currency || "ARS") === "ARS");
   const totReal = arsRows.reduce((s, r) => s + r.realized, 0);
   const totUnreal = arsRows.reduce((s, r) => s + r.unrealized, 0);
@@ -34490,8 +34567,8 @@ function PnlPorInstrumentoModule() {
   const tickerLabel = (r) => r.type === "fci" ? fciDisplayName(r.ticker) : r.ticker;
 
   const downloadCsv = () => {
-    const head = "tipo;ticker;moneda;ops;desde;hasta;qty_comprada;ppp_compra;qty_vendida;ppp_venta;abierto;realizado;no_realizado;total";
-    const lines = shown.map((r) => [TYPE_LABEL[r.type] || r.type, tickerLabel(r), r.currency, r.ops, r.first || "", r.last || "", r.buyQty, r.pppBuy ?? "", r.sellQty, r.pppSell ?? "", r.open, r.realized.toFixed(2), r.unrealized.toFixed(2), r.total.toFixed(2)].join(";"));
+    const head = "tipo;ticker;moneda;ops;desde;hasta;qty_comprada;ppp_compra;qty_vendida;ppp_venta;abierto;realizado;no_realizado;total;dias;tna_pct";
+    const lines = shown.map((r) => [TYPE_LABEL[r.type] || r.type, tickerLabel(r), r.currency, r.ops, r.first || "", r.last || "", r.buyQty, r.pppBuy ?? "", r.sellQty, r.pppSell ?? "", r.open, r.realized.toFixed(2), r.unrealized.toFixed(2), r.total.toFixed(2), r.dias ?? "", r.tna != null ? r.tna.toFixed(2) : ""].join(";"));
     const blob = new Blob(["﻿" + [head, ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -34564,6 +34641,13 @@ function PnlPorInstrumentoModule() {
                 <th style={{ textAlign: "right", padding: "8px 10px" }}>Realizado</th>
                 <th style={{ textAlign: "right", padding: "8px 10px" }}>No realiz.</th>
                 <th style={{ textAlign: "right", padding: "8px 10px" }}>Total</th>
+                <th style={{ textAlign: "right", padding: "8px 10px" }} title="Días desde la primera compra hasta la última venta (o hasta hoy si sigue abierto)">Días</th>
+                <th
+                  onClick={() => setOrdenTna((o) => (o == null ? "desc" : o === "desc" ? "asc" : null))}
+                  title="Rendimiento anualizado sobre el capital que estuvo invertido cada día (click para ordenar)"
+                  style={{ textAlign: "right", padding: "8px 10px", cursor: "pointer", userSelect: "none", color: ordenTna ? C.text : undefined }}>
+                  TNA {ordenTna === "desc" ? "▼" : ordenTna === "asc" ? "▲" : ""}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -34609,10 +34693,17 @@ function PnlPorInstrumentoModule() {
                     {cell(r.realized, false)}
                     {cell(r.unrealized, false)}
                     {cell(r.total, true)}
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.muted }}>{r.dias ?? "—"}</td>
+                    <td
+                      title={r.tna != null && r.dias != null && r.dias < 30 ? "Menos de 30 días: anualizar tan poco tiempo exagera el número" : undefined}
+                      style={{ padding: "7px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", fontWeight: 700,
+                        color: r.tna == null ? C.dim : r.tna >= 0 ? C.green : C.red, opacity: r.tna != null && r.dias != null && r.dias < 30 ? 0.55 : 1 }}>
+                      {r.tna == null ? "—" : `${r.tna >= 0 ? "+" : "−"}${Math.abs(r.tna).toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`}
+                    </td>
                   </tr>
                   {futClose && (
                     <tr>
-                      <td colSpan={9} style={{ padding: "0 10px 7px 10px", fontSize: 10.5, color: C.dim }}>
+                      <td colSpan={11} style={{ padding: "0 10px 7px 10px", fontSize: 10.5, color: C.dim }}>
                         ↳ Si cerrás hoy al precio actual: neto ≈ <b style={{ color: futClose.neto >= 0 ? C.green : C.red, fontVariantNumeric: "tabular-nums" }}>{fmtM(futClose.neto)}</b>
                         {" "}(MTM {fmtM(r.unrealized)} − derechos de salida est. ${Math.round(futClose.fee).toLocaleString("es-AR")} · A3 USD 0,20/contrato + IVA; si cerrás el mismo día que abriste, la bonificación intradía del 50% lo achica)
                       </td>
@@ -34628,16 +34719,19 @@ function PnlPorInstrumentoModule() {
                 {[totReal, totUnreal, totTotal].map((v, i) => (
                   <td key={i} style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, whiteSpace: "nowrap", color: v > 0 ? C.green : v < 0 ? C.red : C.dim }}>{fmtM(v)}</td>
                 ))}
+                <td colSpan={2}></td>
               </tr>
               {typeFilter === "all" && comisiones !== 0 && (
                 <>
                   <tr style={{ background: "rgba(255,255,255,0.02)" }}>
                     <td colSpan={8} style={{ padding: "8px 10px", fontSize: 11, color: C.muted, fontWeight: 600 }}>Comisiones (derechos de mercado + IVA + aranceles)</td>
                     <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, whiteSpace: "nowrap", color: comisiones < 0 ? C.red : C.dim }}>{fmtM(comisiones)}</td>
+                    <td colSpan={2}></td>
                   </tr>
                   <tr style={{ borderTop: `1px solid ${C.border}`, background: "rgba(255,255,255,0.02)" }}>
                     <td colSpan={8} style={{ padding: "8px 10px", fontSize: 11, color: C.text, fontWeight: 700 }}>Total neto (con comisiones)</td>
                     <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, whiteSpace: "nowrap", color: totNeto > 0 ? C.green : totNeto < 0 ? C.red : C.dim }}>{fmtM(totNeto)}</td>
+                    <td colSpan={2}></td>
                   </tr>
                 </>
               )}
@@ -34649,6 +34743,7 @@ function PnlPorInstrumentoModule() {
       <div style={{ fontSize: 11, color: C.dim, lineHeight: 1.6, marginTop: 12 }}>
         <strong style={{ color: C.muted }}>Realizado</strong> = lo cerrado (cobrado). <strong style={{ color: C.muted }}>No realizado</strong> = lo abierto valuado a precio de mercado de ahora (varía minuto a minuto). <strong style={{ color: C.text }}>Total</strong> = todo lo ganado/perdido en ese instrumento desde que lo operás. Misma contabilidad que la cartera (LIFO en futuros, PPP en contado, multiplicadores aplicados). Cauciones excluidas.
         {" "}<strong style={{ color: C.muted }}>Solo aparece lo cargado en Midas</strong>: tus futuros de abril-mayo (DLR ABR26/MAY26) no están cargados — importá el CSV de Matriz de ese período (Cartera → Importar CSV; no duplica) y este reporte los suma solo.
+        {" "}<strong style={{ color: C.muted }}>TNA</strong> = total ÷ (capital invertido × días) × 365: cada peso pesa por el tiempo que estuvo puesto, así se comparan instrumentos que tuviste distinto tiempo. Solo contado (futuros y opciones no inmovilizan capital). Con menos de 30 días se muestra atenuada: anualizar tan poco tiempo exagera.
         {" "}<strong style={{ color: C.muted }}>Comisiones</strong> (solo en la vista Todos): suma de los costos cargados como movimiento de caja (derechos de mercado, IVA y aranceles); el <strong style={{ color: C.text }}>Total neto</strong> = Total bruto − comisiones. Los costos absorbidos en ajustes de conciliación previos no se listan acá por separado.
       </div>
     </div>
