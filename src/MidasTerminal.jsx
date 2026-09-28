@@ -16345,8 +16345,32 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
   const iOrder = ix("order_id"), iAcct = ix("account"), iSec = ix("security_id"),
     iSym = ix("symbol"), iTime = ix("transact_time"), iSide = ix("side"),
     iAvg = ix("avg_price"), iCum = ix("cum_qty"), iEvent = ix("event_subtype"),
-    iExec = ix("exec_type"), iLastQty = ix("last_qty");
+    iExec = ix("exec_type"), iLastQty = ix("last_qty"), iCl = ix("last_cl_ord_id");
   if (iOrder < 0 || iSym < 0 || iCum < 0) return []; // formato no reconocido
+
+  /* ECOS "I" (28/09/2026). Desde ese día el export de Matriz repite cada
+   * ejecución hasta tres veces: la fila de la operación (exec_type F) y dos
+   * "Order Updated" (exec_type I), cada una con un order_id DISTINTO pero la
+   * misma orden de cliente (last_cl_ord_id). Con el agrupado por order_id,
+   * cada compra entraba tres veces: NU 200 a $10.120 se cargó como 600, el
+   * archivo del día dio NU +8.200 en vez de +3.400 y la caja de T+1 el
+   * triple. Regla: si la orden de cliente tiene filas F, sus I son ecos y se
+   * ignoran; si solo vino como I (pasó con una venta de OKLO), se toma UNO de
+   * sus order_ids. Los archivos viejos (solo F) no cambian, y la lógica de
+   * reemplazos de abajo sigue igual porque cada orden de cliente tiene como
+   * mucho un order_id con filas F. */
+  const clConF = new Set();
+  const clElegido = new Map();   // orden de cliente sin F → el order_id que se toma
+  if (iCl >= 0 && iExec >= 0) {
+    for (let li = 1; li < lines.length; li++) {
+      const c = lines[li].split(",");
+      const cl = (c[iCl] || "").trim();
+      if (!cl) continue;
+      if ((c[iExec] || "").trim() === "F") clConF.add(cl);
+      else if (!clElegido.has(cl)) clElegido.set(cl, (c[iOrder] || "").trim());
+    }
+  }
+  const clDe = new Map();        // order_id → orden de cliente (para el dedup)
   // Agrupar por order_id, quedarse con la fila de mayor cum_qty (estado final).
   // Cada orden puede venir en varios fills parciales (una fila por fill, con el
   // cum_qty acumulándose) y a veces una fila final event_subtype="cancel" que
@@ -16366,6 +16390,12 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
     const c = lines[li].split(",");
     const oid = (c[iOrder] || "").trim();
     if (!oid) continue;
+    const cl = iCl >= 0 ? (c[iCl] || "").trim() : "";
+    if (cl && iExec >= 0 && (c[iExec] || "").trim() === "I") {
+      if (clConF.has(cl)) continue;               // eco de una ejecución ya reportada como F
+      if (clElegido.get(cl) !== oid) continue;    // el mismo eco repetido con otro order_id
+    }
+    if (cl) clDe.set(oid, cl);
     const evt = iEvent >= 0 ? (c[iEvent] || "").trim().toLowerCase() : "";
     if (evt === "cancel" || evt === "replace") continue; // ecos sin cantidad nueva
     const cum = Number(c[iCum]) || 0;
@@ -16529,14 +16559,14 @@ function parseMatrizFuturesCsv(text, existingOrderIds, cedearSet, stockSet) {
     if (!isFuture && !isBond) { status = "ignored"; reason = `no soportado (${sym || sec})`; }
     else if (cum <= 0) { status = "ignored"; reason = "sin ejecución"; }
     else if (!side || price <= 0) { status = "ignored"; reason = "datos incompletos"; }
-    else if (existingOrderIds && existingOrderIds.has(oid)) { status = "dup"; }
+    else if (existingOrderIds && (existingOrderIds.has(oid) || (clDe.get(oid) && existingOrderIds.has(clDe.get(oid))))) { status = "dup"; }
     else { status = "new"; }
 
     // Caución: capital firmado (tomadora negativo) y siempre operation_type
     // "buy" — el signo del pasivo vive en quantity.
     const esTomadora = esCaucion && side === "buy";
     out.push({
-      orderId: oid, account, ticker,
+      orderId: oid, clOrdId: clDe.get(oid) || null, account, ticker,
       side: esCaucion ? "buy" : side,
       qty: esCaucion ? (esTomadora ? -cum : cum) : cum,
       price, date, status, reason,
@@ -16585,6 +16615,8 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
     for (const p of existingPositions || []) {
       const oid = p?.extra?.matriz_order_id;
       if (oid) s.add(oid);
+      const cl = p?.extra?.matriz_cl_ord_id;
+      if (cl) s.add(cl);
     }
     return s;
   }, [existingPositions, cashRefs]);
@@ -16651,6 +16683,7 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
             notes: null,
             extra: {
               matriz_order_id: r.orderId, matriz_account: r.account, source: "csv_matriz",
+              ...(r.clOrdId ? { matriz_cl_ord_id: r.clOrdId } : {}),
               // getFutureMultiplier lee extra.contract_size; sin esto el ORO
               // caeria al default de 1.000 del DLR.
               ...(r.contractSize ? { contract_size: r.contractSize } : {}),
