@@ -19179,6 +19179,11 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
     const fPctR = (n) => (n == null || !Number.isFinite(Number(n)) ? "—" : `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}%`);
     const colR = (n) => (n == null || !Number.isFinite(Number(n)) ? C.dim : n >= 0 ? C.green : C.red);
     const COLS = 13;
+    // Banda de "Hoy · % Hoy": el mismo marco cian de la columna "MEP actual"
+    // del carry (pedido de LP 28/09/2026). Borde izquierdo en Hoy y derecho
+    // en % Hoy, en TODAS las filas, para que se lea como una sola franja.
+    const BANDA_I = { borderLeft: `3px solid ${C.cat.cyan}` };
+    const BANDA_D = { borderRight: `3px solid ${C.cat.cyan}` };
     return (
       <div style={{ backgroundColor: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
@@ -19192,10 +19197,10 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
                 <PTh dense align="right" style={HS} {...sortProps("precio")}>P. actual</PTh>
                 <PTh dense align="right" style={HS} {...sortProps("vini")}>V. inicial</PTh>
                 <PTh dense align="right" style={HS} {...sortProps("vact")}>V. actual</PTh>
+                <PTh dense align="right" style={{ ...HS, ...BANDA_I, color: C.cat.cyan, fontWeight: 700 }} {...sortProps("hoy")}>Hoy</PTh>
+                <PTh dense align="right" style={{ ...HS, ...BANDA_D, color: C.cat.cyan, fontWeight: 700 }}>% Hoy</PTh>
                 <PTh dense align="right" style={HS} {...sortProps("pnl")}>Rdo.</PTh>
                 <PTh dense align="right" style={HS} {...sortProps("pnlpct")}>% R.</PTh>
-                <PTh dense align="right" style={HS} {...sortProps("hoy")}>Hoy</PTh>
-                <PTh dense align="right" style={HS}>% Hoy</PTh>
                 <PTh dense align="right" style={HS} {...sortProps("dpt")}>DPT</PTh>
                 <PTh dense align="right" style={HS} {...sortProps("cart")}>% Cart.</PTh>
               </tr>
@@ -19206,9 +19211,12 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
                 return (
                   <Fragment key={cat.key}>
                     <tr style={{ background: C.deep }}>
-                      <td colSpan={COLS} style={{ ...RC, fontFamily: "inherit", fontWeight: 700, color: C.text }}>
+                      <td colSpan={7} style={{ ...RC, fontFamily: "inherit", fontWeight: 700, color: C.text }}>
                         {cat.label} <span style={{ color: C.dim, fontWeight: 400 }}>({cat.rows.length})</span>
                       </td>
+                      <td style={{ ...RC, ...BANDA_I }}></td>
+                      <td style={{ ...RC, ...BANDA_D }}></td>
+                      <td colSpan={COLS - 9} style={RC}></td>
                     </tr>
                     {cat.rows.map((g) => (
                       <ConsolidatedRow
@@ -19235,10 +19243,10 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
                         <td colSpan={5} style={{ ...RC, fontFamily: "inherit", fontWeight: 600, color: C.muted }}>Subtotal · {cat.label}</td>
                         <td style={{ ...RN, fontWeight: 700 }}>{t.capital ? fMon(t.ini, t.cur) : ""}</td>
                         <td style={{ ...RN, fontWeight: 700 }}>{t.capital ? fMon(t.act, t.cur) : ""}</td>
+                        <td style={{ ...RN, ...BANDA_I, fontWeight: 700, color: t.hasHoy ? colR(t.hoy) : C.dim }}>{t.hasHoy ? fMon(t.hoy, t.cur) : "—"}</td>
+                        <td style={{ ...RN, ...BANDA_D, fontWeight: 700, color: t.hasHoy ? colR(t.hoy) : C.dim }}>{t.hasHoy && t.capital && t.act - t.hoy > 0 ? fPctR((t.hoy / (t.act - t.hoy)) * 100) : ""}</td>
                         <td style={{ ...RN, fontWeight: 700, color: colR(t.rdo) }}>{fMon(t.rdo, t.cur)}</td>
                         <td style={{ ...RN, fontWeight: 700, color: colR(t.rdo) }}>{t.capital && t.ini > 0 ? fPctR((t.rdo / t.ini) * 100) : ""}</td>
-                        <td style={{ ...RN, fontWeight: 700, color: t.hasHoy ? colR(t.hoy) : C.dim }}>{t.hasHoy ? fMon(t.hoy, t.cur) : "—"}</td>
-                        <td style={RN}></td>
                         <td style={RN}></td>
                         <td style={{ ...RN, fontWeight: 600, color: C.muted }}>{t.capital && t.cur === "ARS" && capTotal > 0 ? ((t.act / capTotal) * 100).toFixed(1) + "%" : ""}</td>
                       </tr>
@@ -19254,10 +19262,11 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
                   </td>
                   <td style={{ ...RN, fontWeight: 700 }}>{fMon(grand.ini, "ARS")}</td>
                   <td style={{ ...RN, fontWeight: 700 }}>{fMon(grand.act, "ARS")}</td>
+                  <td style={{ ...RN, ...BANDA_I, fontWeight: 700, color: grand.hasHoy ? colR(grand.hoy) : C.dim }}>{grand.hasHoy ? fMon(grand.hoy, "ARS") : "—"}</td>
+                  <td style={{ ...RN, ...BANDA_D, fontWeight: 700, color: grand.hasHoy ? colR(grand.hoy) : C.dim }}>{grand.hasHoy && grand.act - grand.hoy > 0 ? fPctR((grand.hoy / (grand.act - grand.hoy)) * 100) : "—"}</td>
                   <td style={{ ...RN, fontWeight: 700, color: colR(grand.rdo) }}>{fMon(grand.rdo, "ARS")}</td>
                   <td style={{ ...RN, fontWeight: 700, color: colR(grand.rdo) }}>{grand.ini > 0 ? fPctR((grand.rdo / grand.ini) * 100) : "—"}</td>
-                  <td style={{ ...RN, fontWeight: 700, color: grand.hasHoy ? colR(grand.hoy) : C.dim }}>{grand.hasHoy ? fMon(grand.hoy, "ARS") : "—"}</td>
-                  <td colSpan={3} style={RN}></td>
+                  <td colSpan={2} style={RN}></td>
                 </tr>
               )}
             </tbody>
@@ -19580,10 +19589,11 @@ function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPric
                 : group.valueAtMarket != null ? fMon(group.valueAtMarket)
                 : <span title="Sin precio de mercado: valuado a costo">{fMon(group.valueAtCost)}<span style={{ color: C.dim, fontSize: 9, marginLeft: 3 }}>c</span></span>}
             </td>
+            {/* Hoy · % Hoy con la banda cian de "MEP actual" (pedido de LP 28/09). */}
+            <td style={{ ...RN, borderLeft: `3px solid ${C.cat.cyan}`, fontWeight: 700, color: hoyNulo ? C.dim : dailyColor }}>{hoyNulo ? "—" : fMon(dailyPnl)}</td>
+            <td style={{ ...RN, borderRight: `3px solid ${C.cat.cyan}`, fontWeight: 700, color: hoyNulo ? C.dim : dailyColor }}>{hoyNulo ? "—" : fPctR(dailyPct)}</td>
             <td style={{ ...RN, color: pnlColor }}>{group.pnl != null ? fMon(group.pnl) : "—"}</td>
             <td style={{ ...RN, color: pnlColor }}>{fPctR(group.pnlPct)}</td>
-            <td style={{ ...RN, color: hoyNulo ? C.dim : dailyColor }}>{hoyNulo ? "—" : fMon(dailyPnl)}</td>
-            <td style={{ ...RN, color: hoyNulo ? C.dim : dailyColor }}>{hoyNulo ? "—" : fPctR(dailyPct)}</td>
             <td style={{ ...RN, color: C.muted }}>{dias ?? "—"}</td>
             <td style={{ ...RN, color: C.muted }}>{pctCart != null ? pctCart.toFixed(1) + "%" : "—"}</td>
           </tr>
