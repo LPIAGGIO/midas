@@ -223,10 +223,13 @@ const NAV = [
     icon: Calculator,
     type: "group",
     children: [
-      { id: "calc-tasas", label: "Tasas (TNA/TEA/TEM)", icon: Sigma },
-      { id: "calc-precio-bonos", label: "Precio de Bonos", icon: Tag },
-      { id: "calc-mep-ccl", label: "MEP / CCL", icon: Repeat },
-      { id: "calc-comisiones", label: "Comisiones", icon: BadgePercent },
+      // 28/09/2026: LP sacó del menú Tasas (TNA/TEA/TEM), Precio de Bonos,
+      // MEP / CCL y Comisiones ("más adelante veremos"). Para volver a
+      // mostrarlas, reponer estas entradas:
+      //   { id: "calc-tasas", label: "Tasas (TNA/TEA/TEM)", icon: Sigma },
+      //   { id: "calc-precio-bonos", label: "Precio de Bonos", icon: Tag },
+      //   { id: "calc-mep-ccl", label: "MEP / CCL", icon: Repeat },
+      //   { id: "calc-comisiones", label: "Comisiones", icon: BadgePercent },
       { id: "calc-kelly", label: "Criterio de Kelly", icon: Percent },
       { id: "calc-montecarlo", label: "Monte Carlo", icon: Activity },
       { id: "calc-cedear-fv", label: "Valuación CEDEAR", icon: Scale },
