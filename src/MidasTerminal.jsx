@@ -19309,76 +19309,94 @@ function ConsolidatedTable({ consolidated, bondPrices, futurePrices, stockPrices
     );
   }
 
+  // ─── Cerradas hoy, layout "reporte" (29/09/2026, pedido de LP) ───
+  // El mismo diseño que las abiertas: una línea por fila, % en su columna,
+  // categoría con conteo, subtotal y TOTAL. La ganancia del día va en la
+  // franja cian (es el "Hoy" de lo que se cerró). Cantidad = lo cerrado HOY
+  // (el neto ya es 0). Se sacó la columna Total: en una cerrada repetía el P&L.
+  const RC = { padding: "5px 8px", fontSize: 11.5, color: C.text, borderBottom: `1px solid ${C.border}`, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+  const RN = { ...RC, textAlign: "right" };
+  const HS = { padding: "6px 8px", fontSize: 10, letterSpacing: "0.03em", borderBottom: `1px solid ${C.border}` };
+  const fMon = (n, cur) => (n == null || !Number.isFinite(Number(n)) ? "—" : `${Number(n) >= 0 ? "+" : ""}${fmtNumber(Number(n), (cur || "ARS") === "ARS" ? { maxDecimals: 0 } : { maxDecimals: 2, minDecimals: 2 })}`);
+  const colR = (n) => (n == null || !Number.isFinite(Number(n)) ? C.dim : n >= 0 ? C.green : C.red);
+  const BANDA_I = { borderLeft: `3px solid ${C.cat.cyan}` };
+  const BANDA_D = { borderRight: `3px solid ${C.cat.cyan}` };
+  const COLS = 9;
+  const sumaPnl = (rows) => rows.reduce((acc, r) => acc + (r.pnl != null && Number.isFinite(Number(r.pnl)) ? Number(r.pnl) : 0), 0);
+  const totalArs = sumaPnl(consolidated.filter((g) => (g.currency || "ARS") === "ARS"));
+  const hayOtraMoneda = consolidated.some((g) => (g.currency || "ARS") !== "ARS");
   return (
-    <div
-      style={{
-        backgroundColor: C.panel,
-        border: `1px solid ${C.border}`,
-        overflow: "hidden",
-      }}
-    >
+    <div style={{ backgroundColor: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Roboto', sans-serif" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
           <thead>
-            <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-              <PTh dense style={{ width: 28 }}>{""}</PTh>
-              <PTh dense {...sortProps("ticker")}>Ticker</PTh>
-              <PTh dense align="right" {...sortProps("cantidad")}>Cantidad / VN</PTh>
-              {/* En cerradas-hoy la celda no muestra el PPP histórico sino la
-                  BASE DEL DÍA (cierre de ayer para lo arrastrado, precio de
-                  compra para lo operado hoy): es el número contra el que se
-                  mide el P&L de la fila. */}
-              <PTh dense align="right" {...sortProps("ppp")}>{isClosed ? "Base día" : "PPP"}</PTh>
-              <PTh dense align="right" {...sortProps("precio")}>{isClosed ? "Último precio" : "Precio actual"}</PTh>
-              {!isClosed && <PTh dense align="right">P&amp;L Hoy</PTh>}
-              <PTh dense align="right" {...sortProps("pnl")}>{isClosed ? "P&L" : "P&L Total"}</PTh>
-              <PTh dense align="right" {...sortProps("total")}>Total</PTh>
-              <PTh dense {...sortProps("moneda")}>Moneda</PTh>
-              <PTh dense align="right" {...sortProps("ops")}>Ops</PTh>
+            <tr>
+              <PTh dense style={{ ...HS, width: 22, paddingRight: 0 }}>{""}</PTh>
+              <PTh dense style={HS} {...sortProps("ticker")}>Ticker</PTh>
+              <PTh dense align="right" style={HS}>Cant.</PTh>
+              {/* Base del día: cierre de ayer para lo arrastrado, precio de
+                  compra para lo operado hoy. Es contra lo que se mide la fila. */}
+              <PTh dense align="right" style={HS} {...sortProps("ppp")}>Base día</PTh>
+              <PTh dense align="right" style={HS} {...sortProps("precio")}>Últ. precio</PTh>
+              <PTh dense align="right" style={{ ...HS, ...BANDA_I, color: C.cat.cyan, fontWeight: 700 }} {...sortProps("pnl")}>Ganancia día</PTh>
+              <PTh dense align="right" style={{ ...HS, ...BANDA_D, color: C.cat.cyan, fontWeight: 700 }}>%</PTh>
+              <PTh dense style={HS} {...sortProps("moneda")}>Moneda</PTh>
+              <PTh dense align="right" style={HS} {...sortProps("ops")}>Ops</PTh>
             </tr>
           </thead>
           <tbody>
-            {categorized.map((cat) => (
-              <Fragment key={cat.key}>
-                {/* Fila-cabecera de categoría (estilo Cocos): fondo apenas
-                    más claro, solo el nombre. Los subtotales por categoría
-                    se probaron y se sacaron (06/08): al lado del P&L por
-                    fila generaban confusión sobre qué número era de quién. */}
-                <tr style={{ backgroundColor: "rgba(255,255,255,0.035)", borderBottom: `1px solid ${C.border}` }}>
-                  <td
-                    colSpan={isClosed ? 9 : 10}
-                    style={{
-                      padding: "4px 14px",
-                      fontSize: 10.5,
-                      fontWeight: 600,
-                      letterSpacing: "0.12em",
-                      textTransform: "uppercase",
-                      color: C.muted,
-                    }}
-                  >
-                    {cat.label}
-                  </td>
-                </tr>
-                {cat.rows.map((g) => (
-                  <ConsolidatedRow
-                    key={g.groupKey}
-                    group={g}
-                    bondPrices={bondPrices}
-                    futurePrices={futurePrices}
-                    stockPrices={stockPrices}
-                    fciPrices={fciPrices}
-                    futureAdjLookup={futureAdjLookup}
-                    expanded={expanded.has(g.groupKey)}
-                    onToggle={() => toggle(g.groupKey)}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onUpdatePrice={onUpdatePrice}
-                    readOnlyPrice={isClosed}
-                    pppOverride={pppOverrides?.get(g.groupKey) ?? null}
-                  />
-                ))}
-              </Fragment>
-            ))}
+            {categorized.map((cat) => {
+              const mono = new Set(cat.rows.map((r) => r.currency || "ARS")).size === 1;
+              const cur = cat.rows[0]?.currency || "ARS";
+              const sub = sumaPnl(cat.rows);
+              return (
+                <Fragment key={cat.key}>
+                  <tr style={{ background: C.deep }}>
+                    <td colSpan={5} style={{ ...RC, fontFamily: "inherit", fontWeight: 700, color: C.text }}>
+                      {cat.label} <span style={{ color: C.dim, fontWeight: 400 }}>({cat.rows.length})</span>
+                    </td>
+                    <td style={{ ...RC, ...BANDA_I }}></td>
+                    <td style={{ ...RC, ...BANDA_D }}></td>
+                    <td colSpan={COLS - 7} style={RC}></td>
+                  </tr>
+                  {cat.rows.map((g) => (
+                    <ConsolidatedRow
+                      key={g.groupKey}
+                      group={g}
+                      bondPrices={bondPrices}
+                      futurePrices={futurePrices}
+                      stockPrices={stockPrices}
+                      fciPrices={fciPrices}
+                      futureAdjLookup={futureAdjLookup}
+                      expanded={expanded.has(g.groupKey)}
+                      onToggle={() => toggle(g.groupKey)}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      onUpdatePrice={onUpdatePrice}
+                      readOnlyPrice
+                      pppOverride={pppOverrides?.get(g.groupKey) ?? null}
+                      layout="reporte-cerrada"
+                    />
+                  ))}
+                  {mono && (
+                    <tr style={{ background: "rgba(255,255,255,0.02)" }}>
+                      <td colSpan={5} style={{ ...RC, fontFamily: "inherit", fontWeight: 600, color: C.muted }}>Subtotal · {cat.label}</td>
+                      <td style={{ ...RN, ...BANDA_I, fontWeight: 700, color: colR(sub) }}>{fMon(sub, cur)}</td>
+                      <td style={{ ...RN, ...BANDA_D }}></td>
+                      <td colSpan={COLS - 7} style={RN}></td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+            <tr style={{ background: C.deep, borderTop: `2px solid ${C.border}` }}>
+              <td colSpan={5} style={{ ...RC, fontFamily: "inherit", fontWeight: 700 }}>
+                TOTAL ganancia del día{hayOtraMoneda ? " (solo pesos)" : ""}
+              </td>
+              <td style={{ ...RN, ...BANDA_I, fontWeight: 700, color: colR(totalArs) }}>{fMon(totalArs, "ARS")}</td>
+              <td style={{ ...RN, ...BANDA_D }}></td>
+              <td colSpan={COLS - 7} style={RN}></td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -19631,6 +19649,45 @@ function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPric
             <td style={{ ...RN, color: C.muted }}>{pctCart != null ? pctCart.toFixed(1) + "%" : "—"}</td>
           </tr>
         );
+      })() : layout === "reporte-cerrada" ? (() => {
+        // Cerradas hoy con el diseño del reporte (29/09/2026).
+        const RC = { padding: "5px 8px", fontSize: 11.5, color: C.text, borderBottom: expanded ? "none" : `1px solid ${C.border}`, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", verticalAlign: "middle" };
+        const RN = { ...RC, textAlign: "right" };
+        const cur = group.currency || "ARS";
+        const esRf = group.instrument_type === "bond_ars" || group.instrument_type === "bond_usd" || group.instrument_type === "on";
+        const cant = Number(group.closedQty) > 0 ? Number(group.closedQty) : null;
+        const base = pppOverride ?? group.ppp;
+        return (
+          <tr
+            style={{ backgroundColor: expanded ? "rgba(91,141,214,0.04)" : "transparent", cursor: "pointer", transition: "background-color 100ms ease" }}
+            onClick={onToggle}
+            onMouseEnter={(e) => { if (!expanded) e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.015)"; }}
+            onMouseLeave={(e) => { if (!expanded) e.currentTarget.style.backgroundColor = "transparent"; }}
+          >
+            <td style={{ ...RC, width: 22, paddingRight: 0, color: C.dim }}>
+              <span style={{ display: "inline-flex" }}>
+                {expanded ? <ChevronDown size={12} strokeWidth={1.8} /> : <ChevronRight size={12} strokeWidth={1.8} />}
+              </span>
+            </td>
+            <td style={RC}>
+              <div className="flex items-center" style={{ gap: 6 }}>
+                <span style={{ fontWeight: 600, color: "#f59e0b" }}>{fciDisplayName(group.ticker)}</span>
+                {rowBroker && <BrokerBadge broker={rowBroker} />}
+              </div>
+            </td>
+            <td style={RN} title="Cantidad cerrada hoy">{cant != null ? fmtNumber(cant, group.instrument_type === "crypto" ? { maxDecimals: 8 } : { maxDecimals: 0 }) : "—"}</td>
+            <td style={RN}>{base != null ? fmtNumber(base, { maxDecimals: 4, smartDecimals: true }) : "—"}</td>
+            <td style={RN}>{group.currentPrice != null ? fmtNumber(group.currentPrice, { maxDecimals: 4, minDecimals: esRf ? 3 : 0, smartDecimals: true }) : "—"}</td>
+            <td style={{ ...RN, borderLeft: `3px solid ${C.cat.cyan}`, fontWeight: 700, color: pnlColor }}>
+              {group.pnl != null ? `${pnlSign}${fmtNumber(group.pnl, cur === "ARS" ? { maxDecimals: 0 } : { maxDecimals: 2, minDecimals: 2 })}` : "—"}
+            </td>
+            <td style={{ ...RN, borderRight: `3px solid ${C.cat.cyan}`, fontWeight: 700, color: pnlColor }}>
+              {group.pnlPct != null ? `${group.pnlPct >= 0 ? "+" : "−"}${Math.abs(group.pnlPct).toFixed(2)}%` : "—"}
+            </td>
+            <td style={{ ...RC, color: C.muted, fontFamily: "inherit" }}>{cur}</td>
+            <td style={{ ...RN, color: C.muted }}>{group.operations.length}</td>
+          </tr>
+        );
       })() : (
       <tr
         style={{
@@ -19861,7 +19918,7 @@ function ConsolidatedRow({ group, bondPrices, futurePrices, stockPrices, fciPric
       {/* Fila expandida: muestra cada operación individual del grupo */}
       {expanded && (
         <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-          <td colSpan={layout === "reporte" ? 13 : (readOnlyPrice ? 9 : 10)} style={{ padding: 0, backgroundColor: C.deep }}>
+          <td colSpan={layout === "reporte" ? 13 : layout === "reporte-cerrada" ? 9 : (readOnlyPrice ? 9 : 10)} style={{ padding: 0, backgroundColor: C.deep }}>
             {/* Padding compacto: lo justo para no pegarse a los bordes pero
                 sin desperdiciar espacio vertical. Padding-left grande para
                 que la columna OP del sub-table arranque alineada con TICKER
