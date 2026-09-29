@@ -11,7 +11,7 @@
 //   anual, exDiv/payDate=unix(s). Cache 6h (los fundamentals cambian por trimestre).
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
-const MODULES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile,calendarEvents";
+const MODULES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile,calendarEvents,earningsTrend";
 
 async function getAuth() {
   const r = await fetch("https://fc.yahoo.com", { headers: { "User-Agent": UA } });
@@ -29,9 +29,94 @@ async function getAuth() {
 
 const raw = (x) => (x && typeof x === "object" && "raw" in x ? x.raw : (typeof x === "number" ? x : null));
 
+/* Crecimiento de varios años y dilución (filtro estilo Peter Lynch, 29/09/2026).
+ * El quoteSummary solo trae el crecimiento del último trimestre contra el
+ * mismo del año anterior; para "EPS creciendo 15% anual varios años" y "cuánto
+ * se diluye el accionista" hace falta la serie anual, que Yahoo expone en el
+ * endpoint fundamentals-timeseries (mismo cookie+crumb).
+ *   epsCagr / revCagr: crecimiento anual compuesto del EPS diluido y de las
+ *     ventas entre el primer año con base positiva y el último (Yahoo da hasta
+ *     4 años, así que es un CAGR de 2-3 años, no los 5 de Finviz).
+ *   shrYoY: acciones diluidas promedio del último trimestre contra el de un
+ *     año antes. Positivo = el accionista se diluye (emisión, SBC); negativo =
+ *     recompras.
+ *   sbcPct: compensación en acciones de los últimos 12 meses sobre ventas.
+ *   grwFwd: crecimiento esperado del EPS del próximo año fiscal (consenso). */
+const SERIE_TYPES = "annualDilutedEPS,annualTotalRevenue,annualDilutedAverageShares,quarterlyDilutedAverageShares,trailingStockBasedCompensation";
+
+async function fetchSerie(t, auth) {
+  const p2 = Math.floor(Date.now() / 1000), p1 = p2 - 6 * 365 * 86400;
+  const u = `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(t)}?symbol=${encodeURIComponent(t)}&type=${SERIE_TYPES}&period1=${p1}&period2=${p2}&crumb=${encodeURIComponent(auth.crumb)}`;
+  const r = await fetch(u, { headers: { "User-Agent": UA, "Cookie": auth.cookie } });
+  const j = await r.json();
+  const by = {};
+  for (const s of j?.timeseries?.result || []) {
+    const k = s?.meta?.type?.[0];
+    if (!k) continue;
+    by[k] = (s[k] || [])
+      .filter((x) => x && x.asOfDate && x.reportedValue && Number.isFinite(x.reportedValue.raw))
+      .map((x) => ({ d: x.asOfDate, v: x.reportedValue.raw }))
+      .sort((a, b) => (a.d < b.d ? -1 : 1));
+  }
+  return by;
+}
+
+const diasEntre = (a, b) => (new Date(b) - new Date(a)) / 86400000;
+
+// CAGR desde el primer año con base positiva (el EPS negativo no tiene tasa de
+// crecimiento) hasta el último, con al menos 2 años de distancia.
+function cagr(arr) {
+  if (!arr || arr.length < 3) return { v: null, anios: null };
+  const last = arr[arr.length - 1];
+  if (!(last.v > 0)) return { v: null, anios: null };
+  for (const p of arr) {
+    const anios = Math.round(diasEntre(p.d, last.d) / 365.25);
+    if (anios < 2) break;
+    if (p.v > 0) return { v: Math.pow(last.v / p.v, 1 / anios) - 1, anios };
+  }
+  return { v: null, anios: null };
+}
+
+// Dilución interanual: último trimestre contra el más cercano a un año antes;
+// si faltan trimestres, los dos últimos años.
+function dilucion(by) {
+  const q = by.quarterlyDilutedAverageShares || [];
+  if (q.length >= 2) {
+    const last = q[q.length - 1];
+    let prev = null, mejor = Infinity;
+    for (const p of q) {
+      const dd = Math.abs(diasEntre(p.d, last.d) - 365);
+      if (dd < 75 && dd < mejor) { prev = p; mejor = dd; }
+    }
+    if (prev && prev.v > 0) return last.v / prev.v - 1;
+  }
+  const a = by.annualDilutedAverageShares || [];
+  if (a.length >= 2 && a[a.length - 2].v > 0) return a[a.length - 1].v / a[a.length - 2].v - 1;
+  return null;
+}
+
+function lynchDe(by, fd, et) {
+  const eps = cagr(by.annualDilutedEPS), rev = cagr(by.annualTotalRevenue);
+  const sbc = (by.trailingStockBasedCompensation || []).slice(-1)[0]?.v;
+  const ventas = raw(fd?.totalRevenue);
+  const fwd = (et?.trend || []).find((x) => x?.period === "+1y");
+  return {
+    epsCagr: eps.v, epsAnios: eps.anios,
+    revCagr: rev.v, revAnios: rev.anios,
+    shrYoY: dilucion(by),
+    sbcPct: sbc != null && ventas > 0 ? sbc / ventas : null,
+    grwFwd: raw(fwd?.growth),
+  };
+}
+
 async function fetchOne(t, auth) {
   const u = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(t)}?modules=${MODULES}&crumb=${encodeURIComponent(auth.crumb)}`;
-  const r = await fetch(u, { headers: { "User-Agent": UA, "Cookie": auth.cookie } });
+  // La serie anual va en paralelo; si falla, la fila sale igual sin las
+  // columnas de varios años.
+  const [r, by] = await Promise.all([
+    fetch(u, { headers: { "User-Agent": UA, "Cookie": auth.cookie } }),
+    fetchSerie(t, auth).catch(() => ({})),
+  ]);
   const j = await r.json();
   const res = j?.quoteSummary?.result?.[0];
   if (!res) return null;
@@ -53,6 +138,7 @@ async function fetchOne(t, auth) {
     divYield: raw(sd.dividendYield) ?? raw(sd.trailingAnnualDividendYield),
     exDiv: raw(ce.exDividendDate) ?? raw(sd.exDividendDate),
     payDate: raw(ce.dividendDate),
+    ...lynchDe(by, fd, res.earningsTrend),
   };
 }
 
