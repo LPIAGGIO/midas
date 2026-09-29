@@ -1542,19 +1542,30 @@ async function yahooSpot(sym) {
  *
  * Sigue siendo conservador a propósito: se ejecuta al precio límite, nunca
  * mejor, aunque el mínimo haya estado más abajo. */
+/* BUG CORREGIDO 29/09/2026: tomaba el minimo de TODA la rueda, incluido lo
+ * que opero ANTES de que existiera la orden. Una orden creada a las 14:00 con
+ * el papel arriba se "llenaba" en el acto porque a las 11:00 habia tocado el
+ * nivel. Ahora solo cuentan las velas de 5 min que arrancan DESPUES de crear
+ * la orden (la vela en curso al crearla se descarta: su minimo puede ser de
+ * antes). Datos del paper/sombra anteriores al 30/09/2026 quedan contaminados
+ * (research/shadow-fills/INFORME.md). */
 const minCache = new Map();
-async function minRueda(sym) {
+async function minRueda(sym, desdeMs = 0) {
   const hit = minCache.get(sym);
-  if (hit && Date.now() - hit.t < 120000) return hit.v;
-  try {
-    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=5m&range=1d`, { headers: UA });
-    const j = await r.json();
-    const res = j?.chart?.result?.[0];
-    const lows = (res?.indicators?.quote?.[0]?.low || []).filter((x) => Number.isFinite(x));
-    const v = lows.length ? Math.min(...lows) : null;
-    minCache.set(sym, { v, t: Date.now() });
-    return v;
-  } catch { return null; }
+  let velas = hit && Date.now() - hit.t < 120000 ? hit.velas : null;
+  if (!velas) {
+    try {
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=5m&range=1d`, { headers: UA });
+      const j = await r.json();
+      const res = j?.chart?.result?.[0];
+      const ts = res?.timestamp || [];
+      const lows = res?.indicators?.quote?.[0]?.low || [];
+      velas = ts.map((t, i) => ({ t: t * 1000, low: lows[i] })).filter((v) => Number.isFinite(v.low));
+      minCache.set(sym, { velas, t: Date.now() });
+    } catch { return null; }
+  }
+  const validas = velas.filter((v) => v.t >= desdeMs);
+  return validas.length ? Math.min(...validas.map((v) => v.low)) : null;
 }
 
 async function botFeeds() {
@@ -2283,8 +2294,18 @@ async function paperPass() {
       // Una orden límite descansa en el book: alcanza con que el papel haya
       // TOCADO el nivel en algún momento de la rueda, no que esté ahí ahora.
       const lim = Number(t.entry_limit);
-      const bajo = p <= lim ? p : await minRueda(symU);
+      const bajo = p <= lim ? p : await minRueda(symU, Date.parse(t.created_at) || 0);
       if (!(bajo <= lim) && !fillPorIol.has(t.id)) { fillCand.delete(t.id); continue; }
+      /* Paper y sombra: ademas del cruce en dolares, el CEDEAR tiene que estar
+       * OFRECIDO en pesos al limite o menos en ese momento (29/09/2026). El
+       * cruce del subyacente no garantiza que el CEDEAR opere ahi (SPCX 14/09).
+       * Es mas estricto que la realidad (se pierde las mechas del libro local
+       * entre lecturas), a proposito: mejor subestimar que inventar fills. El
+       * libro real no pasa por aca: su fill lo confirma IOL. */
+      if (t.modo !== "real") {
+        const askArs = f.arsAsk[tkU];
+        if (!(askArs > 0 && askArs <= lim * rArs)) { fillCand.delete(t.id); continue; }
+      }
       /* CONFIRMACIÓN ANTI-FANTASMA (01/09/2026): un tick basura del feed llenó
        * AMZN a US$226,88 cuando el mínimo real del día fue 251,93 — posición
        * fantasma, aviso de espejo incluido. Un glitch no sobrevive dos lecturas
@@ -2502,6 +2523,10 @@ async function paperPass() {
               modo: t.modo, perfil: t.perfil, ratio: t.ratio,
               px_ars_entrada: pxArsEntTp, px_ars_salida: pxArsTp,
               fees_ars: Math.round(feesTp), pnl_ars: Math.round(pnlTp),
+              // La misma venta con tarifa Cocos (faltaba en las hijas: un tablero
+              // que sumara pnl_ars_alt subestimaba el sombra en ~1,8M).
+              fees_ars_alt: Math.round((pxArsEntTp + pxArsTp) * qtyTp * FEE_COCOS),
+              pnl_ars_alt: Math.round((pxArsTp - pxArsEntTp) * qtyTp - (pxArsEntTp + pxArsTp) * qtyTp * FEE_COCOS),
               intradia: intradiaTp, veredicto: pnlTp > 0 ? "acierto" : "error",
               regla_salida: "tp50_hijo",
               pnl_pct: Math.round((pnlTp / (pxArsEntTp * qtyTp)) * 10000) / 100,

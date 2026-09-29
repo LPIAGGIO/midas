@@ -1,0 +1,1652 @@
+{
+ "conteos": {
+  "estricto": {
+   "existe": 135,
+   "no_lleno": 93,
+   "indeterminada": 19,
+   "sin_datos": 40,
+   "abiertas_marcadas": 0
+  },
+  "laxo": {
+   "existe": 142,
+   "no_lleno": 86,
+   "indeterminada": 19,
+   "sin_datos": 40,
+   "abiertas_marcadas": 0
+  },
+  "posiciones": 287,
+  "patas": 398,
+  "cubiertas": 247,
+  "sinDatosTickers": [
+   "ARM",
+   "LAR",
+   "GGAL",
+   "XOM",
+   "ADI",
+   "QCOM",
+   "JNJ",
+   "ADBE",
+   "COIN",
+   "RGTI",
+   "HPQ",
+   "GPRK",
+   "AMD"
+  ],
+  "coberturaBaja": 54,
+  "estrictoSiLimiteFueraPxOrden": 136,
+  "cotaDiaria": {
+   "indeterminada:posible": {
+    "n": 17,
+    "pnlSim": 656141
+   },
+   "sin_datos:posible": {
+    "n": 36,
+    "pnlSim": 635028
+   },
+   "indeterminada:imposible": {
+    "n": 2,
+    "pnlSim": 354214
+   },
+   "sin_datos:imposible": {
+    "n": 4,
+    "pnlSim": 115204
+   }
+  }
+ },
+ "stats": {
+  "sim_todas": {
+   "todas": {
+    "n": 287,
+    "mediaPct": 1.0766017699151191,
+    "medianaPct": 1.495412057284967,
+    "desvioPct": 3.6877159727805973,
+    "tOp": 4.945823040574287,
+    "semanas": 5,
+    "tSemana": 2.129385797180516,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 15,
+      "mediaPct": 1.286
+     },
+     {
+      "semana": 37,
+      "n": 48,
+      "mediaPct": -0.034
+     },
+     {
+      "semana": 38,
+      "n": 153,
+      "mediaPct": 1.512
+     },
+     {
+      "semana": 39,
+      "n": 64,
+      "mediaPct": 0.951
+     },
+     {
+      "semana": 40,
+      "n": 7,
+      "mediaPct": -0.122
+     }
+    ],
+    "winRatePct": 67.59581881533101,
+    "pnlTotal": 5401104,
+    "notionalTotal": 498084904
+   },
+   "intradia": {
+    "n": 99,
+    "mediaPct": 1.964490068879928,
+    "medianaPct": 1.690067782542537,
+    "desvioPct": 2.2703875140316585,
+    "tOp": 8.60929214407665,
+    "semanas": 5,
+    "tSemana": 3.054794984243995,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 6,
+      "mediaPct": 1.496
+     },
+     {
+      "semana": 37,
+      "n": 11,
+      "mediaPct": 1.619
+     },
+     {
+      "semana": 38,
+      "n": 58,
+      "mediaPct": 1.873
+     },
+     {
+      "semana": 39,
+      "n": 20,
+      "mediaPct": 2.99
+     },
+     {
+      "semana": 40,
+      "n": 4,
+      "mediaPct": -0.187
+     }
+    ],
+    "winRatePct": 89.8989898989899,
+    "pnlTotal": 3114724,
+    "notionalTotal": 179392467
+   },
+   "overnight": {
+    "n": 188,
+    "mediaPct": 0.6090435699283304,
+    "medianaPct": 1.1750049030853373,
+    "desvioPct": 4.178557173923942,
+    "tOp": 1.9984852082820077,
+    "semanas": 5,
+    "tSemana": 1.0686864851346625,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 9,
+      "mediaPct": 1.146
+     },
+     {
+      "semana": 37,
+      "n": 37,
+      "mediaPct": -0.526
+     },
+     {
+      "semana": 38,
+      "n": 95,
+      "mediaPct": 1.291
+     },
+     {
+      "semana": 39,
+      "n": 44,
+      "mediaPct": 0.025
+     },
+     {
+      "semana": 40,
+      "n": 3,
+      "mediaPct": -0.034
+     }
+    ],
+    "winRatePct": 55.851063829787236,
+    "pnlTotal": 2286380,
+    "notionalTotal": 318692437
+   },
+   "padre=target": {
+    "n": 193,
+    "mediaPct": 3.0868256999289656,
+    "medianaPct": 2.575244801889526,
+    "desvioPct": 2.241117396542536,
+    "tOp": 19.13489815732793,
+    "semanas": 5,
+    "tSemana": 17.533241946575135,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 12,
+      "mediaPct": 2.502
+     },
+     {
+      "semana": 37,
+      "n": 30,
+      "mediaPct": 2.56
+     },
+     {
+      "semana": 38,
+      "n": 107,
+      "mediaPct": 3.222
+     },
+     {
+      "semana": 39,
+      "n": 41,
+      "mediaPct": 3.307
+     },
+     {
+      "semana": 40,
+      "n": 3,
+      "mediaPct": 2.87
+     }
+    ],
+    "winRatePct": 99.48186528497409,
+    "pnlTotal": 9580968,
+    "notionalTotal": 329335277
+   },
+   "padre=stop": {
+    "n": 86,
+    "mediaPct": -3.349203370830595,
+    "medianaPct": -2.9643302795572013,
+    "desvioPct": 2.113760254302854,
+    "tOp": -14.6938302305977,
+    "semanas": 5,
+    "tSemana": -9.608678811685959,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 3,
+      "mediaPct": -3.577
+     },
+     {
+      "semana": 37,
+      "n": 17,
+      "mediaPct": -4.462
+     },
+     {
+      "semana": 38,
+      "n": 40,
+      "mediaPct": -2.944
+     },
+     {
+      "semana": 39,
+      "n": 22,
+      "mediaPct": -3.373
+     },
+     {
+      "semana": 40,
+      "n": 4,
+      "mediaPct": -2.365
+     }
+    ],
+    "winRatePct": 1.1627906976744187,
+    "pnlTotal": -4193539,
+    "notionalTotal": 151049126
+   },
+   "padre=trailing": {
+    "n": 8,
+    "mediaPct": 0.15735472134741374,
+    "medianaPct": -0.5605577064398438,
+    "desvioPct": 3.2523922917103647,
+    "tOp": 0.1368427674608257,
+    "semanas": 3,
+    "tSemana": -0.81585688999257,
+    "porSemana": [
+     {
+      "semana": 37,
+      "n": 1,
+      "mediaPct": -2.582
+     },
+     {
+      "semana": 38,
+      "n": 6,
+      "mediaPct": 0.724
+     },
+     {
+      "semana": 39,
+      "n": 1,
+      "mediaPct": -0.504
+     }
+    ],
+    "winRatePct": 12.5,
+    "pnlTotal": 13675,
+    "notionalTotal": 17700501
+   },
+   "con_tp_parcial": {
+    "n": 111,
+    "mediaPct": 2.64410338884206,
+    "medianaPct": 2.159044767901999,
+    "desvioPct": 2.807384658644633,
+    "tOp": 9.922885952163622,
+    "semanas": 4,
+    "tSemana": 12.722443398501358,
+    "porSemana": [
+     {
+      "semana": 37,
+      "n": 1,
+      "mediaPct": 2.019
+     },
+     {
+      "semana": 38,
+      "n": 57,
+      "mediaPct": 2.831
+     },
+     {
+      "semana": 39,
+      "n": 50,
+      "mediaPct": 2.43
+     },
+     {
+      "semana": 40,
+      "n": 3,
+      "mediaPct": 2.87
+     }
+    ],
+    "winRatePct": 83.78378378378379,
+    "pnlTotal": 4493991,
+    "notionalTotal": 182403276
+   },
+   "sin_tp_parcial": {
+    "n": 176,
+    "mediaPct": 0.08800699888733214,
+    "medianaPct": 0.8345930358706819,
+    "desvioPct": 3.8379222299799363,
+    "tOp": 0.30421272422295204,
+    "semanas": 5,
+    "tSemana": -0.9072800279048289,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 15,
+      "mediaPct": 1.286
+     },
+     {
+      "semana": 37,
+      "n": 47,
+      "mediaPct": -0.078
+     },
+     {
+      "semana": 38,
+      "n": 96,
+      "mediaPct": 0.729
+     },
+     {
+      "semana": 39,
+      "n": 14,
+      "mediaPct": -4.33
+     },
+     {
+      "semana": 40,
+      "n": 4,
+      "mediaPct": -2.365
+     }
+    ],
+    "winRatePct": 57.38636363636363,
+    "pnlTotal": 907113,
+    "notionalTotal": 315681628
+   }
+  },
+  "sim_cubiertas": {
+   "todas": {
+    "n": 247,
+    "mediaPct": 1.1107023832157452,
+    "medianaPct": 1.5188153021572741,
+    "desvioPct": 3.8531619314059586,
+    "tOp": 4.530320416319692,
+    "semanas": 5,
+    "tSemana": 1.9195178894366307,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 11,
+      "mediaPct": 1.525
+     },
+     {
+      "semana": 37,
+      "n": 41,
+      "mediaPct": -0.051
+     },
+     {
+      "semana": 38,
+      "n": 131,
+      "mediaPct": 1.585
+     },
+     {
+      "semana": 39,
+      "n": 58,
+      "mediaPct": 0.925
+     },
+     {
+      "semana": 40,
+      "n": 6,
+      "mediaPct": -0.266
+     }
+    ],
+    "winRatePct": 65.9919028340081,
+    "pnlTotal": 4650872,
+    "notionalTotal": 423207375
+   },
+   "intradia": {
+    "n": 83,
+    "mediaPct": 2.0426983310510556,
+    "medianaPct": 1.763345431326667,
+    "desvioPct": 2.4561046296663487,
+    "tOp": 7.576984808581882,
+    "semanas": 5,
+    "tSemana": 2.6224874448215196,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 4,
+      "mediaPct": 1.844
+     },
+     {
+      "semana": 37,
+      "n": 11,
+      "mediaPct": 1.619
+     },
+     {
+      "semana": 38,
+      "n": 50,
+      "mediaPct": 1.873
+     },
+     {
+      "semana": 39,
+      "n": 15,
+      "mediaPct": 3.479
+     },
+     {
+      "semana": 40,
+      "n": 3,
+      "mediaPct": -0.498
+     }
+    ],
+    "winRatePct": 87.95180722891567,
+    "pnlTotal": 2612930,
+    "notionalTotal": 149705976
+   },
+   "overnight": {
+    "n": 164,
+    "mediaPct": 0.6390215071771426,
+    "medianaPct": 1.195849650811697,
+    "desvioPct": 4.325047282686214,
+    "tOp": 1.8921106907786331,
+    "semanas": 5,
+    "tSemana": 1.0192250059214087,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 7,
+      "mediaPct": 1.342
+     },
+     {
+      "semana": 37,
+      "n": 30,
+      "mediaPct": -0.663
+     },
+     {
+      "semana": 38,
+      "n": 81,
+      "mediaPct": 1.406
+     },
+     {
+      "semana": 39,
+      "n": 43,
+      "mediaPct": 0.034
+     },
+     {
+      "semana": 40,
+      "n": 3,
+      "mediaPct": -0.034
+     }
+    ],
+    "winRatePct": 54.8780487804878,
+    "pnlTotal": 2037942,
+    "notionalTotal": 273501399
+   },
+   "padre=target": {
+    "n": 162,
+    "mediaPct": 3.3035792561775033,
+    "medianaPct": 2.885306781615031,
+    "desvioPct": 2.3246579711248874,
+    "tOp": 18.08769282123649,
+    "semanas": 5,
+    "tSemana": 12.79911359220901,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 9,
+      "mediaPct": 2.759
+     },
+     {
+      "semana": 37,
+      "n": 26,
+      "mediaPct": 2.577
+     },
+     {
+      "semana": 38,
+      "n": 89,
+      "mediaPct": 3.455
+     },
+     {
+      "semana": 39,
+      "n": 36,
+      "mediaPct": 3.555
+     },
+     {
+      "semana": 40,
+      "n": 2,
+      "mediaPct": 3.932
+     }
+    ],
+    "winRatePct": 99.38271604938272,
+    "pnlTotal": 8432817,
+    "notionalTotal": 269873460
+   },
+   "padre=stop": {
+    "n": 77,
+    "mediaPct": -3.403833618405796,
+    "medianaPct": -3.013241870614113,
+    "desvioPct": 2.15397206202778,
+    "tOp": -13.866715965665904,
+    "semanas": 5,
+    "tSemana": -8.39726246946488,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 2,
+      "mediaPct": -4.032
+     },
+     {
+      "semana": 37,
+      "n": 14,
+      "mediaPct": -4.75
+     },
+     {
+      "semana": 38,
+      "n": 36,
+      "mediaPct": -2.896
+     },
+     {
+      "semana": 39,
+      "n": 21,
+      "mediaPct": -3.515
+     },
+     {
+      "semana": 40,
+      "n": 4,
+      "mediaPct": -2.365
+     }
+    ],
+    "winRatePct": 1.2987012987012987,
+    "pnlTotal": -3795620,
+    "notionalTotal": 135633414
+   },
+   "padre=trailing": {
+    "n": 8,
+    "mediaPct": 0.15735472134741374,
+    "medianaPct": -0.5605577064398438,
+    "desvioPct": 3.2523922917103647,
+    "tOp": 0.1368427674608257,
+    "semanas": 3,
+    "tSemana": -0.81585688999257,
+    "porSemana": [
+     {
+      "semana": 37,
+      "n": 1,
+      "mediaPct": -2.582
+     },
+     {
+      "semana": 38,
+      "n": 6,
+      "mediaPct": 0.724
+     },
+     {
+      "semana": 39,
+      "n": 1,
+      "mediaPct": -0.504
+     }
+    ],
+    "winRatePct": 12.5,
+    "pnlTotal": 13675,
+    "notionalTotal": 17700501
+   },
+   "con_tp_parcial": {
+    "n": 98,
+    "mediaPct": 2.8735730867619123,
+    "medianaPct": 2.5191152738137363,
+    "desvioPct": 2.896921146360675,
+    "tOp": 9.819708851281717,
+    "semanas": 4,
+    "tSemana": 7.182245073566385,
+    "porSemana": [
+     {
+      "semana": 37,
+      "n": 1,
+      "mediaPct": 2.019
+     },
+     {
+      "semana": 38,
+      "n": 51,
+      "mediaPct": 3.087
+     },
+     {
+      "semana": 39,
+      "n": 44,
+      "mediaPct": 2.598
+     },
+     {
+      "semana": 40,
+      "n": 2,
+      "mediaPct": 3.932
+     }
+    ],
+    "winRatePct": 83.6734693877551,
+    "pnlTotal": 4259368,
+    "notionalTotal": 158519056
+   },
+   "sin_tp_parcial": {
+    "n": 149,
+    "mediaPct": -0.04876962314347881,
+    "medianaPct": 0.6842499524826422,
+    "desvioPct": 3.970686698803924,
+    "tOp": -0.1499259857088625,
+    "semanas": 5,
+    "tSemana": -0.8712288946661564,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 11,
+      "mediaPct": 1.525
+     },
+     {
+      "semana": 37,
+      "n": 40,
+      "mediaPct": -0.103
+     },
+     {
+      "semana": 38,
+      "n": 80,
+      "mediaPct": 0.627
+     },
+     {
+      "semana": 39,
+      "n": 14,
+      "mediaPct": -4.33
+     },
+     {
+      "semana": 40,
+      "n": 4,
+      "mediaPct": -2.365
+     }
+    ],
+    "winRatePct": 54.36241610738255,
+    "pnlTotal": 391504,
+    "notionalTotal": 264688319
+   }
+  },
+  "estricto": {
+   "todas": {
+    "n": 135,
+    "mediaPct": -0.9832271631465013,
+    "medianaPct": -1.1158351468257166,
+    "desvioPct": 3.521226343492298,
+    "tOp": -3.244343353936536,
+    "semanas": 5,
+    "tSemana": -2.0101924132140456,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 3,
+      "mediaPct": 0.278
+     },
+     {
+      "semana": 37,
+      "n": 19,
+      "mediaPct": -3.114
+     },
+     {
+      "semana": 38,
+      "n": 75,
+      "mediaPct": -0.004
+     },
+     {
+      "semana": 39,
+      "n": 31,
+      "mediaPct": -1.531
+     },
+     {
+      "semana": 40,
+      "n": 7,
+      "mediaPct": -3.81
+     }
+    ],
+    "winRatePct": 43.7037037037037,
+    "pnlTotal": -1739691,
+    "notionalTotal": 227695744
+   },
+   "intradia": {
+    "n": 22,
+    "mediaPct": -0.5423628043562281,
+    "medianaPct": 0.49671871227194264,
+    "desvioPct": 2.1070497168028046,
+    "tOp": -1.2073312863991448,
+    "semanas": 4,
+    "tSemana": -0.7421461803902069,
+    "porSemana": [
+     {
+      "semana": 37,
+      "n": 3,
+      "mediaPct": 0.464
+     },
+     {
+      "semana": 38,
+      "n": 16,
+      "mediaPct": -0.773
+     },
+     {
+      "semana": 39,
+      "n": 2,
+      "mediaPct": 0.54
+     },
+     {
+      "semana": 40,
+      "n": 1,
+      "mediaPct": -2.035
+     }
+    ],
+    "winRatePct": 59.09090909090909,
+    "pnlTotal": -316281,
+    "notionalTotal": 45287637
+   },
+   "overnight": {
+    "n": 113,
+    "mediaPct": -1.0690591622030148,
+    "medianaPct": -1.3164624257229187,
+    "desvioPct": 3.735841629077658,
+    "tOp": -3.0419530336096483,
+    "semanas": 5,
+    "tSemana": -1.935732621132255,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 3,
+      "mediaPct": 0.278
+     },
+     {
+      "semana": 37,
+      "n": 16,
+      "mediaPct": -3.785
+     },
+     {
+      "semana": 38,
+      "n": 59,
+      "mediaPct": 0.205
+     },
+     {
+      "semana": 39,
+      "n": 29,
+      "mediaPct": -1.674
+     },
+     {
+      "semana": 40,
+      "n": 6,
+      "mediaPct": -4.105
+     }
+    ],
+    "winRatePct": 40.70796460176991,
+    "pnlTotal": -1423410,
+    "notionalTotal": 182408107
+   },
+   "padre=target": {
+    "n": 60,
+    "mediaPct": 1.98909353254925,
+    "medianaPct": 1.4063198552931242,
+    "desvioPct": 2.297382507426685,
+    "tOp": 6.706524578043493,
+    "semanas": 4,
+    "tSemana": 6.484684380742211,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 2,
+      "mediaPct": 1.795
+     },
+     {
+      "semana": 37,
+      "n": 6,
+      "mediaPct": 1.29
+     },
+     {
+      "semana": 38,
+      "n": 40,
+      "mediaPct": 2.331
+     },
+     {
+      "semana": 39,
+      "n": 12,
+      "mediaPct": 1.232
+     }
+    ],
+    "winRatePct": 95,
+    "pnlTotal": 1784018,
+    "notionalTotal": 97443880
+   },
+   "padre=stop": {
+    "n": 72,
+    "mediaPct": -3.474221671327174,
+    "medianaPct": -3.1073662206051593,
+    "desvioPct": 2.289885776415277,
+    "tOp": -12.87389473366563,
+    "semanas": 5,
+    "tSemana": -8.20778752234539,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 1,
+      "mediaPct": -2.757
+     },
+     {
+      "semana": 37,
+      "n": 13,
+      "mediaPct": -5.146
+     },
+     {
+      "semana": 38,
+      "n": 33,
+      "mediaPct": -2.809
+     },
+     {
+      "semana": 39,
+      "n": 18,
+      "mediaPct": -3.396
+     },
+     {
+      "semana": 40,
+      "n": 7,
+      "mediaPct": -3.81
+     }
+    ],
+    "winRatePct": 2.7777777777777777,
+    "pnlTotal": -3483868,
+    "notionalTotal": 123364608
+   },
+   "padre=trailing": {
+    "n": 3,
+    "mediaPct": -0.6457728807254148,
+    "medianaPct": -0.7701616643756483,
+    "desvioPct": 0.5430484113128629,
+    "tOp": -2.0596901054593717,
+    "semanas": 2,
+    "tSemana": -2.165070466324477,
+    "porSemana": [
+     {
+      "semana": 38,
+      "n": 2,
+      "mediaPct": -0.411
+     },
+     {
+      "semana": 39,
+      "n": 1,
+      "mediaPct": -1.116
+     }
+    ],
+    "winRatePct": 0,
+    "pnlTotal": -39841,
+    "notionalTotal": 6887256
+   },
+   "con_tp_parcial": {
+    "n": 49,
+    "mediaPct": 0.903156986130147,
+    "medianaPct": 0.7559271876397922,
+    "desvioPct": 2.621405139523223,
+    "tOp": 2.411721411388124,
+    "semanas": 3,
+    "tSemana": -0.12872009426831718,
+    "porSemana": [
+     {
+      "semana": 38,
+      "n": 29,
+      "mediaPct": 1.621
+     },
+     {
+      "semana": 39,
+      "n": 19,
+      "mediaPct": -0.041
+     },
+     {
+      "semana": 40,
+      "n": 1,
+      "mediaPct": -1.982
+     }
+    ],
+    "winRatePct": 67.34693877551021,
+    "pnlTotal": 580757,
+    "notionalTotal": 77913414
+   },
+   "sin_tp_parcial": {
+    "n": 86,
+    "mediaPct": -2.058027434245988,
+    "medianaPct": -2.7738985750406,
+    "desvioPct": 3.52789777950921,
+    "tOp": -5.40983964708758,
+    "semanas": 5,
+    "tSemana": -2.7670112755447036,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 3,
+      "mediaPct": 0.278
+     },
+     {
+      "semana": 37,
+      "n": 19,
+      "mediaPct": -3.114
+     },
+     {
+      "semana": 38,
+      "n": 46,
+      "mediaPct": -1.028
+     },
+     {
+      "semana": 39,
+      "n": 12,
+      "mediaPct": -3.89
+     },
+     {
+      "semana": 40,
+      "n": 6,
+      "mediaPct": -4.114
+     }
+    ],
+    "winRatePct": 30.232558139534884,
+    "pnlTotal": -2320448,
+    "notionalTotal": 149782330
+   }
+  },
+  "laxo": {
+   "todas": {
+    "n": 142,
+    "mediaPct": -0.9244525122220392,
+    "medianaPct": -0.6480550846762625,
+    "desvioPct": 3.4179994225312793,
+    "tOp": -3.2229739416518366,
+    "semanas": 5,
+    "tSemana": -2.0063408556200906,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 3,
+      "mediaPct": 0.278
+     },
+     {
+      "semana": 37,
+      "n": 22,
+      "mediaPct": -2.585
+     },
+     {
+      "semana": 38,
+      "n": 80,
+      "mediaPct": 0.023
+     },
+     {
+      "semana": 39,
+      "n": 30,
+      "mediaPct": -1.68
+     },
+     {
+      "semana": 40,
+      "n": 7,
+      "mediaPct": -3.81
+     }
+    ],
+    "winRatePct": 45.774647887323944,
+    "pnlTotal": -1680372,
+    "notionalTotal": 242849641
+   },
+   "intradia": {
+    "n": 26,
+    "mediaPct": -0.23427550790766516,
+    "medianaPct": 0.5342760581985864,
+    "desvioPct": 2.162126295675729,
+    "tOp": -0.5525002812126222,
+    "semanas": 4,
+    "tSemana": -0.567298090753084,
+    "porSemana": [
+     {
+      "semana": 37,
+      "n": 3,
+      "mediaPct": 0.464
+     },
+     {
+      "semana": 38,
+      "n": 20,
+      "mediaPct": -0.326
+     },
+     {
+      "semana": 39,
+      "n": 2,
+      "mediaPct": 0.54
+     },
+     {
+      "semana": 40,
+      "n": 1,
+      "mediaPct": -2.035
+     }
+    ],
+    "winRatePct": 65.38461538461539,
+    "pnlTotal": -206852,
+    "notionalTotal": 53255380
+   },
+   "overnight": {
+    "n": 116,
+    "mediaPct": -1.0791473580166406,
+    "medianaPct": -1.2795759712179575,
+    "desvioPct": 3.629867508954149,
+    "tOp": -3.2019826397343025,
+    "semanas": 5,
+    "tSemana": -1.9866919758387365,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 3,
+      "mediaPct": 0.278
+     },
+     {
+      "semana": 37,
+      "n": 19,
+      "mediaPct": -3.067
+     },
+     {
+      "semana": 38,
+      "n": 60,
+      "mediaPct": 0.139
+     },
+     {
+      "semana": 39,
+      "n": 28,
+      "mediaPct": -1.838
+     },
+     {
+      "semana": 40,
+      "n": 6,
+      "mediaPct": -4.105
+     }
+    ],
+    "winRatePct": 41.37931034482759,
+    "pnlTotal": -1473520,
+    "notionalTotal": 189594261
+   },
+   "padre=target": {
+    "n": 66,
+    "mediaPct": 1.836728969412894,
+    "medianaPct": 1.3693371702033592,
+    "desvioPct": 2.158978391631143,
+    "tOp": 6.911443275328118,
+    "semanas": 4,
+    "tSemana": 6.669704472579384,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 2,
+      "mediaPct": 1.795
+     },
+     {
+      "semana": 37,
+      "n": 8,
+      "mediaPct": 1.324
+     },
+     {
+      "semana": 38,
+      "n": 45,
+      "mediaPct": 2.119
+     },
+     {
+      "semana": 39,
+      "n": 11,
+      "mediaPct": 1.063
+     }
+    ],
+    "winRatePct": 95.45454545454545,
+    "pnlTotal": 1853328,
+    "notionalTotal": 110291172
+   },
+   "padre=stop": {
+    "n": 73,
+    "mediaPct": -3.4323157544466376,
+    "medianaPct": -3.08564831748073,
+    "desvioPct": 2.300805446089892,
+    "tOp": -12.745848942135492,
+    "semanas": 5,
+    "tSemana": -9.269839932898652,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 1,
+      "mediaPct": -2.757
+     },
+     {
+      "semana": 37,
+      "n": 14,
+      "mediaPct": -4.819
+     },
+     {
+      "semana": 38,
+      "n": 33,
+      "mediaPct": -2.809
+     },
+     {
+      "semana": 39,
+      "n": 18,
+      "mediaPct": -3.387
+     },
+     {
+      "semana": 40,
+      "n": 7,
+      "mediaPct": -3.81
+     }
+    ],
+    "winRatePct": 2.73972602739726,
+    "pnlTotal": -3493859,
+    "notionalTotal": 125671213
+   },
+   "padre=trailing": {
+    "n": 3,
+    "mediaPct": -0.6457728807254148,
+    "medianaPct": -0.7701616643756483,
+    "desvioPct": 0.5430484113128629,
+    "tOp": -2.0596901054593717,
+    "semanas": 2,
+    "tSemana": -2.165070466324477,
+    "porSemana": [
+     {
+      "semana": 38,
+      "n": 2,
+      "mediaPct": -0.411
+     },
+     {
+      "semana": 39,
+      "n": 1,
+      "mediaPct": -1.116
+     }
+    ],
+    "winRatePct": 0,
+    "pnlTotal": -39841,
+    "notionalTotal": 6887256
+   },
+   "con_tp_parcial": {
+    "n": 51,
+    "mediaPct": 0.7781838132324889,
+    "medianaPct": 0.8037538304392238,
+    "desvioPct": 2.4291281279018855,
+    "tOp": 2.2877936913317245,
+    "semanas": 4,
+    "tSemana": 0.18491954501204202,
+    "porSemana": [
+     {
+      "semana": 37,
+      "n": 1,
+      "mediaPct": 1.364
+     },
+     {
+      "semana": 38,
+      "n": 31,
+      "mediaPct": 1.42
+     },
+     {
+      "semana": 39,
+      "n": 18,
+      "mediaPct": -0.206
+     },
+     {
+      "semana": 40,
+      "n": 1,
+      "mediaPct": -1.982
+     }
+    ],
+    "winRatePct": 68.62745098039215,
+    "pnlTotal": 536313,
+    "notionalTotal": 83744249
+   },
+   "sin_tp_parcial": {
+    "n": 91,
+    "mediaPct": -1.8786772660482036,
+    "medianaPct": -2.7435191978478843,
+    "desvioPct": 3.5300665351848073,
+    "tOp": -5.076799185033976,
+    "semanas": 5,
+    "tSemana": -2.6452141729791943,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 3,
+      "mediaPct": 0.278
+     },
+     {
+      "semana": 37,
+      "n": 21,
+      "mediaPct": -2.773
+     },
+     {
+      "semana": 38,
+      "n": 49,
+      "mediaPct": -0.861
+     },
+     {
+      "semana": 39,
+      "n": 12,
+      "mediaPct": -3.89
+     },
+     {
+      "semana": 40,
+      "n": 6,
+      "mediaPct": -4.114
+     }
+    ],
+    "winRatePct": 32.967032967032964,
+    "pnlTotal": -2216685,
+    "notionalTotal": 159105392
+   }
+  },
+  "estricto_cota_optimista": {
+   "todas": {
+    "n": 188,
+    "mediaPct": -0.2926461956975057,
+    "medianaPct": 0.45987973140757704,
+    "desvioPct": 3.5569735059810017,
+    "tOp": -1.1280833182760204,
+    "semanas": 5,
+    "tSemana": -1.1102204170557277,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 9,
+      "mediaPct": 1.069
+     },
+     {
+      "semana": 37,
+      "n": 26,
+      "mediaPct": -2.258
+     },
+     {
+      "semana": 38,
+      "n": 102,
+      "mediaPct": 0.492
+     },
+     {
+      "semana": 39,
+      "n": 41,
+      "mediaPct": -0.745
+     },
+     {
+      "semana": 40,
+      "n": 10,
+      "mediaPct": -2.552
+     }
+    ],
+    "winRatePct": 53.723404255319146,
+    "pnlTotal": -448522,
+    "notionalTotal": 323072153
+   },
+   "intradia": {
+    "n": 38,
+    "mediaPct": 0.2865491292059021,
+    "medianaPct": 0.8379394404384677,
+    "desvioPct": 1.9997912841580041,
+    "tOp": 0.8832959112326368,
+    "semanas": 5,
+    "tSemana": 1.7555567313578302,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 3,
+      "mediaPct": 1.276
+     },
+     {
+      "semana": 37,
+      "n": 3,
+      "mediaPct": 0.464
+     },
+     {
+      "semana": 38,
+      "n": 22,
+      "mediaPct": -0.023
+     },
+     {
+      "semana": 39,
+      "n": 6,
+      "mediaPct": 1.177
+     },
+     {
+      "semana": 40,
+      "n": 4,
+      "mediaPct": -0.223
+     }
+    ],
+    "winRatePct": 73.6842105263158,
+    "pnlTotal": 84193,
+    "notionalTotal": 75038156
+   },
+   "overnight": {
+    "n": 150,
+    "mediaPct": -0.43937567800636973,
+    "medianaPct": -0.16527702325578655,
+    "desvioPct": 3.844274938243359,
+    "tOp": -1.3998039081419051,
+    "semanas": 5,
+    "tSemana": -1.2884768444076384,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 6,
+      "mediaPct": 0.965
+     },
+     {
+      "semana": 37,
+      "n": 23,
+      "mediaPct": -2.613
+     },
+     {
+      "semana": 38,
+      "n": 80,
+      "mediaPct": 0.633
+     },
+     {
+      "semana": 39,
+      "n": 35,
+      "mediaPct": -1.074
+     },
+     {
+      "semana": 40,
+      "n": 6,
+      "mediaPct": -4.105
+     }
+    ],
+    "winRatePct": 48.666666666666664,
+    "pnlTotal": -532715,
+    "notionalTotal": 248033997
+   },
+   "padre=target": {
+    "n": 101,
+    "mediaPct": 2.178734064387112,
+    "medianaPct": 1.690067782542537,
+    "desvioPct": 2.197656385977134,
+    "tOp": 9.963343905036432,
+    "semanas": 5,
+    "tSemana": 9.688126730705628,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 7,
+      "mediaPct": 2.148
+     },
+     {
+      "semana": 37,
+      "n": 10,
+      "mediaPct": 1.754
+     },
+     {
+      "semana": 38,
+      "n": 61,
+      "mediaPct": 2.498
+     },
+     {
+      "semana": 39,
+      "n": 21,
+      "mediaPct": 1.529
+     },
+     {
+      "semana": 40,
+      "n": 2,
+      "mediaPct": 1.479
+     }
+    ],
+    "winRatePct": 97.02970297029702,
+    "pnlTotal": 3435766,
+    "notionalTotal": 170506451
+   },
+   "padre=stop": {
+    "n": 83,
+    "mediaPct": -3.3865703720803197,
+    "medianaPct": -3.08564831748073,
+    "desvioPct": 2.2158646658307033,
+    "tOp": -13.923740430406317,
+    "semanas": 5,
+    "tSemana": -9.40928540094558,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 2,
+      "mediaPct": -2.711
+     },
+     {
+      "semana": 37,
+      "n": 16,
+      "mediaPct": -4.766
+     },
+     {
+      "semana": 38,
+      "n": 38,
+      "mediaPct": -2.879
+     },
+     {
+      "semana": 39,
+      "n": 19,
+      "mediaPct": -3.238
+     },
+     {
+      "semana": 40,
+      "n": 8,
+      "mediaPct": -3.56
+     }
+    ],
+    "winRatePct": 2.4096385542168677,
+    "pnlTotal": -3995150,
+    "notionalTotal": 143783534
+   },
+   "padre=trailing": {
+    "n": 4,
+    "mediaPct": 1.503928897109276,
+    "medianaPct": -0.41074174767526406,
+    "desvioPct": 4.322206842095305,
+    "tOp": 0.6959078785689055,
+    "semanas": 2,
+    "tSemana": 0.3611055453205893,
+    "porSemana": [
+     {
+      "semana": 38,
+      "n": 3,
+      "mediaPct": 2.377
+     },
+     {
+      "semana": 39,
+      "n": 1,
+      "mediaPct": -1.116
+     }
+    ],
+    "winRatePct": 25,
+    "pnlTotal": 110862,
+    "notionalTotal": 8782168
+   },
+   "con_tp_parcial": {
+    "n": 69,
+    "mediaPct": 1.0663444312680637,
+    "medianaPct": 0.9425601185633051,
+    "desvioPct": 2.3276192324916347,
+    "tOp": 3.805485869516218,
+    "semanas": 3,
+    "tSemana": 2.1824923429838106,
+    "porSemana": [
+     {
+      "semana": 38,
+      "n": 37,
+      "mediaPct": 1.526
+     },
+     {
+      "semana": 39,
+      "n": 29,
+      "mediaPct": 0.557
+     },
+     {
+      "semana": 40,
+      "n": 3,
+      "mediaPct": 0.325
+     }
+    ],
+    "winRatePct": 73.91304347826087,
+    "pnlTotal": 1058496,
+    "notionalTotal": 113614277
+   },
+   "sin_tp_parcial": {
+    "n": 119,
+    "mediaPct": -1.0806323575514925,
+    "medianaPct": -1.882500406211555,
+    "desvioPct": 3.901543998921395,
+    "tOp": -3.0214467127753175,
+    "semanas": 5,
+    "tSemana": -1.808496425010102,
+    "porSemana": [
+     {
+      "semana": 36,
+      "n": 9,
+      "mediaPct": 1.069
+     },
+     {
+      "semana": 37,
+      "n": 26,
+      "mediaPct": -2.258
+     },
+     {
+      "semana": 38,
+      "n": 65,
+      "mediaPct": -0.097
+     },
+     {
+      "semana": 39,
+      "n": 12,
+      "mediaPct": -3.89
+     },
+     {
+      "semana": 40,
+      "n": 7,
+      "mediaPct": -3.786
+     }
+    ],
+    "winRatePct": 42.016806722689076,
+    "pnlTotal": -1507018,
+    "notionalTotal": 209457876
+   }
+  }
+ },
+ "descomp": {
+  "estricto": {
+   "simTotalCubiertas": 4650872,
+   "validadoTotal": -1739691,
+   "diferencia": 6390563,
+   "A_noExistieron": {
+    "n": 112,
+    "pnlSim": 5638990,
+    "ganadorasSim": 103,
+    "indeterminadas": 19,
+    "pnlSimIndeterminadas": 1010355
+   },
+   "B_existieron": {
+    "n": 135,
+    "pnlSim": -988118,
+    "pnlVal": -1739691,
+    "diferencia": 751573,
+    "porTipo": {
+     "stop:bid": {
+      "n": 72,
+      "pnlSim": -3724744,
+      "pnlVal": -3532362
+     },
+     "target:target_T": {
+      "n": 58,
+      "pnlSim": 2167546,
+      "pnlVal": 1548688
+     },
+     "tp_parcial:bid": {
+      "n": 49,
+      "pnlSim": 574500,
+      "pnlVal": 382489
+     },
+     "target:stop_tras_target_fallido": {
+      "n": 2,
+      "pnlSim": 26184,
+      "pnlVal": -108674
+     },
+     "trailing:bid": {
+      "n": 3,
+      "pnlSim": -31604,
+      "pnlVal": -29825
+     }
+    }
+   },
+   "retSimMedioLlenaron": -0.5693343934619652,
+   "retSimMedioNoLlenaron": 3.1357467122469145
+  },
+  "laxo": {
+   "simTotalCubiertas": 4650872,
+   "validadoTotal": -1680372,
+   "diferencia": 6331244,
+   "A_noExistieron": {
+    "n": 105,
+    "pnlSim": 5502962,
+    "ganadorasSim": 97,
+    "indeterminadas": 19,
+    "pnlSimIndeterminadas": 1010355
+   },
+   "B_existieron": {
+    "n": 142,
+    "pnlSim": -852090,
+    "pnlVal": -1680372,
+    "diferencia": 828282,
+    "porTipo": {
+     "stop:bid": {
+      "n": 73,
+      "pnlSim": -3770874,
+      "pnlVal": -3545472
+     },
+     "target:target_T": {
+      "n": 64,
+      "pnlSim": 2335279,
+      "pnlVal": 1690685
+     },
+     "tp_parcial:bid": {
+      "n": 51,
+      "pnlSim": 588925,
+      "pnlVal": 312921
+     },
+     "target:stop_tras_target_fallido": {
+      "n": 2,
+      "pnlSim": 26184,
+      "pnlVal": -108674
+     },
+     "trailing:bid": {
+      "n": 3,
+      "pnlSim": -31604,
+      "pnlVal": -29825
+     }
+    }
+   },
+   "retSimMedioLlenaron": -0.5112245801411343,
+   "retSimMedioNoLlenaron": 3.304165514612667
+  }
+ },
+ "capital": {
+  "sim": {
+   "maxNotionalSimultaneo": 72637067,
+   "cuando": "2026-09-14T19:01:38.000Z",
+   "posiciones": 287,
+   "ruedas": 17,
+   "porRueda": 16.88235294117647,
+   "notionalMedio": 1735487,
+   "duracionMedianaHoras": 23.621944444444445
+  },
+  "estricto": {
+   "maxNotionalSimultaneo": 46601326,
+   "cuando": "2026-09-15T19:53:01.000Z",
+   "posiciones": 135,
+   "ruedas": 17,
+   "porRueda": 7.9411764705882355,
+   "notionalMedio": 1686635,
+   "duracionMedianaHoras": 44.99944444444444
+  },
+  "laxo": {
+   "maxNotionalSimultaneo": 47695588,
+   "cuando": "2026-09-15T19:52:03.000Z",
+   "posiciones": 142,
+   "ruedas": 17,
+   "porRueda": 8.352941176470589,
+   "notionalMedio": 1710209,
+   "duracionMedianaHoras": 44.20902777777778
+  }
+ },
+ "entrada": {
+  "conAskAlFill": 175,
+  "askSobreL_alFill": {
+   "medianaPct": 0.8935993349958427,
+   "p25Pct": 0.3405096660808349,
+   "p75Pct": 1.8470864070452286,
+   "fraccionAskArribaDeL": 0.9657142857142857
+  },
+  "noLlenadas_minAskSobreL": {
+   "n": 112,
+   "medianaPct": 1.0408519538430028,
+   "p90Pct": 4.596500391747194
+  },
+  "demoraFillReal_min": {
+   "mediana": 33.36666666666667,
+   "antesDelSim": 10,
+   "n": 135
+  }
+ }
+}
