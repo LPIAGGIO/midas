@@ -69,6 +69,11 @@ const TP_PARCIAL = Number(ENV.COCOS_BOT_TP_PARCIAL ?? 0.5);       // 0 apaga
 // resistencia y que apagarlo mejora todas las variantes en IS y OOS; es un
 // hallazgo post-hoc, asi que queda como parametro y lo decide LP.
 const TRAILING = ENV.COCOS_BOT_TRAILING !== "0";
+// Puntaje minimo del filtro. 7 = el del bot de IOL. LP pidio probar 6 el
+// 30/09/2026; backtest cocos3-score: con 6 se duplican las operaciones y el
+// resultado fuera de muestra queda en cero (ni mejor ni peor que 7, nada
+// significativo), con mas drawdown. El resto del filtro no cambia.
+const MIN_SCORE = Number(ENV.COCOS_BOT_MIN_SCORE || 7);
 const PERDIDA_DIA = Number(ENV.COCOS_BOT_PERDIDA_DIA_ARS || 600_000); // 3% de 20M
 const CONFIRM_ENTRADA_MS = 150_000;
 const CONFIRM_SALIDA_MS = Number(ENV.COCOS_BOT_SALIDA_CONFIRM_MS || 10 * 60_000);
@@ -384,7 +389,7 @@ async function buscarSenales() {
     } else if (r.modo === "shadow") {
       const { rgm, contra } = parseSenal(r.senal);
       const mixtoOk = rgm === "mixto" && score >= 8 && rr >= 2.5;
-      if (score < 7) faltas.push(`score ${score}`);
+      if (score < MIN_SCORE) faltas.push(`score ${score}`);
       if (rr < 2) faltas.push(`R:R ${rr}`);
       if (contra) faltas.push("contra tendencia");
       if (!(rgm === "risk_on" || mixtoOk)) faltas.push(`régimen ${rgm}`);
@@ -698,7 +703,7 @@ if (process.argv.includes("--chequeo")) {
   })().catch((e) => { console.error("chequeo:", e.message); process.exit(1); });
 } else (async () => {
   log(`config: ${fs.existsSync(path.join(process.cwd(), ".env")) ? path.join(process.cwd(), ".env") : path.join(__dirname, ".env")}`);
-  log(`cocos-bot arrancando · libro ${LIBRO}${SOMBRA ? " (SIN FILTRO)" : ""} · ${REAL ? "*** ORDENES REALES ***" : "simulado (sin órdenes reales)"} · cuenta ${CUENTA} · cap ${pesos(CAP)} · ${pesos(MAX_POS_ARS)}/papel · ${MAX_HORA} entradas/hora${MAX_DIA > 0 ? ` (tope ${MAX_DIA}/día)` : ""} · stop ${STOP_ATR}×ATR ${TRAILING ? "con trailing" : "FIJO (sin trailing)"} · target ${TARGET_PCT > 0 ? `+${(TARGET_PCT * 100).toFixed(1)}% o resistencia` : "resistencia"} · universo ${UNIVERSO.size} papeles`);
+  log(`cocos-bot arrancando · libro ${LIBRO}${SOMBRA ? " (SIN FILTRO)" : ""} · ${REAL ? "*** ORDENES REALES ***" : "simulado (sin órdenes reales)"} · cuenta ${CUENTA} · cap ${pesos(CAP)} · ${pesos(MAX_POS_ARS)}/papel · ${MAX_HORA} entradas/hora${MAX_DIA > 0 ? ` (tope ${MAX_DIA}/día)` : ""} · stop ${STOP_ATR}×ATR ${TRAILING ? "con trailing" : "FIJO (sin trailing)"} · target ${TARGET_PCT > 0 ? `+${(TARGET_PCT * 100).toFixed(1)}% o resistencia` : "resistencia"} · puntaje ≥${MIN_SCORE} · universo ${UNIVERSO.size} papeles`);
   await token();
   log("login Primary OK");
   // Reconciliación al arrancar: las señales shadow anteriores al arranque no
