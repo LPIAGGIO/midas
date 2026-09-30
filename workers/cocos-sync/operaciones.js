@@ -98,7 +98,7 @@ async function main() {
       user_id: USER_ID, instrument_type: tipo, operation_type: c.side === "SELL" ? "sell" : "buy",
       ticker: c.ticker, quantity: qty, entry_price: Math.round(px * 10000) / 10000, entry_currency: "ARS",
       entry_date: hoy, settlement: /24hs/i.test(c.plazo) ? "T1" : /48hs/i.test(c.plazo) ? "T2" : "T0", broker: "cocos", notes: null,
-      extra: { source: "csv_matriz", matriz_account: CUENTA, matriz_order_id: top.orderId, matriz_cl_ord_id: top.clOrdId, matriz_chain: c.pref, via: "api_primary", origen: /ISV_PBCP|^\d+$/.test(top.originatingUsername || "") && /^\d{12,}$/.test(top.clOrdId || "") ? "bot" : "matriz" },
+      extra: { source: "csv_matriz", matriz_account: CUENTA, matriz_order_id: top.orderId, matriz_cl_ord_id: top.clOrdId, matriz_chain: c.pref, via: "api_primary", origen: top.originatingUsername === "ISV_PBCP" ? "bot" : "matriz" },   // ISV_PBCP = la API (el bot); ISV_MATRIZ4 o el numero de usuario = LP desde Matriz
     };
     log(`${DRY ? "(dry) " : ""}cargo ${fila.operation_type} ${qty} ${c.ticker} @ ${fila.entry_price} (${tipo}, ${fila.settlement})`);
     if (DRY) continue;
