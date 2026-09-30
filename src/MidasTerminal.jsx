@@ -20556,7 +20556,7 @@ function ControlCocosBanner({ positions }) {
         <span style={{ fontWeight: 700, color }}>{ok ? "Cocos coincide con Matriz" : `Cocos: ${comp.dif} ${comp.dif === 1 ? "papel no coincide" : "papeles no coinciden"} con Matriz`}</span>
         <span style={{ color: C.dim }}>
           · foto {hora} · tenencia al abrir vs extracto hasta el día anterior
-          {ars != null ? ` · saldo $ CI ${fN(ars)}` : ""}{ars24 != null ? ` · 24hs ${fN(ars24)}` : ""}
+          {ars24 != null ? ` · cupo operativo 24hs ${fN(ars24)}` : ""}
         </span>
       </button>
       {abierto && (
@@ -20583,6 +20583,7 @@ function ControlCocosBanner({ positions }) {
           </table>
           <div style={{ marginTop: 6, color: C.dim, fontSize: 10.5, fontFamily: "'Roboto', sans-serif", lineHeight: 1.5 }}>
             El extracto sigue siendo lo que manda. La foto se toma por la API de Primary cada 15 minutos de 10:00 a 12:45, y solo cuenta si Cocos ya cargó Matriz ese día. FCI y cauciones no están en Matriz.
+            {" "}El <b>cupo operativo</b> es el saldo que Cocos carga a mano en Matriz para que puedas operar{ars != null ? ` (contado inmediato ${fN(ars)})` : ""}: no es tu caja real, que sale del extracto de la comitente.
           </div>
         </div>
       )}
