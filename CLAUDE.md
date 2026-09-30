@@ -28,6 +28,10 @@ sobre el que LP decide.
   `worker.js` del repo (este tiene el ranking por universo, sin desplegar).
   Un cambio al bot se aplica a los dos archivos.
 - Apagar el bot: `linked_brokers.bot_enabled=false` en la base (no hace falta ssh).
+- **Bot en Cocos (`workers/cocos-bot`, cuenta 72404, API de Primary):** misma
+  regla de horario. La cuenta es COMPARTIDA con LP (opera a mano ahí): el bot
+  no adopta órdenes ajenas y chequea la tenencia antes de vender. Encenderlo
+  con órdenes reales (`pm2 start`) lo hace LP, no Claude.
 - Stops del libro real: 1,5×ATR(14) diario, trailing que solo sube
   (`IOL_BOT_STOP_ATR`). Al mover un stop a mano se conserva `r_value`.
 
