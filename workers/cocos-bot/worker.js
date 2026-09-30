@@ -52,6 +52,11 @@ const MAX_DIA = Number(ENV.COCOS_BOT_MAX_DIA || 6);
 const STOP_ATR = Number(ENV.COCOS_BOT_STOP_ATR ?? 1.5);
 const TARGET_PCT = Number(ENV.COCOS_BOT_TARGET_PCT || 0);        // 0 = resistencia
 const TP_PARCIAL = Number(ENV.COCOS_BOT_TP_PARCIAL ?? 0.5);       // 0 apaga
+// Trailing del stop por ATR (sube con el precio). El backtest cocos2 (29/09)
+// mostro que el trailing saca el 33-38% de los trades en -2/-4% antes de la
+// resistencia y que apagarlo mejora todas las variantes en IS y OOS; es un
+// hallazgo post-hoc, asi que queda como parametro y lo decide LP.
+const TRAILING = ENV.COCOS_BOT_TRAILING !== "0";
 const PERDIDA_DIA = Number(ENV.COCOS_BOT_PERDIDA_DIA_ARS || 600_000); // 3% de 20M
 const CONFIRM_ENTRADA_MS = 150_000;
 const CONFIRM_SALIDA_MS = Number(ENV.COCOS_BOT_SALIDA_CONFIRM_MS || 10 * 60_000);
@@ -532,7 +537,7 @@ async function gestionarAbierta(t, usd) {
   }
   // 2) trailing 1,5×ATR que solo sube
   let stop = Number(t.stop);
-  if (STOP_ATR > 0) {
+  if (STOP_ATR > 0 && TRAILING) {
     const pRef = Math.min(p, pAnterior.get(t.id) ?? p); pAnterior.set(t.id, p);
     const a = await atr14(sym);
     const sAtr = a > 0 ? pRef - STOP_ATR * a : null;
@@ -594,7 +599,7 @@ if (process.argv.includes("--chequeo")) {
     process.exit(0);
   })().catch((e) => { console.error("chequeo:", e.message); process.exit(1); });
 } else (async () => {
-  log(`cocos-bot arrancando · ${REAL ? "*** ORDENES REALES ***" : "simulado (COCOS_BOT_REAL≠1)"} · cuenta ${CUENTA} · cap ${pesos(CAP)} · ${pesos(MAX_POS_ARS)}/papel · ${MAX_DIA} entradas/día · stop ${STOP_ATR}×ATR · target ${TARGET_PCT > 0 ? `+${(TARGET_PCT * 100).toFixed(1)}% o resistencia` : "resistencia"} · universo ${UNIVERSO.size} papeles`);
+  log(`cocos-bot arrancando · ${REAL ? "*** ORDENES REALES ***" : "simulado (COCOS_BOT_REAL≠1)"} · cuenta ${CUENTA} · cap ${pesos(CAP)} · ${pesos(MAX_POS_ARS)}/papel · ${MAX_DIA} entradas/día · stop ${STOP_ATR}×ATR ${TRAILING ? "con trailing" : "FIJO (sin trailing)"} · target ${TARGET_PCT > 0 ? `+${(TARGET_PCT * 100).toFixed(1)}% o resistencia` : "resistencia"} · universo ${UNIVERSO.size} papeles`);
   await token();
   log("login Primary OK");
   // Reconciliación al arrancar: las señales shadow anteriores al arranque no
