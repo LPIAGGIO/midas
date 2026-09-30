@@ -121,6 +121,7 @@ async function api(metodo, ruta, reintento = true) {
   const t = await token();
   const r = await fetch(`${BASE}${ruta}`, { method: metodo, headers: { "X-Auth-Token": t }, redirect: "manual" });
   if ((r.status === 401 || r.status === 302) && reintento) { await token(true); return api(metodo, ruta, false); }
+  if (r.status === 429 && reintento) { await new Promise((ok) => setTimeout(ok, 3000)); return api(metodo, ruta, false); }
   // La documentación de Primary usa GET para enviar y cancelar órdenes; si
   // este servidor pide POST, se reintenta con el otro método una vez.
   if ((r.status === 405 || r.status === 404) && reintento && /\/rest\/order\/(newSingleOrder|cancelById)/.test(ruta)) return api(metodo === "GET" ? "POST" : "GET", ruta, false);
@@ -144,10 +145,44 @@ async function tickDe(tk) {
 }
 const alTick = (px, tick, modo) => { const n = px / tick; const k = modo === "arriba" ? Math.ceil(n - 1e-9) : Math.floor(n + 1e-9); return Math.round(k * tick * 1000) / 1000; };
 
-async function libro(tk) {
+/* LIBRO LOCAL. Primary limita /rest/marketdata/get POR USUARIO (HTTP 429 el
+ * 30/09/2026, con el bot real y la sombra compartiendo el cupo). Por eso:
+ *  - por defecto el libro sale de data912 (una consulta trae bid/ask/último de
+ *    TODOS los CEDEARs, cache 20 s): alcanza para dimensionar, calcular el
+ *    ratio y ver si el dólar corrió el límite;
+ *  - Primary (preciso=true) solo para poner el precio de una VENTA del bot
+ *    real y para la prueba de plomería, con cache de 8 s;
+ *  - la sombra NUNCA le pide precios a Primary: no le gasta cupo al real. */
+let _loc = { t: 0, m: {} };
+async function libroLocal(tk) {
+  if (Date.now() - _loc.t > 20_000) {
+    try {
+      const r = await fetch("https://data912.com/live/arg_cedears", { headers: UA });
+      const arr = await r.json();
+      const m = {};
+      for (const it of arr || []) { const sy = String(it?.symbol || "").toUpperCase(); if (sy) m[sy] = { bid: Number(it.px_bid) || null, ask: Number(it.px_ask) || null, last: Number(it.c) || null }; }
+      if (Object.keys(m).length > 50) _loc = { t: Date.now(), m };
+    } catch (e) { log(`arg_cedears: ${e.message}`); }
+  }
+  return _loc.m[tk.toUpperCase()] || null;
+}
+const _libP = new Map();
+async function libroPrimary(tk) {
+  const hit = _libP.get(tk);
+  if (hit && Date.now() - hit.t < 8000) return hit.v;
   const j = await api("GET", `/rest/marketdata/get?${q({ marketId: "ROFX", symbol: simbolo(tk), entries: "BI,OF,LA", depth: 1 })}`);
   const md = j?.marketData || {};
-  return { bid: Number(md.BI?.[0]?.price) || null, ask: Number(md.OF?.[0]?.price) || null, last: Number(md.LA?.price) || null };
+  const v = { bid: Number(md.BI?.[0]?.price) || null, ask: Number(md.OF?.[0]?.price) || null, last: Number(md.LA?.price) || null };
+  _libP.set(tk, { v, t: Date.now() });
+  return v;
+}
+async function libro(tk, preciso = false) {
+  const vacio = { bid: null, ask: null, last: null };
+  if (SOMBRA) return (await libroLocal(tk)) || vacio;
+  if (preciso) { try { return await libroPrimary(tk); } catch (e) { log(`[cocos ${tk}] libro Primary: ${e.message} — uso data912`); return (await libroLocal(tk)) || vacio; } }
+  const loc = await libroLocal(tk);
+  if (loc && (loc.last > 0 || loc.bid > 0)) return loc;
+  return libroPrimary(tk);
 }
 async function ordenNueva(tk, lado, qty, px) {
   const j = await api("GET", `/rest/order/newSingleOrder?${q({ marketId: "ROFX", symbol: simbolo(tk), price: px, orderQty: qty, ordType: "LIMIT", side: lado, timeInForce: "DAY", account: CUENTA, cancelPrevious: false, iceberg: false })}`);
@@ -235,12 +270,14 @@ async function tg(texto) {
 
 /* ───────── estado ───────── */
 const vistas = new Set();          // ids de filas shadow ya evaluadas
+const reintentos = new Map();      // id de señal → intentos fallidos por error transitorio
 const cand = new Map();            // "tp_id"/"exit_id" → ts de la primera lectura
 const pAnterior = new Map();       // trade id → último precio USD leído
 const salidas = new Map();         // trade id → { id, kind, qty, pxArs, placedAt }
 const recolocada = new Map();      // trade id → ts
 let plomeriaOk = !PROBAR, plomeriaDia = null, plomeriaIntento = 0, avisoPerdida = null, avisoApagado = null;
 let arranque = new Date().toISOString();
+if (SOMBRA) { const d = new Date(); d.setUTCHours(13, 30, 0, 0); if (d.getTime() < Date.now()) arranque = d.toISOString(); }
 
 async function botHabilitado() {
   const { data } = await supabase.from("linked_brokers").select("bot_enabled").eq("user_id", USER_ID).eq("broker", "cocos").maybeSingle();
@@ -259,7 +296,7 @@ async function probarPlomeria() {
   if (ultimo) plomeriaDia = hoy;
   const tk = "AAPL";
   try {
-    const lb = await libro(tk);
+    const lb = await libro(tk, true);
     const ref = lb.bid || lb.last;
     if (!(ref > 0)) throw new Error("sin libro para la prueba");
     const tick = await tickDe(tk);
@@ -326,7 +363,12 @@ async function buscarSenales() {
     } else if (/regimen mixto/i.test(r.senal || "")) riskMult = 0.5;
     if (faltas.length) { log(`[señal ${tk}] no califica: ${faltas.join(" · ")}`); continue; }
     if (!SOMBRA && await earningsCerca(tk)) { log(`[señal ${tk}] no califica: balance en 3 días`); continue; }
-    await entrar(r, tk, riskMult);
+    try { await entrar(r, tk, riskMult); }
+    catch (e) {
+      const n = (reintentos.get(r.id) || 0) + 1; reintentos.set(r.id, n);
+      log(`[señal ${tk}] error al entrar (${e.message})${n < 5 ? " — reintento en la próxima pasada" : " — abandono"}`);
+      if (n < 5) { vistas.delete(r.id); vistas.delete(clave); }
+    }
   }
 }
 
@@ -555,7 +597,7 @@ async function gestionarAbierta(t, usd) {
     }
     // Viva sin llenar hace más de 3 min: si es stop, bajar al bid actual.
     if (s.kind !== "target" && Date.now() - s.placedAt > 3 * 60_000) {
-      const lb = await libro(tk);
+      const lb = await libro(tk, true);
       if (lb.bid > 0 && lb.bid < s.pxArs) {
         try { await ordenCancelar(s.id); await new Promise((r) => setTimeout(r, 2500)); const o2 = await ordenEstado(s.id); if (o2?.status === "CANCELLED") { salidas.delete(t.id); await vender(t, s.kind, s.qty, alTick(lb.bid, await tickDe(tk), "abajo")); } } catch (e) { log(`[cocos ${tk}] rebajar venta: ${e.message}`); }
       }
@@ -578,7 +620,7 @@ async function gestionarAbierta(t, usd) {
     if (p >= nivel) {
       const c = cand.get("tp_" + t.id);
       if (!c) cand.set("tp_" + t.id, Date.now());
-      else if (Date.now() - c >= CONFIRM_ENTRADA_MS) { cand.delete("tp_" + t.id); const lb = await libro(tk); const px = alTick(Math.min(nivel * ratio, lb.bid || nivel * ratio), tick, "abajo"); await vender(t, "tp_parcial", Math.floor(t.qty / 2), px); return; }
+      else if (Date.now() - c >= CONFIRM_ENTRADA_MS) { cand.delete("tp_" + t.id); const lb = await libro(tk, true); const px = alTick(Math.min(nivel * ratio, lb.bid || nivel * ratio), tick, "abajo"); await vender(t, "tp_parcial", Math.floor(t.qty / 2), px); return; }
     } else cand.delete("tp_" + t.id);
   }
   // 4) stop / target
@@ -590,7 +632,7 @@ async function gestionarAbierta(t, usd) {
   if (!c) { cand.set("exit_" + t.id, Date.now()); log(`[cocos ${tk}] ${kind} tocado (US$${p.toFixed(2)}) — espero confirmación`); return; }
   if (Date.now() - c < (kind === "target" ? CONFIRM_ENTRADA_MS : CONFIRM_SALIDA_MS)) return;
   cand.delete("exit_" + t.id);
-  const lb = await libro(tk);
+  const lb = await libro(tk, true);
   const teorico = (kind === "target" ? target : Math.min(stop, p)) * ratio;
   const px = alTick(kind === "target" ? Math.max(teorico, lb.bid || 0) : (lb.bid > 0 ? Math.min(teorico, lb.bid) : teorico), tick, "abajo");
   await vender(t, kind, t.qty, px);
