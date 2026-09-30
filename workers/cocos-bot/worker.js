@@ -223,7 +223,7 @@ const cand = new Map();            // "tp_id"/"exit_id" → ts de la primera lec
 const pAnterior = new Map();       // trade id → último precio USD leído
 const salidas = new Map();         // trade id → { id, kind, qty, pxArs, placedAt }
 const recolocada = new Map();      // trade id → ts
-let plomeriaOk = !PROBAR, plomeriaDia = null, avisoPerdida = null, avisoApagado = null;
+let plomeriaOk = !PROBAR, plomeriaDia = null, plomeriaIntento = 0, avisoPerdida = null, avisoApagado = null;
 let arranque = new Date().toISOString();
 
 async function botHabilitado() {
@@ -235,7 +235,12 @@ async function botHabilitado() {
 async function probarPlomeria() {
   const hoy = diaAr(new Date());
   if (plomeriaDia === hoy) return plomeriaOk;
-  plomeriaDia = hoy;
+  // Primary puede tardar en levantar a la mañana (mantenimiento nocturno):
+  // si la prueba falla se reintenta cada 10 min hasta las 11:30 antes de dar
+  // el día por perdido.
+  plomeriaIntento++;
+  const ultimo = hhmmAr() >= 1130 || plomeriaIntento >= 7;
+  if (ultimo) plomeriaDia = hoy;
   const tk = "AAPL";
   try {
     const lb = await libro(tk);
@@ -253,12 +258,14 @@ async function probarPlomeria() {
     const o2 = await ordenEstado(id);
     if (!o2 || o2.status !== "CANCELLED") throw new Error(`no confirmó la cancelación: ${o2?.status} ${o2?.text || ""}`);
     plomeriaOk = true;
+    plomeriaDia = hoy;
     log(`[prueba] OK: 1 × ${tk} a ${pesos(px)} aceptada (${o1.status}) y cancelada (${o2.status})`);
     await tg(`<b>COCOS BOT · prueba OK</b>\nPrimary aceptó y canceló una orden de 1 × ${tk} a ${pesos(px)}. El bot opera hoy.`);
   } catch (e) {
     plomeriaOk = false;
-    log(`[prueba] FALLO: ${e.message}`);
-    await tg(`<b>COCOS BOT · prueba FALLÓ</b>\n${e.message}\nHoy NO abre posiciones nuevas. Revisar en Matriz si quedó alguna orden de 1 × AAPL colgada.`);
+    log(`[prueba] FALLO (intento ${plomeriaIntento}): ${e.message}`);
+    if (ultimo) await tg(`<b>COCOS BOT · prueba FALLÓ</b>\n${e.message}\nHoy NO abre posiciones nuevas. Revisar en Matriz si quedó alguna orden de 1 × AAPL colgada.`);
+    else { await tg(`<b>COCOS BOT · prueba falló, reintento en 10 min</b>\n${e.message}`); await new Promise((r) => setTimeout(r, 9 * 60_000)); }
   }
   return plomeriaOk;
 }
