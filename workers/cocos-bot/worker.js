@@ -435,7 +435,8 @@ async function entrar(sig, tk, riskMult) {
   if ((nHora ?? 0) >= MAX_HORA) { log(`[señal ${tk}] tope de ${MAX_HORA} entradas por hora`); return; }
   const usd = await usdPrecios();
   const p = usd[sym];
-  const lb = await libro(tk);
+  // Precio en pesos: de Primary (el mismo libro donde se ejecuta la orden).
+  const lb = await libro(tk, true);
   const local = lb.last || lb.bid;
   if (!(p > 0 && local > 0)) { log(`[señal ${tk}] sin precio USD o local, no dimensiono a ciegas`); return; }
   const ratio = local / p;
@@ -505,7 +506,12 @@ async function gestionarPendiente(t, usd) {
     return;
   }
   // Viva: ¿el dólar corrió el límite? Recolocar con cancelación confirmada.
-  const p = usd[sym]; const lb = await libro(tk);
+  // Solo con los DOS precios frescos: el CEDEAR de Primary y el subyacente
+  // actualizado hace menos de 2 minutos. El 30/09 la orden de NBIS fue y
+  // vino entre $13.650 y $13.550 porque el feed en dólares estaba caído y el
+  // ratio se calculaba mezclando un precio viejo con uno nuevo.
+  if (Date.now() - _usd.t > 120_000 && !(_yh.get(sym) && Date.now() - _yh.get(sym).t < 120_000)) return;
+  const p = usd[sym]; const lb = await libro(tk, true);
   const local = lb.last || lb.bid;
   if (!(p > 0 && local > 0)) return;
   const ratio = local / p;
