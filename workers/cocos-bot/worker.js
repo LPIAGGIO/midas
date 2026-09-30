@@ -44,8 +44,16 @@ const ENV = leerEnv();
 const BASE = "https://api.cocos.xoms.com.ar";
 const CUENTA = ENV.COCOS_CUENTA || "72404";
 const USER_ID = ENV.COCOS_BOT_USER || "cafc5a8c-1cee-4d57-a765-6aacf1acc661";
-const REAL = ENV.COCOS_BOT_REAL === "1";
-const PROBAR = ENV.COCOS_BOT_PROBAR !== "0";
+/* LIBRO: 'cocos' = el bot real. 'cocos_sombra' = la misma maquinaria SIN
+ * filtro de señales (toma todo soporte con stop y target válidos, como el
+ * sombra de IOL) y SIN órdenes reales: REAL queda en false por código, no
+ * por configuración, así una instancia sombra nunca puede operar. Sirve para
+ * comparar al fin del día filtro contra sin filtro con las reglas de Cocos. */
+const LIBRO = ENV.COCOS_BOT_LIBRO === "cocos_sombra" ? "cocos_sombra" : "cocos";
+const SOMBRA = LIBRO === "cocos_sombra";
+const REAL = !SOMBRA && ENV.COCOS_BOT_REAL === "1";
+const PROBAR = !SOMBRA && ENV.COCOS_BOT_PROBAR !== "0";
+const TG_ON = !SOMBRA && ENV.COCOS_BOT_TG !== "0";
 const CAP = Number(ENV.COCOS_BOT_CAP || 20_000_000);
 const MAX_POS_ARS = Number(ENV.COCOS_BOT_MAX_POS_ARS || 2_000_000);
 const MAX_DIA = Number(ENV.COCOS_BOT_MAX_DIA || 6);
@@ -77,7 +85,11 @@ const hhmmAr = () => { const s = new Date().toLocaleTimeString("en-GB", { timeZo
 const esHabil = () => { const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" })).getDay(); return d >= 1 && d <= 5; };
 
 function leerEnv() {
-  const txt = fs.readFileSync(path.join(__dirname, ".env"), "utf8");
+  // El .env se lee del directorio de TRABAJO, no del archivo: la instancia
+  // sombra corre en ~/workers/cocos-sombra con worker.js enlazado al del bot,
+  // y con __dirname habria leido el .env del bot REAL (REAL=1).
+  const ruta = fs.existsSync(path.join(process.cwd(), ".env")) ? path.join(process.cwd(), ".env") : path.join(__dirname, ".env");
+  const txt = fs.readFileSync(ruta, "utf8");
   const o = {};
   for (const l of txt.split("\n")) {
     const m = /^([A-Z0-9_]+)=(.*)$/.exec(l.trim());
@@ -209,7 +221,7 @@ async function earningsCerca(tk) {
 /* ───────── Telegram ───────── */
 let _chat = null;
 async function tg(texto) {
-  if (!ENV.TELEGRAM_BOT_TOKEN) return;
+  if (!TG_ON || !ENV.TELEGRAM_BOT_TOKEN) return;
   try {
     if (!_chat) { const { data } = await supabase.from("telegram_links").select("chat_id").eq("user_id", USER_ID).eq("enabled", true).maybeSingle(); _chat = data?.chat_id || null; }
     if (!_chat) return;
@@ -297,7 +309,9 @@ async function buscarSenales() {
     if (!UNIVERSO.has(tk)) faltas.push("fuera del universo");
     if (ARG_LOCAL.has(tk)) faltas.push("acción argentina (v1 solo CEDEARs)");
     let riskMult = 1;
-    if (r.modo === "shadow") {
+    if (SOMBRA) {
+      // sin filtro: solo universo y que sea CEDEAR (ya chequeado arriba)
+    } else if (r.modo === "shadow") {
       const { rgm, contra } = parseSenal(r.senal);
       const mixtoOk = rgm === "mixto" && score >= 8 && rr >= 2.5;
       if (score < 7) faltas.push(`score ${score}`);
@@ -307,18 +321,18 @@ async function buscarSenales() {
       if (mixtoOk) riskMult = 0.5;
     } else if (/regimen mixto/i.test(r.senal || "")) riskMult = 0.5;
     if (faltas.length) { log(`[señal ${tk}] no califica: ${faltas.join(" · ")}`); continue; }
-    if (await earningsCerca(tk)) { log(`[señal ${tk}] no califica: balance en 3 días`); continue; }
+    if (!SOMBRA && await earningsCerca(tk)) { log(`[señal ${tk}] no califica: balance en 3 días`); continue; }
     await entrar(r, tk, riskMult);
   }
 }
 
 async function abiertasCocos() {
-  const { data } = await supabase.from("paper_iol_trades").select("*").eq("modo", "cocos").in("status", ["pending", "open"]);
+  const { data } = await supabase.from("paper_iol_trades").select("*").eq("modo", LIBRO).in("status", ["pending", "open"]);
   return data || [];
 }
 async function perdidaHoy(vivas, usd) {
   const hoyIni = new Date(); hoyIni.setUTCHours(3, 0, 0, 0);
-  const { data: cerr } = await supabase.from("paper_iol_trades").select("pnl_ars").eq("modo", "cocos").eq("status", "closed").gte("exit_ts", hoyIni.toISOString());
+  const { data: cerr } = await supabase.from("paper_iol_trades").select("pnl_ars").eq("modo", LIBRO).eq("status", "closed").gte("exit_ts", hoyIni.toISOString());
   let t = (cerr || []).reduce((s, r) => s + (Number(r.pnl_ars) || 0), 0);
   for (const v of vivas) {
     if (v.status !== "open") continue;
@@ -335,7 +349,7 @@ async function entrar(sig, tk, riskMult) {
   const vivas = await abiertasCocos();
   if (vivas.some((v) => String(v.ticker).toUpperCase() === tk)) { log(`[señal ${tk}] ya hay posición u orden viva en Cocos`); return; }
   const hoyIni = new Date(); hoyIni.setUTCHours(3, 0, 0, 0);
-  const { count: nHoy } = await supabase.from("paper_iol_trades").select("id", { count: "exact", head: true }).eq("modo", "cocos").gte("created_at", hoyIni.toISOString());
+  const { count: nHoy } = await supabase.from("paper_iol_trades").select("id", { count: "exact", head: true }).eq("modo", LIBRO).gte("created_at", hoyIni.toISOString());
   if ((nHoy ?? 0) >= MAX_DIA) { log(`[señal ${tk}] tope de ${MAX_DIA} entradas por día`); return; }
   const usd = await usdPrecios();
   const p = usd[sym];
@@ -354,12 +368,12 @@ async function entrar(sig, tk, riskMult) {
   if (comprometido + qty * limArs > CAP) qty = Math.floor((CAP - comprometido) / limArs);
   if (qty < 1) { log(`[señal ${tk}] sin capital: comprometido ${pesos(comprometido)} de ${pesos(CAP)}`); return; }
   const perd = await perdidaHoy(vivas, usd);
-  if (perd <= -PERDIDA_DIA) {
+  if (PERDIDA_DIA > 0 && perd <= -PERDIDA_DIA) {
     if (avisoPerdida !== diaAr(new Date())) { avisoPerdida = diaAr(new Date()); await tg(`<b>COCOS BOT · freno diario</b>\nPérdida del día ${pesos(perd)} supera ${pesos(PERDIDA_DIA)}: no abro más posiciones hoy.`); }
     log(`[señal ${tk}] freno diario: pérdida ${pesos(perd)}`); return;
   }
   if (!plomeriaOk) { log(`[señal ${tk}] la prueba de plomería falló hoy: no coloco`); return; }
-  if (!(await botHabilitado())) { if (avisoApagado !== diaAr(new Date())) { avisoApagado = diaAr(new Date()); log("bot_enabled=false para cocos: sin entradas nuevas"); } return; }
+  if (!SOMBRA && !(await botHabilitado())) { if (avisoApagado !== diaAr(new Date())) { avisoApagado = diaAr(new Date()); log("bot_enabled=false para cocos: sin entradas nuevas"); } return; }
   if (REAL) {
     const disp = await disponible24().catch(() => null);
     if (disp != null && disp < qty * limArs * 1.01) {
@@ -376,7 +390,7 @@ async function entrar(sig, tk, riskMult) {
   const { data: fila, error } = await supabase.from("paper_iol_trades").insert({
     ticker: tk, sym, senal: `COCOS · ${sig.senal || ""}`.replace("SIN FILTRO · ", ""), score: sig.score, rr: sig.rr,
     status: "pending", qty, entry_limit: entry, stop, stop_inicial: stop, target, r_value: entry - stop,
-    modo: "cocos", perfil: "cocos", ratio: Math.round(ratio * 100) / 100, px_ars_orden: limArs,
+    modo: LIBRO, perfil: "cocos", ratio: Math.round(ratio * 100) / 100, px_ars_orden: limArs,
     broker_order_id: brokerId, regla_salida: TP_PARCIAL > 0 ? "trailing_atr+tp50" : "trailing_atr",
     nota_sim: `Orden límite ${qty} × ${pesos(limArs)} (US$${entry.toFixed(2)} × ratio ${ratio.toFixed(2)}). Stop ${STOP_ATR}×ATR US$${stop.toFixed(2)} · target US$${target.toFixed(2)}${TARGET_PCT > 0 && target < targetSig ? ` (tapado a +${(TARGET_PCT * 100).toFixed(1)}%)` : ""}.${REAL ? "" : " SIMULADA (COCOS_BOT_REAL≠1)."}`,
   }).select("id").single();
@@ -507,7 +521,7 @@ async function cerrar(t, kind, qty, pxArs, usd) {
   const p = usd[sym]; const ratio = Number(t.ratio) || (p > 0 ? pxArs / p : 1);
   const comun = { px_ars_salida: Math.round(pxArs), exit_price: pxArs / ratio, exit_ts: new Date().toISOString(), fees_ars: Math.round(fee), pnl_ars: Math.round(pnl), fees_ars_alt: Math.round(fee), pnl_ars_alt: Math.round(pnl), tarifa_alt: "cocos", intradia, veredicto: pnl > 0 ? "acierto" : "error", pnl_pct: Math.round((pnl / (pxEnt * qty)) * 10000) / 100 };
   if (kind === "tp_parcial") {
-    await supabase.from("paper_iol_trades").insert({ ...comun, ticker: t.ticker, sym: t.sym, senal: t.senal, score: t.score, rr: t.rr, status: "closed", qty, entry_limit: t.entry_limit, entry_price: t.entry_price, entry_ts: t.entry_ts, stop: t.stop, stop_inicial: t.stop_inicial, target: t.target, r_value: t.r_value, modo: "cocos", perfil: "cocos", ratio: t.ratio, px_ars_entrada: pxEnt, exit_reason: "tp_parcial", regla_salida: "tp50_hijo", broker_order_id: salidas.get(t.id)?.id || null });
+    await supabase.from("paper_iol_trades").insert({ ...comun, ticker: t.ticker, sym: t.sym, senal: t.senal, score: t.score, rr: t.rr, status: "closed", qty, entry_limit: t.entry_limit, entry_price: t.entry_price, entry_ts: t.entry_ts, stop: t.stop, stop_inicial: t.stop_inicial, target: t.target, r_value: t.r_value, modo: LIBRO, perfil: "cocos", ratio: t.ratio, px_ars_entrada: pxEnt, exit_reason: "tp_parcial", regla_salida: "tp50_hijo", broker_order_id: salidas.get(t.id)?.id || null });
     await supabase.from("paper_iol_trades").update({ qty: t.qty - qty, regla_salida: String(t.regla_salida || "") + "+tp50hecho" }).eq("id", t.id);
     await tg(`<b>COCOS BOT · VENTA PARCIAL ${tk}</b>\n${qty} × ${pesos(pxArs)} · P&L ${pnl >= 0 ? "+" : "−"}${pesos(Math.abs(pnl))} · quedan ${t.qty - qty}`);
   } else {
@@ -606,7 +620,8 @@ if (process.argv.includes("--chequeo")) {
     process.exit(0);
   })().catch((e) => { console.error("chequeo:", e.message); process.exit(1); });
 } else (async () => {
-  log(`cocos-bot arrancando · ${REAL ? "*** ORDENES REALES ***" : "simulado (COCOS_BOT_REAL≠1)"} · cuenta ${CUENTA} · cap ${pesos(CAP)} · ${pesos(MAX_POS_ARS)}/papel · ${MAX_DIA} entradas/día · stop ${STOP_ATR}×ATR ${TRAILING ? "con trailing" : "FIJO (sin trailing)"} · target ${TARGET_PCT > 0 ? `+${(TARGET_PCT * 100).toFixed(1)}% o resistencia` : "resistencia"} · universo ${UNIVERSO.size} papeles`);
+  log(`config: ${fs.existsSync(path.join(process.cwd(), ".env")) ? path.join(process.cwd(), ".env") : path.join(__dirname, ".env")}`);
+  log(`cocos-bot arrancando · libro ${LIBRO}${SOMBRA ? " (SIN FILTRO)" : ""} · ${REAL ? "*** ORDENES REALES ***" : "simulado (sin órdenes reales)"} · cuenta ${CUENTA} · cap ${pesos(CAP)} · ${pesos(MAX_POS_ARS)}/papel · ${MAX_DIA} entradas/día · stop ${STOP_ATR}×ATR ${TRAILING ? "con trailing" : "FIJO (sin trailing)"} · target ${TARGET_PCT > 0 ? `+${(TARGET_PCT * 100).toFixed(1)}% o resistencia` : "resistencia"} · universo ${UNIVERSO.size} papeles`);
   await token();
   log("login Primary OK");
   // Reconciliación al arrancar: las señales shadow anteriores al arranque no
