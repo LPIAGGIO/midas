@@ -56,7 +56,11 @@ const PROBAR = !SOMBRA && ENV.COCOS_BOT_PROBAR !== "0";
 const TG_ON = !SOMBRA && ENV.COCOS_BOT_TG !== "0";
 const CAP = Number(ENV.COCOS_BOT_CAP || 20_000_000);
 const MAX_POS_ARS = Number(ENV.COCOS_BOT_MAX_POS_ARS || 2_000_000);
-const MAX_DIA = Number(ENV.COCOS_BOT_MAX_DIA || 6);
+// Tope de entradas: por HORA (ventana movil de 60 min), pedido de LP
+// 30/09/2026 ("6 por dia no es necesario, maximo 6 por hora"). El tope por
+// dia queda opcional (0 = sin tope); el freno real es el capital (20M / 2M).
+const MAX_HORA = Number(ENV.COCOS_BOT_MAX_HORA || 6);
+const MAX_DIA = Number(ENV.COCOS_BOT_MAX_DIA || 0);
 const STOP_ATR = Number(ENV.COCOS_BOT_STOP_ATR ?? 1.5);
 const TARGET_PCT = Number(ENV.COCOS_BOT_TARGET_PCT || 0);        // 0 = resistencia
 const TP_PARCIAL = Number(ENV.COCOS_BOT_TP_PARCIAL ?? 0.5);       // 0 apaga
@@ -350,7 +354,9 @@ async function entrar(sig, tk, riskMult) {
   if (vivas.some((v) => String(v.ticker).toUpperCase() === tk)) { log(`[señal ${tk}] ya hay posición u orden viva en Cocos`); return; }
   const hoyIni = new Date(); hoyIni.setUTCHours(3, 0, 0, 0);
   const { count: nHoy } = await supabase.from("paper_iol_trades").select("id", { count: "exact", head: true }).eq("modo", LIBRO).gte("created_at", hoyIni.toISOString());
-  if ((nHoy ?? 0) >= MAX_DIA) { log(`[señal ${tk}] tope de ${MAX_DIA} entradas por día`); return; }
+  if (MAX_DIA > 0 && (nHoy ?? 0) >= MAX_DIA) { log(`[señal ${tk}] tope de ${MAX_DIA} entradas por día`); return; }
+  const { count: nHora } = await supabase.from("paper_iol_trades").select("id", { count: "exact", head: true }).eq("modo", LIBRO).gte("created_at", new Date(Date.now() - 3600_000).toISOString());
+  if ((nHora ?? 0) >= MAX_HORA) { log(`[señal ${tk}] tope de ${MAX_HORA} entradas por hora`); return; }
   const usd = await usdPrecios();
   const p = usd[sym];
   const lb = await libro(tk);
@@ -621,7 +627,7 @@ if (process.argv.includes("--chequeo")) {
   })().catch((e) => { console.error("chequeo:", e.message); process.exit(1); });
 } else (async () => {
   log(`config: ${fs.existsSync(path.join(process.cwd(), ".env")) ? path.join(process.cwd(), ".env") : path.join(__dirname, ".env")}`);
-  log(`cocos-bot arrancando · libro ${LIBRO}${SOMBRA ? " (SIN FILTRO)" : ""} · ${REAL ? "*** ORDENES REALES ***" : "simulado (sin órdenes reales)"} · cuenta ${CUENTA} · cap ${pesos(CAP)} · ${pesos(MAX_POS_ARS)}/papel · ${MAX_DIA} entradas/día · stop ${STOP_ATR}×ATR ${TRAILING ? "con trailing" : "FIJO (sin trailing)"} · target ${TARGET_PCT > 0 ? `+${(TARGET_PCT * 100).toFixed(1)}% o resistencia` : "resistencia"} · universo ${UNIVERSO.size} papeles`);
+  log(`cocos-bot arrancando · libro ${LIBRO}${SOMBRA ? " (SIN FILTRO)" : ""} · ${REAL ? "*** ORDENES REALES ***" : "simulado (sin órdenes reales)"} · cuenta ${CUENTA} · cap ${pesos(CAP)} · ${pesos(MAX_POS_ARS)}/papel · ${MAX_HORA} entradas/hora${MAX_DIA > 0 ? ` (tope ${MAX_DIA}/día)` : ""} · stop ${STOP_ATR}×ATR ${TRAILING ? "con trailing" : "FIJO (sin trailing)"} · target ${TARGET_PCT > 0 ? `+${(TARGET_PCT * 100).toFixed(1)}% o resistencia` : "resistencia"} · universo ${UNIVERSO.size} papeles`);
   await token();
   log("login Primary OK");
   // Reconciliación al arrancar: las señales shadow anteriores al arranque no
