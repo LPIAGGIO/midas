@@ -1423,6 +1423,9 @@ async function tickDelLibro(simbolo, token) {
   } catch { return null; }
 }
 const BOT_RISK = 0.015;      // riesgo por trade: 1,5% del capital
+// Libros que maneja ESTE worker. Ninguna lectura de paper_iol_trades puede
+// salir de aca: hay otros workers escribiendo sus propios modos en la tabla.
+const MIS_MODOS = ["paper", "real", "shadow"];
 const BOT_VENTANA_H = 48;    // la orden límite vive 48hs y se cae sola
 const IVA = 1.21;
 const DERECHOS = 0.0005 * IVA;                                  // 0,0605%
@@ -1952,7 +1955,7 @@ async function avisarRecolocacion(t, nuevoPx, motivo) {
 async function paperSignal(sym, tk, entry, stop, target, score, rr, senal, riskMult = 1, libro = "paper") {
   if (!BOT_UNIVERSO.has(String(tk).toUpperCase())) return;   // opera 3 papeles, no todo el tablero
   const esShadow = libro === "shadow";
-  const { data: exAll } = await supabase.from("paper_iol_trades").select("id,status,entry_limit,modo,broker_order_id").eq("sym", sym).in("status", ["pending", "open"]);
+  const { data: exAll } = await supabase.from("paper_iol_trades").select("id,status,entry_limit,modo,broker_order_id").eq("sym", sym).in("status", ["pending", "open"]).in("modo", MIS_MODOS);
   const ex = (exAll || []).filter((t) => (t.modo === "shadow") === esShadow); // cada libro se deduplica solo
   if (ex.some((t) => t.status === "open")) return;          // ya hay posición en el papel (en este libro)
   const pend = ex.filter((t) => t.status === "pending");
@@ -2191,7 +2194,10 @@ const fillIolCheck = new Map();
 const fillPorIol = new Set();
 async function paperPass() {
   await resolverModo();
-  const { data: trades } = await supabase.from("paper_iol_trades").select("*").in("status", ["pending", "open"]);
+  // SOLO mis libros: la tabla tambien tiene 'cocos' y 'cocos_sombra' (otro
+  // worker). El 01/10/2026 este paso tomo una fila de Cocos y coloco su orden
+  // en IOL con plata real (ver patch_solo_mis_modos.py).
+  const { data: trades } = await supabase.from("paper_iol_trades").select("*").in("status", ["pending", "open"]).in("modo", MIS_MODOS);
   if (!trades?.length) return;
   const now = Date.now();
   for (const t of trades.filter((x) => x.status === "pending" && now - new Date(x.created_at).getTime() > BOT_VENTANA_H * 3600 * 1000)) {
