@@ -9196,12 +9196,12 @@ function useStockPrices() {
             if (!cat || !usd || !local) continue;
             const theo = (usd * ccl) / cat.r;
             if (!(theo > 0) || theo > local.price * 1.12 || theo < local.price * 0.88) continue;
-            map[tk] = {
-              ...local,
-              price: theo,
-              source: "teorico",
-              changePct: local.previousClose > 0 ? (theo / local.previousClose - 1) * 100 : local.changePct,
-            };
+            // 30/09/2026: el teórico ya NO pisa el precio. Valuar al teórico
+            // hacía que el "Hoy" de Midas no coincidiera con el P&L diario de
+            // Matriz, que usa el último operado local (HUT −316k vs −421k,
+            // MU +59k vs −41k). Queda como dato aparte (`teorico`) para
+            // mostrarlo como referencia de hacia dónde corregiría el CEDEAR.
+            map[tk] = { ...local, teorico: theo };
           }
         }
 
@@ -13000,6 +13000,12 @@ function resolvePositionPrice(p, bondPrices, futurePrices, stockPrices, fciPrice
   // 2) Para futuros, feed Primary (tiempo real).
   if (p.instrument_type === "future" && futurePrices && ticker) {
     const fp = futurePrices[ticker];
+    // Con el ajuste de HOY publicado, la posición se valúa al ajuste (como el
+    // broker), no al último operado ni al mid (30/09/2026).
+    const hoyAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    if (fp?.settlementDate === hoyAR && Number(fp?.settlement) > 0 && !fp.error) {
+      return { price: Number(fp.settlement), source: "settle" };
+    }
     if (fp?.price != null && !fp.error) {
       return { price: Number(fp.price), source: "primary" };
     }
@@ -13366,17 +13372,18 @@ function computeDailyPnL(p, bondPrices, futurePrices, stockPrices, futureAdjLook
     // contra el último operado, no contra el midpoint del book. Usar fp.price
     // mezcla criterios (cae a mid cuando last no es fresco) y genera divergen-
     // cias con la acreditación real. Fallback: settlement si no hay last hoy.
-    const lastRaw = fp?.last != null ? fp.last : fp?.settlement;
+    // 30/09/2026: cuando A3 ya publicó el AJUSTE de hoy, ése es el precio
+    // del día (así lo liquida Matriz), no el último operado. El último de
+    // DLRNOV26 fue 1.574,5 a las 14:59 y el ajuste quedó ~1.577,5: Midas
+    // decía −150.000 y Matriz +103.000.
+    const todayAR = new Date().toLocaleDateString("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+    });
+    const settleHoy = fp?.settlementDate === todayAR && Number(fp?.settlement) > 0 ? Number(fp.settlement) : null;
+    const lastRaw = settleHoy != null ? settleHoy : (fp?.last != null ? fp.last : fp?.settlement);
     if (lastRaw != null && !fp?.error) {
       const last = Number(lastRaw);
       const lookupEntry = futureAdjLookup ? futureAdjLookup.get(p.id) : null;
-      // Fecha de hoy en ART, no UTC. Con `new Date().toISOString` entre
-      // 21:00 y 23:59 ART el slice(0,10) avanza al día UTC siguiente —
-      // eso rompía la comparación contra entry_date (que se guarda como
-      // YYYY-MM-DD en ART).
-      const todayAR = new Date().toLocaleDateString("en-CA", {
-        timeZone: "America/Argentina/Buenos_Aires",
-      });
       // Base del P&L del día:
       //   1) lote abierto HOY → su precio de entrada (scalp intradía).
       //   2) lote arrastrado → settle de AYER = fp.reference (feed matba). NO

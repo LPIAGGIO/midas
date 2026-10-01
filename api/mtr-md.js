@@ -60,6 +60,12 @@ function rowToPriceEntry(row, nowMs) {
   const reference = row.reference != null ? Number(row.reference) : null;
   const midpoint = bid != null && offer != null ? (bid + offer) / 2 : null;
   const lastDate = row.last_ts ? new Date(row.last_ts).getTime() : null;
+  // Fecha (hora argentina) del settlement que trae la fila: el front compara
+  // contra "hoy" para saber si ya es el ajuste del dia. OJO: el settle de ayer
+  // se publica 21:00 ART = 00:00 UTC de hoy; en UTC parece de hoy y no lo es.
+  const settlementDate = row.settlement_ts
+    ? new Date(row.settlement_ts).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+    : null;
   const lastAge = lastDate != null ? nowMs - lastDate : Infinity;
 
   // Tamaños de las puntas (para order-book imbalance) + volumen.
@@ -89,7 +95,7 @@ function rowToPriceEntry(row, nowMs) {
     freshness = "stale";
   }
 
-  return { last, bid, offer, settlement, reference, midpoint, price, priceSource, lastDate, freshness, bidSize, askSize, volume };
+  return { last, bid, offer, settlement, settlementDate, reference, midpoint, price, priceSource, lastDate, freshness, bidSize, askSize, volume };
 }
 
 /** app ticker -> security_id de la tabla. DLR va al segmento rx_DDF;
