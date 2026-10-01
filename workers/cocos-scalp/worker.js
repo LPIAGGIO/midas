@@ -64,9 +64,15 @@ const CORTE = Number(ENV.SCALP_CORTE || 0.018);        // caída desde el ancla 
 const PERDIDA_MAX = Number(ENV.SCALP_PERDIDA_MAX_ARS || 60000);
 const HORA_INICIO = Number(ENV.SCALP_HORA_INICIO || 1035);
 const HORA_CIERRE = Number(ENV.SCALP_HORA_CIERRE || 1645);
+// Después de esta hora no se abre un ciclo NUEVO (01/10/2026: abrió uno a 28
+// minutos del cierre, sin tiempo de llegar a su venta). Los escalones de un
+// ciclo ya abierto siguen funcionando hasta HORA_CIERRE.
+const HORA_ULTIMO_CICLO = Number(ENV.SCALP_HORA_ULTIMO_CICLO || 1615);
 const REANCLA_MS = Number(ENV.SCALP_REANCLA_MIN || 10) * 60_000;
 const REAL = ENV.SCALP_REAL === "1";
+const CIERRE_VENDE = ENV.SCALP_CIERRE_VENDE === "1";    // por defecto NO vende al cierre: arrastra
 const CHEQUEO = process.argv.includes("--chequeo");
+const SOLO_SYNC = process.argv.includes("--sincronizar"); // actualiza el estado contra Primary y sale
 const FEE = 0.00044 * 1.21;                              // 0,053% por punta (intradía)
 // Banco de prueba de la LÓGICA (nunca con REAL): libro sintético que camina al
 // azar y reloj acelerado. node worker.js con SCALP_FAKE=1 en el entorno.
@@ -206,12 +212,23 @@ async function tg(texto) {
 }
 
 /* ───────── estado ───────── */
-const ARCH = path.join(process.cwd(), `estado-${diaAr()}${REAL ? "" : "-sim"}.json`);
+// El estado NO es por día: los papeles que no se vendieron quedan para la
+// rueda siguiente (LP 01/10/2026: "si no se venden, hay que dejarlos abiertos
+// al próximo día"). Lo diario (P&L, vueltas, cierre) se reinicia en nuevoDia().
+const ARCH = path.join(process.cwd(), REAL ? "estado.json" : "estado-sim.json");
+function archivoPrevio() {
+  // Migración: el estado de la versión anterior se llamaba estado-<fecha>.json.
+  const v = fs.readdirSync(process.cwd()).filter((f) => /^estado-\d{4}-\d\d-\d\d\.json$/.test(f)).sort();
+  return v.length ? path.join(process.cwd(), v[v.length - 1]) : null;
+}
 let S = { dia: diaAr(), real: REAL, ancla: null, reentrada: null, niveles: Array.from({ length: NIVELES }, () => ({ held: 0, costo: 0 })), ordenes: [], pnl: 0, rondas: 0, comprado: 0, vendido: 0, fin: null, base: null };
 function heldTot() { return S.niveles.reduce((a, n) => a + n.held, 0); }
 const vivas = () => S.ordenes.filter((o) => !o.final);
 // La simulación no retoma estado: sus órdenes viven en memoria.
-if (REAL && fs.existsSync(ARCH) && !CHEQUEO) { S = JSON.parse(fs.readFileSync(ARCH, "utf8")); log(`retomo el estado del día: ${vivas().length} órdenes vivas, ${heldTot()} papeles, P&L ${pesos(S.pnl)}`); }
+if (REAL && !CHEQUEO) {
+  const origen = fs.existsSync(ARCH) ? ARCH : archivoPrevio();
+  if (origen) { S = JSON.parse(fs.readFileSync(origen, "utf8")); log(`retomo el estado (${path.basename(origen)}, del ${S.dia}): ${vivas().length} órdenes vivas, ${heldTot()} papeles, P&L ${pesos(S.pnl)}`); }
+}
 const guardar = () => { if (!CHEQUEO) fs.writeFileSync(ARCH, JSON.stringify(S)); };
 let rechazos = 0, pausaCompras = 0, ultimoResumen = 0, ultimaTenencia = 0, excesos = 0;
 
@@ -299,13 +316,43 @@ async function liquidar(motivo) {
   await tg(`<b>SCALP ${TK}</b>\n${msg}`);
 }
 
+/* Cierre de la rueda SIN vender: cancela lo apoyado y deja los papeles para
+ * mañana. (SCALP_CIERRE_VENDE=1 vuelve al cierre que liquida todo.) */
+async function cerrarDia() {
+  for (let i = 0; i < 12 && vivas().length; i++) { for (const o of vivas()) { o.cancelT = 0; await cancelar(o, "cierre de la rueda"); } await dormir(2500); await sincronizar(await libro()).catch((e) => log(`sync: ${e.message}`)); }
+  const n = heldTot(), costo = S.niveles.reduce((a, x) => a + x.costo, 0);
+  S.fin = n ? `cierre de la rueda: quedan ${n} papeles abiertos para mañana (costo ${pesos(costo)})` : "cierre de la rueda: sin papeles";
+  guardar();
+  const msg = `CIERRE del día (${S.fin}) · ${S.rondas} ventas · P&L realizado ${pesos(S.pnl)}`;
+  log(msg); await tg(`<b>SCALP ${TK}</b>\n${msg}`);
+}
+/* Rueda nueva con estado de una anterior: las órdenes eran por el día, así
+ * que ya no existen; se consulta su estado final (una venta pudo ejecutarse
+ * después del último registro) y recién ahí se reinicia lo diario. Si la
+ * cuenta tiene MENOS papeles de los que el bot cree llevar, no opera. */
+async function nuevoDia() {
+  log(`rueda nueva (el estado era del ${S.dia}): reviso las órdenes de ayer`);
+  if (REAL) await sincronizar(await libro()).catch((e) => log(`sync: ${e.message}`));
+  for (const o of vivas()) { o.final = true; log(`orden de ayer sin estado final (${o.lado} ${o.qty} × ${o.px}): la doy por vencida`); }
+  const n = heldTot();
+  S.dia = diaAr(); S.pnl = 0; S.rondas = 0; S.comprado = 0; S.vendido = 0; S.fin = null; S.reentrada = null; S.ordenes = [];
+  if (REAL) {
+    const t = await tenenciaCuenta().catch(() => null);
+    if (t != null && t < n) { S.fin = `la cuenta tiene ${t} ${TK} y el bot lleva ${n}: no opero hasta revisar`; log(`ERROR ${S.fin}`); await tg(`<b>SCALP ${TK}</b>\n${S.fin}`); }
+    S.base = t != null ? t - n : null;
+  }
+  guardar();
+  log(`arranco la rueda con ${n} papeles de ayer · ancla ${S.ancla ? pesos(S.ancla) : "—"}`);
+}
+
 async function ciclo() {
+  if (S.dia !== diaAr()) { if (!esHabil() || hhmmAr() < HORA_INICIO) return; await nuevoDia(); }
   const b = await libro();
   await sincronizar(b);
   if (S.fin) return;
   if (fs.existsSync(path.join(process.cwd(), "STOP"))) return liquidar("archivo STOP");
   const hm = hhmmAr();
-  if (hm >= HORA_CIERRE) return liquidar("hora de cierre");
+  if (hm >= HORA_CIERRE) return CIERRE_VENDE ? liquidar("hora de cierre") : cerrarDia();
   if (!esHabil() || hm < HORA_INICIO) return;
   if (rechazos >= 3) { for (const o of vivas()) await cancelar(o, "rechazos"); S.fin = "tres órdenes rechazadas seguidas"; guardar(); log(`ERROR ${S.fin}: me detengo, revisar a mano (tengo ${heldTot()} papeles)`); await tg(`<b>SCALP ${TK}</b>\nTres órdenes rechazadas seguidas: me detuve con ${heldTot()} papeles. Revisar a mano.`); return; }
   if (!(b.bid > 0) || !(b.ask > 0)) return;                       // sin libro no se decide nada
@@ -348,8 +395,10 @@ async function ciclo() {
   for (const c of compras) if (c.nivel !== deseado && c.cum === 0) await cancelar(c, "la grilla se movió");
   const c0 = compras.find((c) => c.nivel === 0 && c.cum === 0);
   const enReentrada = S.reentrada && Date.now() < S.reentrada.hasta;
-  if (c0 && h === -1 && !enReentrada && b.bid > c0.px * 1.001 && Date.now() - c0.t > 60_000) await cancelar(c0, "el precio se alejó");
-  if (!compras.length && deseado < NIVELES && tot + LOTE <= MAX && !pausaCompras && (deseado === 0 || S.ancla)) {
+  const tarde = hm >= HORA_ULTIMO_CICLO;
+  if (c0 && h === -1 && tarde) await cancelar(c0, "ya no se abren ciclos nuevos hoy");
+  else if (c0 && h === -1 && !enReentrada && b.bid > c0.px * 1.001 && Date.now() - c0.t > 60_000) await cancelar(c0, "el precio se alejó");
+  if (!compras.length && deseado < NIVELES && tot + LOTE <= MAX && !pausaCompras && (deseado === 0 ? !tarde : S.ancla)) {
     let px;
     if (deseado === 0) px = enReentrada && b.bid > S.reentrada.px ? S.reentrada.px : b.bid;
     else px = Math.min(alTick(S.ancla * (1 - PASO * deseado), "abajo"), b.ask);
@@ -378,7 +427,14 @@ async function main() {
     log(`spread ${(sp * 100).toFixed(3)}% · costo ida y vuelta ${(2 * FEE * 100).toFixed(3)}% · neto por vuelta de ${LOTE}: ${pesos(LOTE * b.bid * (GANANCIA - 2 * FEE))} · exposición máxima ${pesos(MAX * b.ask)} · pérdida si corta con todo cargado ≈ ${pesos(MAX * b.ask * (CORTE - PASO * (NIVELES - 1) / 2 + 2 * FEE))}`);
   }
   if (CHEQUEO) process.exit(0);
-  if (S.fin) { log(`el día ya se cerró (${S.fin}). Para volver a operar hoy, borrar ${path.basename(ARCH)}`); return; }
+  if (SOLO_SYNC) {
+    if (!REAL) { log("--sincronizar solo tiene sentido con órdenes reales"); process.exit(1); }
+    await sincronizar(b);
+    log(`sincronizado · tengo ${heldTot()} (cuenta ${ten ?? "?"}) · órdenes vivas ${vivas().length} · P&L ${pesos(S.pnl)} · ${S.rondas} ventas`);
+    guardar(); process.exit(0);
+  }
+  if (S.dia !== diaAr() && esHabil() && hhmmAr() >= HORA_INICIO) await nuevoDia();
+  if (S.fin) log(`el día ya se cerró (${S.fin}). Mañana retoma solo.`);
   if (REAL && disp != null && b.ask > 0 && disp < MAX * b.ask * 1.01) { log(`ERROR disponible ${pesos(disp)} menor a la exposición máxima ${pesos(MAX * b.ask)}: no arranco`); process.exit(1); }
   if (REAL && S.base == null && ten != null) { S.base = ten - heldTot(); guardar(); }
   let ocupado = false;

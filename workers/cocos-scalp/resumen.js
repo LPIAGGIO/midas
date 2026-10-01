@@ -52,7 +52,7 @@ function leerBot(dir) {
   if (!tk) return null;
   ev.sort((a, b) => a.t - b.t);
   let est = null;
-  const arch = path.join(dir, `estado-${hoy}.json`);
+  const arch = fs.existsSync(path.join(dir, "estado.json")) ? path.join(dir, "estado.json") : path.join(dir, `estado-${hoy}.json`);
   if (fs.existsSync(arch)) { try { est = JSON.parse(fs.readFileSync(arch, "utf8")); } catch { /* sin estado */ } }
   return { tk, ev, est };
 }
@@ -76,17 +76,16 @@ function armar(b) {
   }
   L.push(`Operado: compras ${plata(comprado)} · ventas ${plata(vendido)}`);
   const quedan = b.est ? b.est.niveles.reduce((a, n) => a + n.held, 0) : null;
-  if (quedan) L.push(`<b>OJO: quedaron ${quedan} papeles sin vender</b> (costo ${plata(b.est.niveles.reduce((a, n) => a + n.costo, 0))})`);
-  if (b.est?.fin) L.push(`Cierre: ${b.est.fin}`);
-  else if (b.est) L.push("El bot no registró el cierre del día (revisar).");
-  L.push(`<b>Resultado del día (neto de comisiones): ${pesos(total)}</b>`);
+  if (quedan) L.push(`<b>Quedan ${quedan} papeles abiertos para mañana</b> (costo ${plata(b.est.niveles.reduce((a, n) => a + n.costo, 0))})`);
+  if (b.est?.fin && !/^cierre de la rueda/.test(b.est.fin)) L.push(`Cierre: ${b.est.fin}`);
+  L.push(`<b>Resultado realizado del día (neto de comisiones): ${pesos(total)}</b>`);
   if (comprado > 0) L.push(`Sobre lo operado: ${(total / comprado * 100).toFixed(3).replace(".", ",")}%`);
   return { texto: L.join("\n"), total, vueltas: ventas.length };
 }
 async function main() {
   // Antes del cierre de las grillas (16:45) no se manda: el detalle estaría a medias.
   const hm = Number(new Date().toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }).slice(0, 5).replace(":", ""));
-  if (!DRY && !process.argv.includes("--forzar") && hm < 1646) { console.log(`son las ${hm}: el resumen sale después de las 16:45`); return; }
+  if (!DRY && !process.argv.includes("--forzar") && hm < 1700) { console.log(`son las ${hm}: el resumen sale después de las 17:00`); return; }
   const bots = fs.readdirSync(RAIZ).filter((d) => /^cocos-scalp/.test(d)).map((d) => leerBot(path.join(RAIZ, d))).filter((b) => b && b.ev.length);
   if (!bots.length) { console.log("sin operaciones reales de scalp hoy: no mando nada"); return; }
   const partes = bots.map(armar);
