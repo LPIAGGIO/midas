@@ -89,3 +89,27 @@ Conclusión: sin corte, la grilla gana cuando el sector sube y pierde casi todo
 el capital de la grilla cuando el sector entra en un ciclo malo. No hay un
 filtro medido que separe "buen papel" por adelantado; la apuesta es al ciclo
 del sector y el único límite real es el máximo de papeles.
+
+## Dos cuentas desfasadas (02/10/2026)
+
+El 02/10 la cuenta 3893 arrancó a las 12:24, cerca del mínimo, y a la hora
+estaba +$20.800 contra −$15.400 de la 72404 (misma grilla, mismos papeles).
+LP pidió medir si conviene desfasarlas. `desfasaje.py`, 9 papeles, sin corte
+con refuerzo de 50%; A = configuración actual, B = segunda cuenta.
+
+| Variante de B | 5 min, 43 ruedas (A+B) | Horario, 730 ruedas | Diario, 1.255 ruedas | Peor momento combinado (5m / h / d) |
+|---|---:|---:|---:|---|
+| igual a A (hoy) | +5.293 | +45.626 | +39.051 | −5.589 / −25.997 / −32.683 |
+| abre tras caer medio escalón | +5.248 | +44.341 | +35.925 | −5.073 / −25.711 / −32.507 |
+| abre tras caer un escalón | +4.400 | +40.900 | +35.849 | −4.266 / −25.433 / −32.399 |
+| espera el triple antes de perseguir | +5.380 | +43.629 | +37.311 | −5.319 / −25.704 / −31.957 |
+| grilla 1,5 veces más ancha | +5.211 | +46.618 | +41.264 | −5.162 / −25.446 / −32.115 |
+| grilla 0,7 veces más angosta | +5.432 | +44.078 | +35.848 | −5.954 / −26.229 / −32.991 |
+
+Veredicto: desfasar casi no cambia nada. Las dos cuentas terminan cargadas a
+la vez entre 55% y 80% del tiempo con cualquier variante, porque el desfasaje
+se pierde cuando el papel cae de corrido (que es cuando importa). Lo del 02/10
+fue el horario de entrada, no una ventaja repetible. La única variante que
+mejora un poco en las dos muestras largas es B con grilla 1,5 veces más ancha
+(+2% a +6% de resultado, 2% menos de peor momento), dentro del ruido y a favor
+del sesgo conocido de las velas gruesas hacia grillas anchas.

@@ -42,13 +42,13 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0):
     """corte=None → holdea sin limite. Devuelve metricas en USD."""
     # doble: con la grilla llena, si el precio cae a ancla*(1 - doble*profundidad) compra
     # OTRA VEZ la misma cantidad que tiene y pasa a salir todo junto en promedio + gan.
     X = 99
     # permitido: fechas en las que se puede ABRIR un ciclo nuevo (None = siempre)
-    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV)
+    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV, espera=0)
     lots = {}          # k -> (precio, unidades, costo_usd)
     por_anio = {}
 
@@ -123,6 +123,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                         vender(kk, p1 if salto else obj, fecha)
                     E['reent'] = E['ancla']
                     E['ancla'] = None
+                    E['espera'] = espera_barras
                     return
                 k = min(lots, key=lambda kk: lots[kk][0])
                 obj = lots[k][0] * (1 + gan)
@@ -132,8 +133,11 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                 if not lots:
                     E['reent'] = E['ancla']
                     E['ancla'] = None
+                    E['espera'] = espera_barras
 
     eq = []
+    s_ab = []
+    s_lot = []
     cargado = racha = racha_max = 0
     peor_abierto = 0.0
     prev_c = None
@@ -148,13 +152,21 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
             mover(prev_c, o, fecha, True)
         E['ok'] = permitido is None or fecha in permitido
         if E['ok'] and E['ancla'] is None and E['parado'] is None and E['reent'] is None:
-            comprar(0, o)               # arranque, o primera vela despues de un corte
+            if entrada_off > 0:
+                E['reent'] = o * (1 - entrada_off)   # espera una caida antes de abrir el ciclo
+            else:
+                comprar(0, o)           # arranque, o primera vela despues de un corte
         camino = [o, l, h, c] if c >= o else [o, h, l, c]
         for a, b in zip(camino, camino[1:]):
             mover(a, b, fecha, False)
         if E['ok'] and E['ancla'] is None and E['parado'] is None:
-            E['reent'] = None
-            comprar(0, c)               # no volvio al ancla: sigue al precio
+            if E['espera'] > 0:
+                E['espera'] -= 1        # sigue esperando que vuelva al ancla
+            elif entrada_off > 0:
+                E['reent'] = c * (1 - entrada_off)   # la orden sigue al precio, siempre una caida abajo
+            else:
+                E['reent'] = None
+                comprar(0, c)           # no volvio al ancla: sigue al precio
         if cierre_vende and (i + 1 == len(bars) or bars[i + 1][0] != fecha):
             # ultima vela del dia: vende todo al cierre y mañana arranca de cero
             for kk in list(lots):
@@ -165,6 +177,8 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         ab = sum(u * c / E['fx'] - cusd for (_, u, cusd) in lots.values())
         peor_abierto = min(peor_abierto, ab)
         eq.append(E['real'] + ab)
+        s_ab.append(ab)
+        s_lot.append(len(lots))
         if fecha != prev_f:
             if len(lots) >= NIV:
                 cargado += 1
@@ -180,7 +194,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         dd = min(dd, e - pico)
     dias = len({b[0] for b in bars})
     return dict(total=eq[-1], real=E['real'], abierto=eq[-1] - E['real'], rondas=E['rondas'], cortes=E['cortes'], perd=E['perd'], dd=dd,
-                capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio)
+                capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio, eq=eq, s_ab=s_ab, s_lot=s_lot)
 
 
 CORTES = [0.05, 0.075, 0.10, 0.15, 0.20, 0.30, None]
