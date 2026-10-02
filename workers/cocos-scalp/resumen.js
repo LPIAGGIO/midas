@@ -40,12 +40,16 @@ function leerBot(dir) {
       const m = /\[(\d{4}-\d\d-\d\dT[\d:.]+Z)\] \[scalp ([A-Z0-9.]+)\] (.*)$/.exec(l);
       if (!m) continue;
       const t = new Date(m[1]);
-      if (t.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }) !== hoy) continue;
       const txt = m[3];
+      // El modo (real o simulado) y la cuenta se leen de TODO el log, no solo de
+      // hoy: un bot encendido ayer sigue operando hoy sin volver a anunciarse
+      // (02/10/2026: el resumen omitia a los cuatro papeles prendidos la noche
+      // anterior). Solo los eventos se filtran por fecha.
       if (txt.startsWith("SIMULADO")) { real = false; continue; }
       if (txt.includes("ÓRDENES REALES")) { real = true; tk = m[2]; continue; }
       const mc = /^cuenta (\d+) ·/.exec(txt);
       if (mc) { cuenta = mc[1]; continue; }
+      if (t.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }) !== hoy) continue;
       if (!real) continue;
       const hora = t.toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }).slice(0, 5);
       let x;
