@@ -45834,6 +45834,19 @@ function BotScalpingModule() {
                         <td style={td}>{d.ventas}</td>
                       </tr>
                     ))}
+                    {(() => {
+                      // Totalizador: acumulado de todos los días listados.
+                      const porC = {}; let tt = 0, vv = 0;
+                      for (const d of histDias) { for (const [c, v] of Object.entries(d.porCuenta)) porC[c] = (porC[c] || 0) + v; tt += d.total; vv += d.ventas; }
+                      return (
+                        <tr style={{ borderTop: `1px solid ${C.borderStrong}`, background: C.deep }}>
+                          <td style={{ ...td, textAlign: "left", fontWeight: 700, color: C.muted, fontFamily: "'Roboto', sans-serif" }}>Acumulado · {histDias.length} {histDias.length === 1 ? "rueda" : "ruedas"}</td>
+                          {cuentas.map(([c]) => <td key={c} style={{ ...td, color: color(porC[c] || 0), fontWeight: 700 }}>{porC[c] != null ? conSigno(porC[c]) : "—"}</td>)}
+                          <td style={{ ...td, color: color(tt), fontWeight: 700 }}>{conSigno(tt)}</td>
+                          <td style={{ ...td, fontWeight: 700 }}>{vv}</td>
+                        </tr>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>
