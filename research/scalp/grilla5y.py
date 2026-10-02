@@ -42,9 +42,10 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None):
     """corte=None → holdea sin limite. Devuelve metricas en USD."""
-    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0)
+    # permitido: fechas en las que se puede ABRIR un ciclo nuevo (None = siempre)
+    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True)
     lots = {}          # k -> (precio, unidades, costo_usd)
     por_anio = {}
 
@@ -70,7 +71,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False):
                     return
                 cand = []
                 if E['ancla'] is None:
-                    if E['reent'] is not None and E['reent'] >= p1:
+                    if E['ok'] and E['reent'] is not None and E['reent'] >= p1:
                         cand.append((min(E['reent'], pos), 'r', 0))
                 else:
                     h = max(lots) if lots else -1
@@ -124,12 +125,13 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False):
             E['parado'] = None          # dia nuevo despues de un corte
         if prev_c is not None:
             mover(prev_c, o, fecha, True)
-        if E['ancla'] is None and E['parado'] is None and E['reent'] is None:
+        E['ok'] = permitido is None or fecha in permitido
+        if E['ok'] and E['ancla'] is None and E['parado'] is None and E['reent'] is None:
             comprar(0, o)               # arranque, o primera vela despues de un corte
         camino = [o, l, h, c] if c >= o else [o, h, l, c]
         for a, b in zip(camino, camino[1:]):
             mover(a, b, fecha, False)
-        if E['ancla'] is None and E['parado'] is None:
+        if E['ok'] and E['ancla'] is None and E['parado'] is None:
             E['reent'] = None
             comprar(0, c)               # no volvio al ancla: sigue al precio
         if cierre_vende and (i + 1 == len(bars) or bars[i + 1][0] != fecha):

@@ -65,3 +65,27 @@ Vender al cierre regala la mayor parte del retorno.
    acotada con ventas escalonadas, que rinde mucho menos que comprar y mantener
    el mismo papel cuando sube, y pierde todo el capital de la grilla cuando no.
 3. La protección que queda no es el corte sino el tamaño: el máximo de papeles.
+
+## "Hay que ver buenos papeles" (objeción de LP, misma noche)
+
+`buenos.py` y `semis2000.py`, con 10 años de velas diarias (`d10/`).
+
+- Los cuatro que hoy son malos eran de los mejores el 17/09/2021, por
+  rendimiento de los 3 años previos entre 263 papeles: SNAP puesto 3 (+690%),
+  GLOB 6 (+454%), PYPL 27 (+219%), NKE 74 (+89%); los cuatro sobre su media de
+  200 ruedas. MU estaba en el puesto 91 y DEBAJO de su media de 200.
+- Elegir "los que mejor venían" fue lo peor: el quinto superior tuvo 50% de
+  grillas positivas y 19% perdió más de la mitad del capital; los otros cuatro
+  quintos, 73% a 78% positivas y 0% a 5% de ruina.
+- Filtro "abrir ciclos solo sobre la media de 200": no cambia nada (la grilla
+  ya está cargada cuando el papel se da vuelta).
+- Semis 2021-2026: 15 de 15 positivos sin corte (mediana +1.679 sobre 2.300).
+  Semis 2016-2021: 8 de 8 positivos.
+- Semis desde el techo de 2000, a 10 años: 7 de 8 negativos (MU −1.496 con el
+  papel −82%, 2.417 días cargada; solo NVDA positivo). Desde 2007 a 5 años: 5
+  de 8 negativos (MU −1.171).
+
+Conclusión: sin corte, la grilla gana cuando el sector sube y pierde casi todo
+el capital de la grilla cuando el sector entra en un ciclo malo. No hay un
+filtro medido que separe "buen papel" por adelantado; la apuesta es al ciclo
+del sector y el único límite real es el máximo de papeles.
