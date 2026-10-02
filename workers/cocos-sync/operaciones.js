@@ -10,9 +10,16 @@
  * operaciones tienen que verse en la cartera. El extracto sigue mandando:
  * esto es solo el puente del día.
  *
- * QUE CARGA (v1): CEDEARs y acciones de BYMA ("MERV - XMEV - TICKER - plazo").
- * Futuros, bonos, cauciones y opciones NO (escalas y cadenas de reemplazo
- * distintas): siguen entrando por el extracto.
+ * QUE CARGA: CEDEARs y acciones de BYMA ("MERV - XMEV - TICKER - plazo") y,
+ * desde el 01/10/2026, FUTUROS de ROFEX (DLR/ORO/WTI; LP: "que actualice las
+ * cosas que se operan en Matriz"). Bonos, cauciones y opciones NO: siguen
+ * entrando por el extracto.
+ *
+ * FUTUROS: en ROFEX cada orden tiene su propio orderId y su propio acumulado
+ * (no hay cadenas con prefijo). Una orden se carga apenas tiene algo
+ * ejecutado y, si después ejecuta más, se ACTUALIZA la misma fila (se busca
+ * por matriz_order_id). Operar un futuro no mueve caja (el trigger
+ * trg_cash_from_import los saltea): su caja son los ajustes diarios.
  *
  * Una orden modificada en Matriz genera varias órdenes con el mismo prefijo
  * de orderId y cantidad ejecutada ACUMULADA: se toma una fila por cadena
@@ -75,16 +82,19 @@ async function main() {
     cadenas.set(clave, c);
   }
   const [ced, acc] = await Promise.all([simbolos("https://data912.com/live/arg_cedears"), simbolos("https://data912.com/live/arg_stocks")]);
-  if (!ced || !acc) throw new Error("sin feed para clasificar CEDEAR / acción: no cargo a ciegas");
+  // Sin feed no se cargan CEDEARs ni acciones a ciegas, pero los futuros no
+  // dependen de esa clasificación y se cargan igual.
+  const sinFeed = !ced || !acc;
+  if (sinFeed) log("sin feed para clasificar CEDEAR / acción: salteo BYMA en esta corrida");
 
   const sb = createClient(env.sbUrl, env.sbKey, { auth: { persistSession: false, autoRefreshToken: false }, realtime: { transport: ws } });
-  const { data: existentes, error: e0 } = await sb.from("positions").select("id,extra").eq("user_id", USER_ID).eq("broker", "cocos").eq("entry_date", hoy);
+  const { data: existentes, error: e0 } = await sb.from("positions").select("id,extra,quantity,entry_price").eq("user_id", USER_ID).eq("broker", "cocos").eq("entry_date", hoy);
   if (e0) throw new Error(`positions: ${e0.message}`);
   const yaCadena = new Set(), yaCl = new Set();
   for (const p of existentes || []) { if (p.extra?.matriz_chain) yaCadena.add(p.extra.matriz_chain); if (p.extra?.matriz_cl_ord_id) yaCl.add(p.extra.matriz_cl_ord_id); if (p.extra?.matriz_order_id) yaCadena.add(String(p.extra.matriz_order_id).split("-")[0]); }
 
   let nuevas = 0;
-  for (const c of cadenas.values()) {
+  for (const c of sinFeed ? [] : cadenas.values()) {
     const top = c.ordenes.reduce((a, o) => ((Number(o.cumQty) || 0) > (Number(a.cumQty) || 0) ? o : a), c.ordenes[0]);
     const qty = Number(top.cumQty) || 0;
     if (qty <= 0) continue;                                   // nada ejecutado
@@ -106,6 +116,48 @@ async function main() {
     if (error) { log(`insert ${c.ticker}: ${error.message}`); continue; }
     nuevas++;
   }
-  log(`operaciones de hoy: ${cadenas.size} cadenas BYMA · ${nuevas} nuevas cargadas`);
+  // ── Futuros de ROFEX ──
+  let futNuevas = 0, futActualizadas = 0, futOrdenes = 0;
+  const porOrden = new Map();
+  for (const p of existentes || []) if (p.extra?.matriz_order_id) porOrden.set(String(p.extra.matriz_order_id), p);
+  for (const o of j.orders || []) {
+    const sym = String(o.instrumentId?.symbol || "").toUpperCase();
+    const m = /^(DLR|ORO|WTI)\/([A-Z]{3}\d{2})$/.exec(sym);
+    if (!m) continue;
+    if (!String(o.transactTime || "").startsWith(hoyCompacto)) continue;
+    const oid = String(o.orderId || "");
+    const qty = Number(o.cumQty) || 0, px = Number(o.avgPx) || 0;
+    if (!oid || oid === "NONE" || qty <= 0 || !(px > 0)) continue;
+    futOrdenes++;
+    const previa = porOrden.get(oid) || (existentes || []).find((p) => o.clOrdId && p.extra?.matriz_cl_ord_id === o.clOrdId);
+    if (previa) {
+      // Solo se actualiza una fila que cargó ESTE puente; una importada a mano se respeta.
+      if (previa.extra?.via !== "api_primary" || (Number(previa.quantity) === qty && Math.abs(Number(previa.entry_price) - px) < 1e-6)) continue;
+      log(`${DRY ? "(dry) " : ""}actualizo ${m[1]}${m[2]} ${o.side}: ${previa.quantity} → ${qty} @ ${px}`);
+      if (DRY) continue;
+      const { error } = await sb.from("positions").update({ quantity: qty, entry_price: px }).eq("id", previa.id).eq("user_id", USER_ID);
+      if (error) log(`update ${sym}: ${error.message}`); else futActualizadas++;
+      continue;
+    }
+    const fila = {
+      user_id: USER_ID, instrument_type: "future", operation_type: o.side === "SELL" ? "sell" : "buy",
+      ticker: `${m[1]}${m[2]}`, quantity: qty, entry_price: px, entry_currency: m[1] === "DLR" ? "ARS" : "USD-MEP",
+      entry_date: hoy, settlement: "CI", broker: "cocos", notes: null,
+      extra: { source: "csv_matriz", matriz_account: CUENTA, matriz_order_id: oid, matriz_cl_ord_id: o.clOrdId, via: "api_primary", origen: o.originatingUsername === "ISV_PBCP" ? "bot" : "matriz",
+        ...(m[1] === "ORO" ? { contract_size: 1 } : m[1] === "WTI" ? { contract_size: 10 } : {}) },   // DLR: default 1.000
+    };
+    log(`${DRY ? "(dry) " : ""}cargo futuro ${fila.operation_type} ${qty} ${fila.ticker} @ ${px}`);
+    if (DRY) continue;
+    const { error } = await sb.from("positions").insert(fila);
+    if (error) { log(`insert ${fila.ticker}: ${error.message}`); continue; }
+    futNuevas++;
+  }
+  log(`operaciones de hoy: ${cadenas.size} cadenas BYMA · ${nuevas} nuevas cargadas · futuros: ${futOrdenes} órdenes con ejecución, ${futNuevas} nuevas, ${futActualizadas} actualizadas`);
+  // Si entró algo, se refresca la foto de la cuenta para que el cartel de
+  // control (Matriz ahora vs Midas ahora) no quede comparando contra una foto vieja.
+  if (!DRY && nuevas + futNuevas + futActualizadas > 0) {
+    try { require("child_process").execFileSync(process.execPath, [path.join(__dirname, "worker.js")], { cwd: __dirname, timeout: 60000, stdio: "ignore" }); log("foto de la cuenta actualizada"); }
+    catch (e) { log(`foto: ${e.message}`); }
+  }
 }
 main().then(() => process.exit(0)).catch((e) => { console.error(`[${new Date().toISOString()}] fatal:`, e.message); process.exit(1); });
