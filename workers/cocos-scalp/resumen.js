@@ -30,6 +30,9 @@ function leerBot(dir) {
   const logs = path.join(dir, "logs");
   if (!fs.existsSync(logs)) return null;
   const ev = []; let tk = null;
+  // La cuenta sale del log ("cuenta 3893 · tick ..."); las carpetas viejas,
+  // anteriores a ese renglón, son de la 72404.
+  let cuenta = "72404";
   const archivos = fs.readdirSync(logs).filter((f) => /^out.*\.log$/.test(f)).map((f) => path.join(logs, f)).sort((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs);
   for (const f of archivos) {
     let real = false;
@@ -41,6 +44,8 @@ function leerBot(dir) {
       const txt = m[3];
       if (txt.startsWith("SIMULADO")) { real = false; continue; }
       if (txt.includes("ÓRDENES REALES")) { real = true; tk = m[2]; continue; }
+      const mc = /^cuenta (\d+) ·/.exec(txt);
+      if (mc) { cuenta = mc[1]; continue; }
       if (!real) continue;
       const hora = t.toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }).slice(0, 5);
       let x;
@@ -54,10 +59,10 @@ function leerBot(dir) {
   let est = null;
   const arch = fs.existsSync(path.join(dir, "estado.json")) ? path.join(dir, "estado.json") : path.join(dir, `estado-${hoy}.json`);
   if (fs.existsSync(arch)) { try { est = JSON.parse(fs.readFileSync(arch, "utf8")); } catch { /* sin estado */ } }
-  return { tk, ev, est };
+  return { tk, ev, est, cuenta };
 }
 function armar(b) {
-  const L = [`<b>SCALP ${b.tk} · ${hoy.split("-").reverse().join("/")}</b>`];
+  const L = [`<b>SCALP ${b.tk} · cuenta ${b.cuenta} · ${hoy.split("-").reverse().join("/")}</b>`];
   let comprado = 0, vendido = 0, qC = 0;
   for (const e of b.ev) {
     if (e.tipo === "compra") { L.push(`${e.hora} compra ${e.qty} × ${plata(e.px)} (escalón ${e.esc})`); comprado += e.qty * e.px; qC += e.qty; }
@@ -86,11 +91,26 @@ async function main() {
   // Antes del cierre de las grillas (16:45) no se manda: el detalle estaría a medias.
   const hm = Number(new Date().toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }).slice(0, 5).replace(":", ""));
   if (!DRY && !process.argv.includes("--forzar") && hm < 1700) { console.log(`son las ${hm}: el resumen sale después de las 17:00`); return; }
-  const bots = fs.readdirSync(RAIZ).filter((d) => /^cocos-scalp/.test(d)).map((d) => leerBot(path.join(RAIZ, d))).filter((b) => b && b.ev.length);
+  const bots = fs.readdirSync(RAIZ).filter((d) => /^cocos\d*-scalp/.test(d)).map((d) => leerBot(path.join(RAIZ, d))).filter((b) => b && b.ev.length)
+    .sort((a, b) => a.cuenta.localeCompare(b.cuenta) || a.tk.localeCompare(b.tk));
   if (!bots.length) { console.log("sin operaciones reales de scalp hoy: no mando nada"); return; }
   const partes = bots.map(armar);
   const mensajes = partes.map((p) => p.texto);
-  if (bots.length > 1) mensajes.push(`<b>SCALP · total del día</b>\n${bots.map((b, i) => `${b.tk}: ${pesos(partes[i].total)} en ${partes[i].vueltas} vueltas`).join("\n")}\n<b>Total: ${pesos(partes.reduce((a, p) => a + p.total, 0))}</b>`);
+  if (bots.length > 1) {
+    const cuentas = [...new Set(bots.map((b) => b.cuenta))];
+    const L = ["<b>SCALP · total del día</b>"];
+    let general = 0;
+    for (const c of cuentas) {
+      let sub = 0;
+      L.push("", `<b>Cuenta ${c}</b>`);
+      bots.forEach((b, i) => { if (b.cuenta !== c) return; sub += partes[i].total; L.push(`${b.tk}: ${pesos(partes[i].total)} en ${partes[i].vueltas} ventas`); });
+      L.push(`Subtotal: ${pesos(sub)}`);
+      general += sub;
+    }
+    if (cuentas.length > 1) L.push("", `<b>Total general: ${pesos(general)}</b>`);
+    else L[L.length - 1] = `<b>Total: ${pesos(general)}</b>`;
+    mensajes.push(L.join("\n"));
+  }
   if (DRY) { console.log(mensajes.join("\n\n────────\n\n")); return; }
   const E = env();
   const sb = createClient(E.SUPABASE_URL, E.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false }, realtime: { transport: WebSocket } });

@@ -46,6 +46,20 @@ function leerEnv() {
       if (m) o[m[1]] = m[2].replace(/^['"]|['"]$/g, "");
     }
   }
+  // OTRA CUENTA (02/10/2026: segunda cuenta de Cocos de LP, "como dos personas
+  // distintas usando el bot"): si el .env de la carpeta trae SCALP_CREDENCIALES,
+  // el usuario, la clave y el número de cuenta salen del .env de ESA carpeta.
+  // Nada más se comparte: estado, órdenes y logs son de cada carpeta.
+  if (o.SCALP_CREDENCIALES) {
+    const ruta = path.join(o.SCALP_CREDENCIALES, ".env");
+    if (!fs.existsSync(ruta)) { console.error(`no existe ${ruta}`); process.exit(1); }
+    const c = {};
+    for (const l of fs.readFileSync(ruta, "utf8").split("\n")) { const m = /^([A-Z0-9_]+)=(.*)$/.exec(l.trim()); if (m) c[m[1]] = m[2].replace(/^['"]|['"]$/g, ""); }
+    for (const k of ["COCOS_API_USER_B64", "COCOS_API_PASS_B64", "COCOS_CUENTA"]) {
+      if (!c[k]) { console.error(`falta ${k} en ${ruta}`); process.exit(1); }
+      o[k] = c[k];
+    }
+  }
   const b64 = (k) => (o[k] ? Buffer.from(o[k], "base64").toString("utf8") : null);
   o.user = b64("COCOS_API_USER_B64"); o.pass = b64("COCOS_API_PASS_B64");
   return o;
@@ -325,7 +339,7 @@ async function liquidar(motivo) {
   const resto = heldTot();
   const msg = `CIERRE del día (${motivo}) · ${S.rondas} ventas · P&L neto ${pesos(S.pnl)}${resto ? ` · OJO: quedaron ${resto} papeles sin vender` : ""}`;
   log(msg); guardar();
-  await tg(`<b>SCALP ${TK}</b>\n${msg}`);
+  await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\n${msg}`);
 }
 
 /* Cierre de la rueda SIN vender: cancela lo apoyado y deja los papeles para
@@ -336,7 +350,7 @@ async function cerrarDia() {
   S.fin = n ? `cierre de la rueda: quedan ${n} papeles abiertos para mañana (costo ${pesos(costo)})` : "cierre de la rueda: sin papeles";
   guardar();
   const msg = `CIERRE del día (${S.fin}) · ${S.rondas} ventas · P&L realizado ${pesos(S.pnl)}`;
-  log(msg); await tg(`<b>SCALP ${TK}</b>\n${msg}`);
+  log(msg); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\n${msg}`);
 }
 /* Rueda nueva con estado de una anterior: las órdenes eran por el día, así
  * que ya no existen; se consulta su estado final (una venta pudo ejecutarse
@@ -350,7 +364,7 @@ async function nuevoDia() {
   S.dia = diaAr(); S.pnl = 0; S.rondas = 0; S.comprado = 0; S.vendido = 0; S.fin = null; S.reentrada = null; S.ordenes = [];
   if (REAL) {
     const t = await tenenciaCuenta().catch(() => null);
-    if (t != null && t < n) { S.fin = `la cuenta tiene ${t} ${TK} y el bot lleva ${n}: no opero hasta revisar`; log(`ERROR ${S.fin}`); await tg(`<b>SCALP ${TK}</b>\n${S.fin}`); }
+    if (t != null && t < n) { S.fin = `la cuenta tiene ${t} ${TK} y el bot lleva ${n}: no opero hasta revisar`; log(`ERROR ${S.fin}`); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\n${S.fin}`); }
     S.base = t != null ? t - n : null;
   }
   guardar();
@@ -366,7 +380,7 @@ async function ciclo() {
   const hm = hhmmAr();
   if (hm >= HORA_CIERRE) return CIERRE_VENDE ? liquidar("hora de cierre") : cerrarDia();
   if (!esHabil() || hm < HORA_INICIO) return;
-  if (rechazos >= 3) { for (const o of vivas()) await cancelar(o, "rechazos"); S.fin = "tres órdenes rechazadas seguidas"; guardar(); log(`ERROR ${S.fin}: me detengo, revisar a mano (tengo ${heldTot()} papeles)`); await tg(`<b>SCALP ${TK}</b>\nTres órdenes rechazadas seguidas: me detuve con ${heldTot()} papeles. Revisar a mano.`); return; }
+  if (rechazos >= 3) { for (const o of vivas()) await cancelar(o, "rechazos"); S.fin = "tres órdenes rechazadas seguidas"; guardar(); log(`ERROR ${S.fin}: me detengo, revisar a mano (tengo ${heldTot()} papeles)`); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\nTres órdenes rechazadas seguidas: me detuve con ${heldTot()} papeles. Revisar a mano.`); return; }
   if (!(b.bid > 0) || !(b.ask > 0)) return;                       // sin libro no se decide nada
   const tot = heldTot();
   const abierto = tot > 0 ? tot * b.bid - S.niveles.reduce((a, n) => a + n.costo, 0) : 0;
@@ -379,7 +393,7 @@ async function ciclo() {
     ultimaTenencia = Date.now();
     try {
       const t = await tenenciaCuenta();
-      if (t > S.base + tot) { if (++excesos >= 2 && !pausaCompras) { pausaCompras = 1; log(`ERROR la cuenta tiene ${t} ${TK} y yo llevo ${tot} (base ${S.base}): pauso las compras`); await tg(`<b>SCALP ${TK}</b>\nLa cuenta tiene ${t} y el bot lleva ${tot}: compras pausadas. Revisar.`); } }
+      if (t > S.base + tot) { if (++excesos >= 2 && !pausaCompras) { pausaCompras = 1; log(`ERROR la cuenta tiene ${t} ${TK} y yo llevo ${tot} (base ${S.base}): pauso las compras`); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\nLa cuenta tiene ${t} y el bot lleva ${tot}: compras pausadas. Revisar.`); } }
       else excesos = 0;
     } catch (e) { log(`tenencia: ${e.message}`); }
   }
@@ -451,7 +465,7 @@ async function main() {
   const disp = FAKE ? null : await disponible24().catch(() => null);
   const ten = FAKE ? null : await tenenciaCuenta().catch(() => null);
   log(`${REAL ? "*** ÓRDENES REALES ***" : "SIMULADO"} · lote ${LOTE} · máximo ${MAX} (${NIVELES} escalones) · paso ${(PASO * 100).toFixed(2)}% · ganancia ${(GANANCIA * 100).toFixed(2)}% · ${REFUERZO_FRAC > 0 ? `refuerzo ${Math.round(MAX * REFUERZO_FRAC)} a −${(REFUERZO_MULT * PASO * (NIVELES - 1) * 100).toFixed(1)}% · ` : ""}corte ${CORTE >= 0.9 ? "apagado" : (CORTE * 100).toFixed(1) + "%"} · cierre ${HORA_CIERRE} · tope de pérdida ${pesos(PERDIDA_MAX)}`);
-  log(`tick ${TICK} · libro ${b.bid}/${b.ask} (último ${b.last}) · disponible ${disp == null ? "?" : pesos(disp)} · tenencia de ${TK} en la cuenta ${ten ?? "?"}`);
+  log(`cuenta ${CUENTA} · tick ${TICK} · libro ${b.bid}/${b.ask} (último ${b.last}) · disponible ${disp == null ? "?" : pesos(disp)} · tenencia de ${TK} en la cuenta ${ten ?? "?"}`);
   if (b.bid > 0 && b.ask > 0) {
     const sp = (b.ask - b.bid) / b.bid;
     log(`spread ${(sp * 100).toFixed(3)}% · costo ida y vuelta ${(2 * FEE * 100).toFixed(3)}% · neto por vuelta de ${LOTE}: ${pesos(LOTE * b.bid * (GANANCIA - 2 * FEE))} · exposición máxima ${pesos(MAX * (1 + REFUERZO_FRAC) * b.ask)} · ${CORTE >= 0.9 ? "sin corte: no vende con pérdida" : `pérdida si corta con todo cargado ≈ ${pesos(MAX * b.ask * (CORTE - PASO * (NIVELES - 1) / 2 + 2 * FEE))}`}`);
