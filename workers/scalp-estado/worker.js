@@ -116,7 +116,9 @@ async function pasada() {
       reforzado: !!S.reforzado, fin: delDia ? (S.fin || null) : null,
       eventos: b.ev.slice(-60),
     });
-    resultados.push({ user_id: USER_ID, fecha: hoy, cuenta: b.cuenta, ticker: b.ticker, pnl: Math.round(b.pnlLog), ventas: b.ventas, comprado: Math.round(b.comprado), vendido: Math.round(b.vendido), tenencia_cierre: tenencia, costo_cierre: costo });
+    const latente = tenencia > 0 && ref ? Math.round(tenencia * ref - costo) : 0;
+    const expo = Math.round(max * (1 + Number(cfg.SCALP_REFUERZO_FRAC || 0)) * (p.ask || p.last || p.bid || 0));
+    resultados.push({ user_id: USER_ID, fecha: hoy, cuenta: b.cuenta, ticker: b.ticker, pnl: Math.round(b.pnlLog), ventas: b.ventas, comprado: Math.round(b.comprado), vendido: Math.round(b.vendido), tenencia_cierre: tenencia, costo_cierre: costo, latente_cierre: latente, exposicion_max: expo });
   }
   if (!filas.length) { log("sin bots reales"); return; }
   const { error } = await sb.from("scalp_estado").upsert(filas, { onConflict: "user_id,cuenta,ticker" });
