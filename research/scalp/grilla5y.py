@@ -42,22 +42,24 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4):
     """corte=None → holdea sin limite. Devuelve metricas en USD."""
     # doble: con la grilla llena, si el precio cae a ancla*(1 - doble*profundidad) compra
     # OTRA VEZ la misma cantidad que tiene y pasa a salir todo junto en promedio + gan.
     X = 99
     # permitido: fechas en las que se puede ABRIR un ciclo nuevo (None = siempre)
-    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV, espera=0)
+    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV, espera=0, idle=0, nx=0, extras=0)
     lots = {}          # k -> (precio, unidades, costo_usd)
     por_anio = {}
 
     def comprar(k, px):
+        E['idle'] = 0
         lots[k] = (px, LOTE * E['fx'] / px, LOTE)
         if E['ancla'] is None:
             E['ancla'] = px
 
     def vender(k, px, fecha):
+        E['idle'] = 0
         co, u, cusd = lots.pop(k)
         ing = u * px / E['fx']
         g = ing - cusd - FEE * (ing + cusd)
@@ -77,7 +79,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                     if E['ok'] and E['reent'] is not None and E['reent'] >= p1:
                         cand.append((min(E['reent'], pos), 'r', 0))
                 else:
-                    h = max((k for k in lots if k != X), default=-1)
+                    h = max((k for k in lots if k < NIV), default=-1)
                     if doble is not None and h == NIV - 1 and X not in lots:
                         px = E['ancla'] * (1 - doble * paso * (NIV - 1))
                         if px >= p1:
@@ -174,6 +176,16 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
             E['ancla'] = None
             E['reent'] = None
             E['parado'] = fecha
+        # Regla del lateral: tantas velas sin ejecuciones → un lote extra al precio.
+        E['idle'] += 1
+        if lateral_barras and E['idle'] >= lateral_barras and lots and X not in lots and E['parado'] is None:
+            vivos = sum(1 for k in lots if k >= 100)
+            if vivos < lateral_max:
+                E['nx'] += 1
+                lots[100 + E['nx']] = (c, lateral_frac * LOTE * E['fx'] / c, lateral_frac * LOTE)
+                E['extras'] += 1
+                E['idle'] = 0
+        E['capmax'] = max(E['capmax'], sum(v[2] for v in lots.values()))
         ab = sum(u * c / E['fx'] - cusd for (_, u, cusd) in lots.values())
         peor_abierto = min(peor_abierto, ab)
         eq.append(E['real'] + ab)
@@ -194,7 +206,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         dd = min(dd, e - pico)
     dias = len({b[0] for b in bars})
     return dict(total=eq[-1], real=E['real'], abierto=eq[-1] - E['real'], rondas=E['rondas'], cortes=E['cortes'], perd=E['perd'], dd=dd,
-                capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio, eq=eq, s_ab=s_ab, s_lot=s_lot)
+                capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio, eq=eq, s_ab=s_ab, s_lot=s_lot, extras=E['extras'])
 
 
 CORTES = [0.05, 0.075, 0.10, 0.15, 0.20, 0.30, None]

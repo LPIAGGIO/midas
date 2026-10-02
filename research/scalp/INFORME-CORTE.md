@@ -134,3 +134,26 @@ forma consistente. La mejora no viene de desfasar una cuenta contra la otra
 sino de NO operar la primera hora: menos vueltas, pero mejores (la grilla
 compra caídas de la apertura que suelen seguir). Aplica a las dos cuentas.
 Reserva: mismo sesgo de dirección que favorece a las grillas anchas.
+
+## Regla del lateral (02/10/2026)
+
+LP: "comprar medio lote al precio si pasan 2 hs y no pasa nada". `lateral.py`,
+9 papeles, sin corte, refuerzo 50%. El extra se vende a su costo + ganancia.
+
+| Variante | 5 min: resultado | peor | sobre capital máx. | Horario: resultado | peor | sobre capital máx. |
+|---|---:|---:|---:|---:|---:|---:|
+| sin regla | +2.646 | −2.794 | 8,7% | +22.813 | −12.998 | 74,4% |
+| medio lote a las 2 h (hasta 4) | +3.240 | −3.244 | 8,2% | +30.214 | −16.379 | 70,7% |
+| medio lote a la 1 h | +3.704 | −3.532 | 9,0% | +35.256 | −17.102 | 82,4% |
+| medio lote a las 4 h | +2.854 | −2.871 | 8,4% | +26.111 | −14.620 | 64,7% |
+| lote entero a las 2 h | +3.905 | −3.695 | 8,0% | +37.215 | −19.590 | 67,7% |
+| medio lote a las 2 h, hasta 2 | +3.002 | −3.125 | 8,5% | +27.409 | −14.985 | 74,7% |
+
+Mejora el resultado en 8 de 9 papeles (5 min) y 9 de 9 (horario): +22% y +32%.
+Pero usa 30% a 40% más capital y el peor momento es 16% a 26% más profundo:
+el rendimiento sobre el capital máximo queda igual (8,2% vs 8,7%; 70,7% vs
+74,4%). No es una ventaja nueva: es más plata trabajando, con una mejora chica
+en resultado por unidad de peor momento (5% a 17%). La variante de 1 hora es
+la única que mejora también sobre el capital máximo en las dos muestras.
+Mi pronóstico previo ("va a dar parecido a la grilla angosta") fue errado en
+términos absolutos.
