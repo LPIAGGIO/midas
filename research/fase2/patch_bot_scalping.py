@@ -81,7 +81,9 @@ function BotScalpingModule() {
   const cuentas = useMemo(() => {
     const m = new Map();
     for (const f of filas || []) { if (!m.has(f.cuenta)) m.set(f.cuenta, []); m.get(f.cuenta).push(f); }
-    return [...m.entries()];
+    // La cuenta original (72404) va primero; las demás, después, por número.
+    const orden = (c) => (c === "72404" ? "0" : "1" + c);
+    return [...m.entries()].sort((x, y) => orden(x[0]).localeCompare(orden(y[0])));
   }, [filas]);
   const resumen = (fs) => {
     const r = { real: 0, lat: 0, inv: 0, ventas: 0, on: 0, n: fs.length, expo: 0 };
