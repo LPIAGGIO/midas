@@ -69,7 +69,7 @@ function armar(b) {
   const L = [`<b>SCALP ${b.tk} · cuenta ${b.cuenta} · ${hoy.split("-").reverse().join("/")}</b>`];
   let comprado = 0, vendido = 0, qC = 0;
   for (const e of b.ev) {
-    if (e.tipo === "compra") { L.push(`${e.hora} compra ${e.qty} × ${plata(e.px)} (escalón ${e.esc})`); comprado += e.qty * e.px; qC += e.qty; }
+    if (e.tipo === "compra") { L.push(`${e.hora} compra ${e.qty} × ${plata(e.px)} (${e.esc >= 7 ? "extra del lateral" : e.esc === 6 ? "refuerzo" : `escalón ${e.esc}`})`); comprado += e.qty * e.px; qC += e.qty; }
     else if (e.tipo === "venta") { L.push(`${e.hora} venta ${e.qty} × ${plata(e.px)} → <b>${pesos(e.neto)}</b>`); vendido += e.qty * e.px; }
     else L.push(`${e.hora} ${e.txt}`);
   }

@@ -83,6 +83,14 @@ const CORTE = Number(ENV.SCALP_CORTE || 0.018);        // caída desde el ancla 
 // más cuando no; usa 1,5 veces el capital.
 const REFUERZO_FRAC = Number(ENV.SCALP_REFUERZO_FRAC || 0);
 const REFUERZO_MULT = Number(ENV.SCALP_REFUERZO_MULT || 2);
+// REGLA DEL LATERAL (LP 02/10/2026): si el papel pasa LATERAL_MIN minutos sin
+// ninguna ejecución y tiene entre 1 y LATERAL_HASTA_ESC escalones cargados,
+// compra un lote extra de LATERAL_FRAC × LOTE al precio. Hasta LATERAL_MAX
+// extras abiertos; cada uno se vende a su costo + GANANCIA. 0 = apagada.
+const LATERAL_MIN = Number(ENV.SCALP_LATERAL_MIN || 0);
+const LATERAL_FRAC = Number(ENV.SCALP_LATERAL_FRAC || 0.5);
+const LATERAL_MAX = Number(ENV.SCALP_LATERAL_MAX || 4);
+const LATERAL_HASTA_ESC = Number(ENV.SCALP_LATERAL_HASTA_ESC || 2);
 const PERDIDA_MAX = Number(ENV.SCALP_PERDIDA_MAX_ARS || 60000);
 const HORA_INICIO = Number(ENV.SCALP_HORA_INICIO || 1035);
 const HORA_CIERRE = Number(ENV.SCALP_HORA_CIERRE || 1645);
@@ -163,7 +171,11 @@ async function wsConectar() {
       // BI/OF vacíos = punta sin órdenes: se anula (no se arrastra la anterior).
       book = { bid: "BI" in md ? Number(md.BI?.[0]?.price) || null : book.bid, ask: "OF" in md ? Number(md.OF?.[0]?.price) || null : book.ask, last: Number(md.LA?.price) || book.last, t: Date.now() };
     });
-    ws.on("close", (c) => { if (wsConn === ws) { wsConn = null; reintentar(`close ${c}`); } });
+    // El libro de un CEDEAR puede pasar minutos sin cambiar: el pong dice que la
+    // conexión vive, así no se sale a pedir el precio por REST sin necesidad.
+    ws.on("pong", () => { wsUltimo = Date.now(); });
+    const lat = setInterval(() => { if (wsConn !== ws) return clearInterval(lat); if (ws.readyState === 1) { try { ws.ping(); } catch { /* se cae sola */ } } }, 30_000);
+    ws.on("close", (c) => { clearInterval(lat); if (wsConn === ws) { wsConn = null; reintentar(`close ${c}`); } });
     ws.on("error", (e) => { if (wsConn === ws) { wsConn = null; reintentar(e.message); } });
   } catch (e) { reintentar(e.message); }
 }
@@ -247,7 +259,16 @@ function archivoPrevio() {
 let S = { dia: diaAr(), real: REAL, ancla: null, reentrada: null, niveles: Array.from({ length: NIVELES }, () => ({ held: 0, costo: 0 })), ordenes: [], pnl: 0, rondas: 0, comprado: 0, vendido: 0, fin: null, base: null };
 function heldTot() { return S.niveles.reduce((a, n) => a + n.held, 0); }
 const NIVEL_REF = NIVELES;                       // índice del nivel del refuerzo en S.niveles
-function normalizar() { while (S.niveles.length <= NIVEL_REF) S.niveles.push({ held: 0, costo: 0 }); if (S.reforzado == null) S.reforzado = false; }
+const EXTRA_0 = NIVELES + 1;                     // primer casillero de los extras del lateral
+const esExtra = (k) => k >= EXTRA_0;
+function normalizar() {
+  while (S.niveles.length < EXTRA_0 + LATERAL_MAX) S.niveles.push({ held: 0, costo: 0 });
+  if (S.reforzado == null) S.reforzado = false;
+  if (S.ultOp == null) S.ultOp = Date.now();     // última ejecución (para la regla del lateral)
+}
+// Papeles que puede llegar a tener: grilla llena + refuerzo + extras del lateral.
+const EXPO_MAX = MAX * (1 + REFUERZO_FRAC) + (LATERAL_MIN > 0 ? LATERAL_MAX * Math.max(1, Math.round(LOTE * LATERAL_FRAC)) : 0);
+const heldGrilla = () => S.niveles.slice(0, NIVELES).reduce((a, n) => a + n.held, 0);
 const vivas = () => S.ordenes.filter((o) => !o.final);
 // La simulación no retoma estado: sus órdenes viven en memoria.
 if (REAL && !CHEQUEO) {
@@ -273,6 +294,7 @@ async function colocar(lado, nivel, qty, px) {
 }
 function aplicarFill(o, cum, avg) {
   const dq = cum - o.cum; if (!(dq > 0)) return;
+  S.ultOp = Date.now();
   const dN = cum * avg - o.cum * o.avg;
   const L = S.niveles[o.nivel];
   if (o.lado === "BUY") {
@@ -361,6 +383,7 @@ async function nuevoDia() {
   if (REAL) await sincronizar(await libro()).catch((e) => log(`sync: ${e.message}`));
   for (const o of vivas()) { o.final = true; log(`orden de ayer sin estado final (${o.lado} ${o.qty} × ${o.px}): la doy por vencida`); }
   const n = heldTot();
+  S.ultOp = Date.now();
   S.dia = diaAr(); S.pnl = 0; S.rondas = 0; S.comprado = 0; S.vendido = 0; S.fin = null; S.reentrada = null; S.ordenes = [];
   if (REAL) {
     const t = await tenenciaCuenta().catch(() => null);
@@ -401,7 +424,8 @@ async function ciclo() {
   const vs = vivas();
   // Fin de ciclo: todo vendido → la próxima compra vuelve al precio del ancla
   // y, si en REANCLA no se da, sigue a la punta.
-  if (S.ancla && tot === 0 && !vs.some((o) => o.lado === "SELL" || o.cum > 0)) {
+  const totG = heldGrilla();
+  if (S.ancla && totG === 0 && S.niveles[NIVEL_REF].held === 0 && !vs.some((o) => !esExtra(o.nivel) && (o.lado === "SELL" || o.cum > 0))) {
     S.reentrada = { px: alTick(S.ancla, "abajo"), hasta: Date.now() + REANCLA_MS };
     log(`ciclo completo · P&L del día ${pesos(S.pnl)} · ${S.rondas} ventas`);
     S.ancla = null; S.reforzado = false; guardar();
@@ -419,7 +443,8 @@ async function ciclo() {
     return;
   }
   // Ventas: cada escalón con papeles y sin compra en curso tiene su venta.
-  for (let k = 0; k < NIVELES; k++) {
+  for (let k = 0; k < S.niveles.length; k++) {
+    if (k === NIVEL_REF) continue;               // el refuerzo no sale solo: sale todo junto
     const L = S.niveles[k]; if (!(L.held > 0)) continue;
     if (vs.some((o) => o.lado === "BUY" && o.nivel === k)) continue;
     const v = vs.find((o) => o.lado === "SELL" && o.nivel === k);
@@ -427,27 +452,41 @@ async function ciclo() {
     else if (!v.duda && v.qty - v.cum !== L.held) await cancelar(v, "cantidad distinta a la tenencia");
   }
   // Compra: una sola apoyada, en el escalón siguiente al más bajo con papeles.
-  let h = -1; S.niveles.forEach((n, k) => { if (n.held > 0) h = k; });
+  let h = -1; S.niveles.forEach((n, k) => { if (k < NIVELES && n.held > 0) h = k; });
   const deseado = h + 1;
-  const compras = vs.filter((o) => o.lado === "BUY");
-  for (const c of compras) if (c.nivel !== deseado && c.cum === 0 && !(c.nivel === NIVEL_REF && tot >= MAX)) await cancelar(c, "la grilla se movió");
+  const compras = vs.filter((o) => o.lado === "BUY" && !esExtra(o.nivel));
+  for (const c of compras) if (c.nivel !== deseado && c.cum === 0 && !(c.nivel === NIVEL_REF && totG >= MAX)) await cancelar(c, "la grilla se movió");
   const c0 = compras.find((c) => c.nivel === 0 && c.cum === 0);
   const enReentrada = S.reentrada && Date.now() < S.reentrada.hasta;
   const tarde = hm >= HORA_ULTIMO_CICLO;
   if (c0 && h === -1 && tarde) await cancelar(c0, "ya no se abren ciclos nuevos hoy");
   else if (c0 && h === -1 && !enReentrada && b.bid > c0.px * 1.001 && Date.now() - c0.t > 60_000) await cancelar(c0, "el precio se alejó");
   // Refuerzo: grilla llena, sin refuerzo previo en este ciclo.
-  if (REFUERZO_FRAC > 0 && !S.reforzado && !compras.length && S.ancla && tot >= MAX && ref.held === 0 && !pausaCompras) {
+  if (REFUERZO_FRAC > 0 && !S.reforzado && !compras.length && S.ancla && totG >= MAX && ref.held === 0 && !pausaCompras) {
     const pxRef = alTick(S.ancla * (1 - REFUERZO_MULT * PASO * (NIVELES - 1)), "abajo");
-    const qtyRef = Math.round(tot * REFUERZO_FRAC);
+    const qtyRef = Math.round(totG * REFUERZO_FRAC);
     if (qtyRef > 0) await colocar("BUY", NIVEL_REF, qtyRef, Math.min(pxRef, b.ask));
   }
-  if (!S.reforzado && !compras.length && deseado < NIVELES && tot + LOTE <= MAX && !pausaCompras && (deseado === 0 ? !tarde : S.ancla)) {
+  if (!S.reforzado && !compras.length && deseado < NIVELES && totG + LOTE <= MAX && !pausaCompras && (deseado === 0 ? !tarde : S.ancla)) {
     let px;
     if (deseado === 0) px = enReentrada && b.bid > S.reentrada.px ? S.reentrada.px : b.bid;
     else px = Math.min(alTick(S.ancla * (1 - PASO * deseado), "abajo"), b.ask);
     await colocar("BUY", deseado, LOTE, px);
   }
+  // Regla del lateral: una hora sin ejecuciones y pocos escalones cargados → un
+  // lote extra al precio (orden límite sobre la punta vendedora, para que entre).
+  if (LATERAL_MIN > 0 && !S.reforzado && ref.held === 0 && !pausaCompras && !tarde && Date.now() - S.ultOp >= LATERAL_MIN * 60_000) {
+    const nEsc = S.niveles.slice(0, NIVELES).filter((n) => n.held > 0).length;
+    const libre = S.niveles.findIndex((n, k) => esExtra(k) && n.held === 0 && !vs.some((o) => o.nivel === k));
+    const qtyX = Math.max(1, Math.round(LOTE * LATERAL_FRAC));
+    if (nEsc >= 1 && nEsc <= LATERAL_HASTA_ESC && libre >= 0 && !vs.some((o) => o.lado === "BUY" && esExtra(o.nivel))) {
+      S.ultOp = Date.now();                      // se ejecute o no, no vuelve a intentar hasta la próxima hora
+      log(`lateral: ${LATERAL_MIN} min sin operaciones con ${nEsc} ${nEsc === 1 ? "escalón" : "escalones"} → lote extra de ${qtyX}`);
+      await colocar("BUY", libre, qtyX, alTick(b.ask, "arriba"));
+    }
+  }
+  // Una compra extra que no se ejecutó en 2 minutos se retira (el precio se fue).
+  for (const o of vs) if (o.lado === "BUY" && esExtra(o.nivel) && o.cum === 0 && Date.now() - o.t > 120_000) await cancelar(o, "el extra no se ejecutó");
   if (Date.now() - ultimoResumen > 5 * 60_000) {
     ultimoResumen = Date.now();
     log(`estado · tengo ${tot} · ancla ${S.ancla ? pesos(S.ancla) : "—"} · libro ${pesos(b.bid)}/${pesos(b.ask)} · abierto ${pesos(abierto)} · P&L del día ${pesos(S.pnl)} · ${S.rondas} ventas`);
@@ -462,13 +501,15 @@ async function main() {
     for (let i = 0; i < 10 && !book.t; i++) await dormir(1000);
   }
   const b = await libro();
-  const disp = FAKE ? null : await disponible24().catch(() => null);
+  // El saldo se reintenta: con muchos bots arrancando a la vez la consulta se satura.
+  let disp = null;
+  for (let i = 0; !FAKE && i < 4 && disp == null; i++) { disp = await disponible24().catch(() => null); if (disp == null) await dormir(2500 + Math.random() * 2500); }
   const ten = FAKE ? null : await tenenciaCuenta().catch(() => null);
-  log(`${REAL ? "*** ÓRDENES REALES ***" : "SIMULADO"} · lote ${LOTE} · máximo ${MAX} (${NIVELES} escalones) · paso ${(PASO * 100).toFixed(2)}% · ganancia ${(GANANCIA * 100).toFixed(2)}% · ${REFUERZO_FRAC > 0 ? `refuerzo ${Math.round(MAX * REFUERZO_FRAC)} a −${(REFUERZO_MULT * PASO * (NIVELES - 1) * 100).toFixed(1)}% · ` : ""}corte ${CORTE >= 0.9 ? "apagado" : (CORTE * 100).toFixed(1) + "%"} · cierre ${HORA_CIERRE} · tope de pérdida ${pesos(PERDIDA_MAX)}`);
+  log(`${REAL ? "*** ÓRDENES REALES ***" : "SIMULADO"} · lote ${LOTE} · máximo ${MAX} (${NIVELES} escalones) · paso ${(PASO * 100).toFixed(2)}% · ganancia ${(GANANCIA * 100).toFixed(2)}% · ${REFUERZO_FRAC > 0 ? `refuerzo ${Math.round(MAX * REFUERZO_FRAC)} a −${(REFUERZO_MULT * PASO * (NIVELES - 1) * 100).toFixed(1)}% · ` : ""}${LATERAL_MIN > 0 ? `lateral: ${Math.max(1, Math.round(LOTE * LATERAL_FRAC))} extra a los ${LATERAL_MIN} min (hasta ${LATERAL_MAX}, con ${LATERAL_HASTA_ESC} escalones o menos) · ` : ""}corte ${CORTE >= 0.9 ? "apagado" : (CORTE * 100).toFixed(1) + "%"} · cierre ${HORA_CIERRE} · tope de pérdida ${pesos(PERDIDA_MAX)}`);
   log(`cuenta ${CUENTA} · tick ${TICK} · libro ${b.bid}/${b.ask} (último ${b.last}) · disponible ${disp == null ? "?" : pesos(disp)} · tenencia de ${TK} en la cuenta ${ten ?? "?"}`);
   if (b.bid > 0 && b.ask > 0) {
     const sp = (b.ask - b.bid) / b.bid;
-    log(`spread ${(sp * 100).toFixed(3)}% · costo ida y vuelta ${(2 * FEE * 100).toFixed(3)}% · neto por vuelta de ${LOTE}: ${pesos(LOTE * b.bid * (GANANCIA - 2 * FEE))} · exposición máxima ${pesos(MAX * (1 + REFUERZO_FRAC) * b.ask)} · ${CORTE >= 0.9 ? "sin corte: no vende con pérdida" : `pérdida si corta con todo cargado ≈ ${pesos(MAX * b.ask * (CORTE - PASO * (NIVELES - 1) / 2 + 2 * FEE))}`}`);
+    log(`spread ${(sp * 100).toFixed(3)}% · costo ida y vuelta ${(2 * FEE * 100).toFixed(3)}% · neto por vuelta de ${LOTE}: ${pesos(LOTE * b.bid * (GANANCIA - 2 * FEE))} · exposición máxima ${pesos(EXPO_MAX * b.ask)} · ${CORTE >= 0.9 ? "sin corte: no vende con pérdida" : `pérdida si corta con todo cargado ≈ ${pesos(MAX * b.ask * (CORTE - PASO * (NIVELES - 1) / 2 + 2 * FEE))}`}`);
   }
   if (CHEQUEO) process.exit(0);
   if (SOLO_SYNC) {
@@ -479,7 +520,7 @@ async function main() {
   }
   if (S.dia !== diaAr() && esHabil() && hhmmAr() >= HORA_INICIO) await nuevoDia();
   if (S.fin) log(`el día ya se cerró (${S.fin}). Mañana retoma solo.`);
-  if (REAL && disp != null && b.ask > 0 && disp < MAX * (1 + REFUERZO_FRAC) * b.ask * 1.01) { log(`ERROR disponible ${pesos(disp)} menor a la exposición máxima ${pesos(MAX * b.ask)}: no arranco`); process.exit(1); }
+  if (REAL && disp != null && b.ask > 0 && disp < EXPO_MAX * b.ask * 1.01) { log(`ERROR disponible ${pesos(disp)} menor a la exposición máxima ${pesos(MAX * b.ask)}: no arranco`); process.exit(1); }
   if (REAL && S.base == null && ten != null) { S.base = ten - heldTot(); guardar(); }
   let ocupado = false;
   setInterval(async () => {

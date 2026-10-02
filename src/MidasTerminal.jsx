@@ -45753,7 +45753,7 @@ function BotScalpingModule() {
                       const k = `${f.cuenta}|${f.ticker}`, cfg = f.config || {}, ten = Number(f.tenencia) || 0;
                       const ords = f.ordenes || [], ventas = ords.filter((o) => o.lado === "SELL"), compras = ords.filter((o) => o.lado === "BUY");
                       const pv = ventas.length ? Math.min(...ventas.map((o) => o.px)) : null, pc = compras.length ? Math.max(...compras.map((o) => o.px)) : null;
-                      const nEsc = (f.niveles || []).length, px = Number(f.bid || f.ultimo) || null;
+                      const nEsc = (f.niveles || []).filter((n) => !n.tipo || n.tipo === "escalon").length, nExt = (f.niveles || []).filter((n) => n.tipo === "extra").length, px = Number(f.bid || f.ultimo) || null;
                       const estado = !f.online ? "apagado" : f.fin ? f.fin : f.reforzado ? "con refuerzo: sale todo junto" : ten ? "en posición" : "esperando compra";
                       const abierto = abierta === k;
                       return (
@@ -45764,6 +45764,7 @@ function BotScalpingModule() {
                             </td>
                             <td style={td}>
                               {Array.from({ length: cfg.escalones || 5 }).map((_, i) => <span key={i} style={{ display: "inline-block", width: 8, height: 8, marginLeft: 3, borderRadius: 2, background: i < nEsc ? (f.reforzado ? C.cat.amber : C.accent) : C.faint }} />)}
+                              {nExt > 0 && <span title="lotes extra de la regla del lateral" style={{ marginLeft: 6, fontSize: 10, color: C.green }}>+{nExt}</span>}
                             </td>
                             <td style={td}>{ten ? fN(ten) : "—"}</td>
                             <td style={td}>{ten ? `$${fN(Number(f.costo) / ten)}` : "—"}</td>
@@ -45786,12 +45787,13 @@ function BotScalpingModule() {
                                       {fN(cfg.lote)} por escalón · máximo {fN(cfg.max)}<br />
                                       escalón cada {((cfg.paso || 0) * 100).toFixed(1)}% · venta a +{((cfg.ganancia || 0) * 100).toFixed(1)}%<br />
                                       {cfg.refuerzo > 0 ? `refuerzo de ${fN((cfg.max || 0) * cfg.refuerzo)} si cae ${((cfg.paso || 0) * ((cfg.escalones || 5) - 1) * 2 * 100).toFixed(1)}%` : "sin refuerzo"} · {cfg.corte >= 0.9 ? "sin corte" : `corte ${((cfg.corte || 0) * 100).toFixed(1)}%`}<br />
+                                      {cfg.lateral_min > 0 ? `lateral: ${fN(Math.max(1, Math.round((cfg.lote || 0) * (cfg.lateral_frac || 0.5))))} extra tras ${cfg.lateral_min} min quieto (hasta ${cfg.lateral_max})` : "sin regla del lateral"} · arranca {String(cfg.hora_inicio || 1035).replace(/(\d\d)$/, ":$1")}<br />
                                       primera compra del ciclo: {f.ancla ? `$${fN(Number(f.ancla))}` : "—"}
                                     </div>
                                   </div>
                                   <div>
                                     <div style={{ color: C.dim, fontSize: 10, marginBottom: 4 }}>LOTES EN CARTERA</div>
-                                    {(f.niveles || []).length ? (f.niveles || []).map((n) => <div key={n.k} style={{ color: C.muted, lineHeight: 1.7 }}>escalón {n.k}: {fN(n.tenencia)} a ${fN(n.costo / n.tenencia)}</div>) : <div style={{ color: C.dim }}>ninguno</div>}
+                                    {(f.niveles || []).length ? (f.niveles || []).map((n) => <div key={n.k} style={{ color: C.muted, lineHeight: 1.7 }}>{n.tipo === "extra" ? "extra del lateral" : n.tipo === "refuerzo" ? "refuerzo" : `escalón ${n.k}`}: {fN(n.tenencia)} a ${fN(n.costo / n.tenencia)}</div>) : <div style={{ color: C.dim }}>ninguno</div>}
                                   </div>
                                   <div>
                                     <div style={{ color: C.dim, fontSize: 10, marginBottom: 4 }}>ÓRDENES APOYADAS</div>
@@ -45801,7 +45803,7 @@ function BotScalpingModule() {
                                     <div style={{ color: C.dim, fontSize: 10, marginBottom: 4 }}>OPERACIONES DE HOY</div>
                                     {(f.eventos || []).length ? [...(f.eventos || [])].reverse().map((e, i) => (
                                       <div key={i} style={{ color: e.tipo === "error" ? C.red : C.muted, lineHeight: 1.7 }}>
-                                        {hora(e.t)} · {e.tipo === "compra" ? `compra ${fN(e.q)} a $${fN(e.px)} (escalón ${e.esc})` : e.tipo === "venta" ? <>venta {fN(e.q)} a ${fN(e.px)} → <b style={{ color: color(e.neto) }}>{conSigno(e.neto)}</b></> : e.tipo === "refuerzo" ? `refuerzo: ${e.txt}` : e.txt}
+                                        {hora(e.t)} · {e.tipo === "compra" ? `compra ${fN(e.q)} a $${fN(e.px)} (${e.esc > (cfg.escalones || 5) + 1 ? "extra del lateral" : e.esc === (cfg.escalones || 5) + 1 ? "refuerzo" : `escalón ${e.esc}`})` : e.tipo === "venta" ? <>venta {fN(e.q)} a ${fN(e.px)} → <b style={{ color: color(e.neto) }}>{conSigno(e.neto)}</b></> : e.tipo === "refuerzo" ? `refuerzo: ${e.txt}` : e.txt}
                                       </div>
                                     )) : <div style={{ color: C.dim }}>sin operaciones hoy</div>}
                                   </div>

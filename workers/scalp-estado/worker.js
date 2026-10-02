@@ -48,6 +48,7 @@ function procesosPm2() {
     return new Map(a.filter((p) => /^cocos\d*-scalp/.test(p.name)).map((p) => [p.pm2_env?.pm_cwd, p.pm2_env?.status]));
   } catch { return new Map(); }
 }
+const env_max = (e) => e.SCALP_MAX || 10;
 function leerBot(dir, hoy) {
   const env = { ...leerEnv(path.join(dir, ".env")) };
   const cred = env.SCALP_CREDENCIALES ? leerEnv(path.join(env.SCALP_CREDENCIALES, ".env")) : E;
@@ -96,7 +97,11 @@ async function pasada() {
     try { b = leerBot(dir, hoy); } catch (e) { log(`${path.basename(dir)}: ${e.message}`); continue; }
     if (!b.real) continue;                                     // solo bots con órdenes reales
     const S = b.S || {};
-    const niveles = (S.niveles || []).map((n, k) => ({ k: k + 1, tenencia: n.held, costo: Math.round(n.costo) })).filter((n) => n.tenencia > 0);
+    // Casilleros del estado del bot: 0..E-1 escalones de la grilla, E el refuerzo,
+    // E+1 en adelante los extras de la regla del lateral.
+    const E_ = Math.floor(Number(env_max(b.env)) / Number(b.env.SCALP_LOTE || 2));
+    const tipoDe = (k) => (k < E_ ? "escalon" : k === E_ ? "refuerzo" : "extra");
+    const niveles = (S.niveles || []).map((n, k) => ({ k: k + 1, tipo: tipoDe(k), tenencia: n.held, costo: Math.round(n.costo) })).filter((n) => n.tenencia > 0);
     const tenencia = niveles.reduce((a, n) => a + n.tenencia, 0);
     const costo = niveles.reduce((a, n) => a + n.costo, 0);
     const p = px[b.ticker] || {};
@@ -107,9 +112,9 @@ async function pasada() {
     filas.push({
       user_id: USER_ID, cuenta: b.cuenta, ticker: b.ticker, actualizado_at: new Date().toISOString(),
       online: pm2.get(dir) === "online", real: b.real,
-      config: { lote, max, escalones: Math.floor(max / lote), paso: Number(cfg.SCALP_PASO || 0.003), ganancia: Number(cfg.SCALP_GANANCIA || 0.0025), refuerzo: Number(cfg.SCALP_REFUERZO_FRAC || 0), corte: Number(cfg.SCALP_CORTE || 0.018) },
+      config: { lote, max, escalones: Math.floor(max / lote), paso: Number(cfg.SCALP_PASO || 0.003), ganancia: Number(cfg.SCALP_GANANCIA || 0.0025), refuerzo: Number(cfg.SCALP_REFUERZO_FRAC || 0), corte: Number(cfg.SCALP_CORTE || 0.018), lateral_min: Number(cfg.SCALP_LATERAL_MIN || 0), lateral_frac: Number(cfg.SCALP_LATERAL_FRAC || 0.5), lateral_max: Number(cfg.SCALP_LATERAL_MAX || 4), hora_inicio: Number(cfg.SCALP_HORA_INICIO || 1035) },
       tenencia, costo, ancla: S.ancla ?? null, niveles,
-      ordenes: (S.ordenes || []).filter((o) => !o.final).map((o) => ({ lado: o.lado, esc: o.nivel + 1, q: o.qty, px: o.px, ejecutado: o.cum })),
+      ordenes: (S.ordenes || []).filter((o) => !o.final).map((o) => ({ lado: o.lado, esc: o.nivel + 1, tipo: tipoDe(o.nivel), q: o.qty, px: o.px, ejecutado: o.cum })),
       bid: p.bid ?? null, ask: p.ask ?? null, ultimo: p.last ?? null,
       latente: tenencia > 0 && ref ? Math.round(tenencia * ref - costo) : 0,
       pnl_dia: delDia ? Math.round(S.pnl || 0) : Math.round(b.pnlLog), ventas_dia: delDia ? (S.rondas || 0) : b.ventas,
@@ -117,7 +122,8 @@ async function pasada() {
       eventos: b.ev.slice(-60),
     });
     const latente = tenencia > 0 && ref ? Math.round(tenencia * ref - costo) : 0;
-    const expo = Math.round(max * (1 + Number(cfg.SCALP_REFUERZO_FRAC || 0)) * (p.ask || p.last || p.bid || 0));
+    const extraMax = Number(cfg.SCALP_LATERAL_MIN || 0) > 0 ? Number(cfg.SCALP_LATERAL_MAX || 4) * Math.max(1, Math.round(lote * Number(cfg.SCALP_LATERAL_FRAC || 0.5))) : 0;
+    const expo = Math.round((max * (1 + Number(cfg.SCALP_REFUERZO_FRAC || 0)) + extraMax) * (p.ask || p.last || p.bid || 0));
     resultados.push({ user_id: USER_ID, fecha: hoy, cuenta: b.cuenta, ticker: b.ticker, pnl: Math.round(b.pnlLog), ventas: b.ventas, comprado: Math.round(b.comprado), vendido: Math.round(b.vendido), tenencia_cierre: tenencia, costo_cierre: costo, latente_cierre: latente, exposicion_max: expo });
   }
   if (!filas.length) { log("sin bots reales"); return; }
