@@ -93,6 +93,9 @@ const LATERAL_MAX = Number(ENV.SCALP_LATERAL_MAX || 4);
 const LATERAL_HASTA_ESC = Number(ENV.SCALP_LATERAL_HASTA_ESC || 2);
 const PERDIDA_MAX = Number(ENV.SCALP_PERDIDA_MAX_ARS || 60000);
 const HORA_INICIO = Number(ENV.SCALP_HORA_INICIO || 1035);
+// Antes de HORA_COMPRAS el bot solo vende lo que arrastra de ruedas anteriores:
+// no compra nada (grilla, refuerzo ni lateral). Por defecto, igual a HORA_INICIO.
+const HORA_COMPRAS = Math.max(HORA_INICIO, Number(ENV.SCALP_HORA_COMPRAS || HORA_INICIO));
 const HORA_CIERRE = Number(ENV.SCALP_HORA_CIERRE || 1700);   // cierre real de BYMA
 // Después de esta hora no se abre un ciclo NUEVO (01/10/2026: abrió uno a 28
 // minutos del cierre, sin tiempo de llegar a su venta). Los escalones de un
@@ -399,7 +402,7 @@ async function nuevoDia() {
     S.base = t != null ? t - n : null;
   }
   guardar();
-  log(`arranco la rueda con ${n} papeles de ayer · ancla ${S.ancla ? pesos(S.ancla) : "—"}`);
+  log(`arranco la rueda con ${n} papeles de ayer · ancla ${S.ancla ? pesos(S.ancla) : "—"}${HORA_COMPRAS > HORA_INICIO ? ` · hasta las ${HORA_COMPRAS} solo vendo, no compro` : ""}`);
 }
 
 async function ciclo() {
@@ -467,15 +470,17 @@ async function ciclo() {
   const c0 = compras.find((c) => c.nivel === 0 && c.cum === 0);
   const enReentrada = S.reentrada && Date.now() < S.reentrada.hasta;
   const tarde = hm >= HORA_ULTIMO_CICLO;
+  const temprano = hm < HORA_COMPRAS;            // todavía solo se vende lo arrastrado
+  if (temprano) S.ultOp = Date.now();            // el reloj del lateral arranca con las compras
   if (c0 && h === -1 && tarde) await cancelar(c0, "ya no se abren ciclos nuevos hoy");
   else if (c0 && h === -1 && !enReentrada && b.bid > c0.px * 1.001 && Date.now() - c0.t > 60_000) await cancelar(c0, "el precio se alejó");
   // Refuerzo: grilla llena, sin refuerzo previo en este ciclo.
-  if (REFUERZO_FRAC > 0 && !S.reforzado && !compras.length && S.ancla && totG >= MAX && ref.held === 0 && !pausaCompras) {
+  if (REFUERZO_FRAC > 0 && !S.reforzado && !compras.length && S.ancla && totG >= MAX && ref.held === 0 && !pausaCompras && !temprano) {
     const pxRef = alTick(S.ancla * (1 - REFUERZO_MULT * PASO * (NIVELES - 1)), "abajo");
     const qtyRef = Math.round(totG * REFUERZO_FRAC);
     if (qtyRef > 0) await colocar("BUY", NIVEL_REF, qtyRef, Math.min(pxRef, b.ask));
   }
-  if (!S.reforzado && !compras.length && deseado < NIVELES && totG + LOTE <= MAX && !pausaCompras && (deseado === 0 ? !tarde : S.ancla)) {
+  if (!S.reforzado && !compras.length && deseado < NIVELES && totG + LOTE <= MAX && !pausaCompras && !temprano && (deseado === 0 ? !tarde : S.ancla)) {
     let px;
     if (deseado === 0) px = enReentrada && b.bid > S.reentrada.px ? S.reentrada.px : b.bid;
     else px = Math.min(alTick(S.ancla * (1 - PASO * deseado), "abajo"), b.ask);
@@ -483,7 +488,7 @@ async function ciclo() {
   }
   // Regla del lateral: una hora sin ejecuciones y pocos escalones cargados → un
   // lote extra al precio (orden límite sobre la punta vendedora, para que entre).
-  if (LATERAL_MIN > 0 && !S.reforzado && ref.held === 0 && !pausaCompras && !tarde && Date.now() - S.ultOp >= LATERAL_MIN * 60_000) {
+  if (LATERAL_MIN > 0 && !S.reforzado && ref.held === 0 && !pausaCompras && !tarde && !temprano && Date.now() - S.ultOp >= LATERAL_MIN * 60_000) {
     const nEsc = S.niveles.slice(0, NIVELES).filter((n) => n.held > 0).length;
     const libre = S.niveles.findIndex((n, k) => esExtra(k) && n.held === 0 && !vs.some((o) => o.nivel === k));
     const qtyX = Math.max(1, Math.round(LOTE * LATERAL_FRAC));
@@ -513,7 +518,7 @@ async function main() {
   let disp = null;
   for (let i = 0; !FAKE && i < 4 && disp == null; i++) { disp = await disponible24().catch(() => null); if (disp == null) await dormir(2500 + Math.random() * 2500); }
   const ten = FAKE ? null : await tenenciaCuenta().catch(() => null);
-  log(`${REAL ? "*** ÓRDENES REALES ***" : "SIMULADO"} · lote ${LOTE} · máximo ${MAX} (${NIVELES} escalones) · paso ${(PASO * 100).toFixed(2)}% · ganancia ${(GANANCIA * 100).toFixed(2)}% · ${REFUERZO_FRAC > 0 ? `refuerzo ${Math.round(MAX * REFUERZO_FRAC)} a −${(REFUERZO_MULT * PASO * (NIVELES - 1) * 100).toFixed(1)}% · ` : ""}${LATERAL_MIN > 0 ? `lateral: ${Math.max(1, Math.round(LOTE * LATERAL_FRAC))} extra a los ${LATERAL_MIN} min (hasta ${LATERAL_MAX}, con ${LATERAL_HASTA_ESC} escalones o menos) · ` : ""}corte ${CORTE >= 0.9 ? "apagado" : (CORTE * 100).toFixed(1) + "%"} · cierre ${HORA_CIERRE} · tope de pérdida ${pesos(PERDIDA_MAX)}`);
+  log(`${REAL ? "*** ÓRDENES REALES ***" : "SIMULADO"} · lote ${LOTE} · máximo ${MAX} (${NIVELES} escalones) · paso ${(PASO * 100).toFixed(2)}% · ganancia ${(GANANCIA * 100).toFixed(2)}% · ${REFUERZO_FRAC > 0 ? `refuerzo ${Math.round(MAX * REFUERZO_FRAC)} a −${(REFUERZO_MULT * PASO * (NIVELES - 1) * 100).toFixed(1)}% · ` : ""}${LATERAL_MIN > 0 ? `lateral: ${Math.max(1, Math.round(LOTE * LATERAL_FRAC))} extra a los ${LATERAL_MIN} min (hasta ${LATERAL_MAX}, con ${LATERAL_HASTA_ESC} escalones o menos) · ` : ""}corte ${CORTE >= 0.9 ? "apagado" : (CORTE * 100).toFixed(1) + "%"} · ${HORA_COMPRAS > HORA_INICIO ? `vende desde ${HORA_INICIO}, compra desde ${HORA_COMPRAS} · ` : ""}cierre ${HORA_CIERRE} · tope de pérdida ${pesos(PERDIDA_MAX)}`);
   log(`cuenta ${CUENTA} · tick ${TICK} · libro ${b.bid}/${b.ask} (último ${b.last}) · disponible ${disp == null ? "?" : pesos(disp)} · tenencia de ${TK} en la cuenta ${ten ?? "?"}`);
   if (b.bid > 0 && b.ask > 0) {
     const sp = (b.ask - b.bid) / b.bid;

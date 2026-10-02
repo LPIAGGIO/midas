@@ -115,7 +115,7 @@ async function pasada() {
     filas.push({
       user_id: USER_ID, cuenta: b.cuenta, ticker: b.ticker, actualizado_at: new Date().toISOString(),
       online: pm2.get(dir) === "online", real: b.real,
-      config: { lote, max, escalones: Math.floor(max / lote), paso: Number(cfg.SCALP_PASO || 0.003), ganancia: Number(cfg.SCALP_GANANCIA || 0.0025), refuerzo: Number(cfg.SCALP_REFUERZO_FRAC || 0), corte: Number(cfg.SCALP_CORTE || 0.018), lateral_min: Number(cfg.SCALP_LATERAL_MIN || 0), lateral_frac: Number(cfg.SCALP_LATERAL_FRAC || 0.5), lateral_max: Number(cfg.SCALP_LATERAL_MAX || 4), hora_inicio: Number(cfg.SCALP_HORA_INICIO || 1035) },
+      config: { lote, max, escalones: Math.floor(max / lote), paso: Number(cfg.SCALP_PASO || 0.003), ganancia: Number(cfg.SCALP_GANANCIA || 0.0025), refuerzo: Number(cfg.SCALP_REFUERZO_FRAC || 0), corte: Number(cfg.SCALP_CORTE || 0.018), lateral_min: Number(cfg.SCALP_LATERAL_MIN || 0), lateral_frac: Number(cfg.SCALP_LATERAL_FRAC || 0.5), lateral_max: Number(cfg.SCALP_LATERAL_MAX || 4), hora_inicio: Number(cfg.SCALP_HORA_COMPRAS || cfg.SCALP_HORA_INICIO || 1035) },   // hora desde la que compra
       tenencia, costo, ancla: S.ancla ?? null, niveles,
       ordenes: (S.ordenes || []).filter((o) => !o.final).map((o) => ({ lado: o.lado, esc: o.nivel + 1, tipo: tipoDe(o.nivel), q: o.qty, px: o.px, ejecutado: o.cum })),
       bid: p.bid ?? null, ask: p.ask ?? null, ultimo: p.last ?? null,
