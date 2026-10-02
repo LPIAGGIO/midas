@@ -93,11 +93,11 @@ const LATERAL_MAX = Number(ENV.SCALP_LATERAL_MAX || 4);
 const LATERAL_HASTA_ESC = Number(ENV.SCALP_LATERAL_HASTA_ESC || 2);
 const PERDIDA_MAX = Number(ENV.SCALP_PERDIDA_MAX_ARS || 60000);
 const HORA_INICIO = Number(ENV.SCALP_HORA_INICIO || 1035);
-const HORA_CIERRE = Number(ENV.SCALP_HORA_CIERRE || 1645);
+const HORA_CIERRE = Number(ENV.SCALP_HORA_CIERRE || 1700);   // cierre real de BYMA
 // Después de esta hora no se abre un ciclo NUEVO (01/10/2026: abrió uno a 28
 // minutos del cierre, sin tiempo de llegar a su venta). Los escalones de un
 // ciclo ya abierto siguen funcionando hasta HORA_CIERRE.
-const HORA_ULTIMO_CICLO = Number(ENV.SCALP_HORA_ULTIMO_CICLO || 1615);
+const HORA_ULTIMO_CICLO = Number(ENV.SCALP_HORA_ULTIMO_CICLO || 1645);
 const REANCLA_MS = Number(ENV.SCALP_REANCLA_MIN || 10) * 60_000;
 const REAL = ENV.SCALP_REAL === "1";
 const CIERRE_VENDE = ENV.SCALP_CIERRE_VENDE === "1";    // por defecto NO vende al cierre: arrastra
@@ -367,12 +367,20 @@ async function liquidar(motivo) {
 /* Cierre de la rueda SIN vender: cancela lo apoyado y deja los papeles para
  * mañana. (SCALP_CIERRE_VENDE=1 vuelve al cierre que liquida todo.) */
 async function cerrarDia() {
-  for (let i = 0; i < 12 && vivas().length; i++) { for (const o of vivas()) { o.cancelT = 0; await cancelar(o, "cierre de la rueda"); } await dormir(2500); await sincronizar(await libro()).catch((e) => log(`sync: ${e.message}`)); }
+  // Con el mercado ya cerrado las ordenes vencieron solas: alcanza con leer su
+  // estado final (una venta pudo ejecutarse en el ultimo minuto). Si el cierre
+  // se pidio antes de las 17:00 (SCALP_HORA_CIERRE), ahi si se cancelan.
+  const cerrado = hhmmAr() >= 1700;
+  for (let i = 0; i < (cerrado ? 4 : 12) && vivas().length; i++) {
+    if (!cerrado) for (const o of vivas()) { o.cancelT = 0; await cancelar(o, "cierre de la rueda"); }
+    await dormir(cerrado ? 5000 : 2500);
+    await sincronizar(await libro()).catch((e) => log(`sync: ${e.message}`));
+  }
   const n = heldTot(), costo = S.niveles.reduce((a, x) => a + x.costo, 0);
   S.fin = n ? `cierre de la rueda: quedan ${n} papeles abiertos para mañana (costo ${pesos(costo)})` : "cierre de la rueda: sin papeles";
   guardar();
-  const msg = `CIERRE del día (${S.fin}) · ${S.rondas} ventas · P&L realizado ${pesos(S.pnl)}`;
-  log(msg); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\n${msg}`);
+  log(`CIERRE del día (${S.fin}) · ${S.rondas} ventas · P&L realizado ${pesos(S.pnl)}`);
+  // Sin Telegram por bot: el detalle de todos sale junto en el resumen de las 17:03.
 }
 /* Rueda nueva con estado de una anterior: las órdenes eran por el día, así
  * que ya no existen; se consulta su estado final (una venta pudo ejecutarse
