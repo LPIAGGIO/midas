@@ -45753,7 +45753,7 @@ function BotScalpingModule() {
                       const k = `${f.cuenta}|${f.ticker}`, cfg = f.config || {}, ten = Number(f.tenencia) || 0;
                       const ords = f.ordenes || [], ventas = ords.filter((o) => o.lado === "SELL"), compras = ords.filter((o) => o.lado === "BUY");
                       const pv = ventas.length ? Math.min(...ventas.map((o) => o.px)) : null, pc = compras.length ? Math.max(...compras.map((o) => o.px)) : null;
-                      const nEsc = (f.niveles || []).filter((n) => !n.tipo || n.tipo === "escalon").length, nExt = (f.niveles || []).filter((n) => n.tipo === "extra").length, px = Number(f.bid || f.ultimo) || null;
+                      const nEsc = (f.niveles || []).filter((n) => !n.tipo || n.tipo === "escalon").length, nExt = (f.niveles || []).filter((n) => n.tipo === "extra").length, px = Number(f.ultimo || f.bid) || null;
                       const estado = !f.online ? "apagado" : f.fin ? f.fin : f.reforzado ? "con refuerzo: sale todo junto" : ten ? "en posición" : "esperando compra";
                       const abierto = abierta === k;
                       return (
@@ -45911,7 +45911,7 @@ function BotScalpingModule() {
             );
           })()}
           <div style={{ color: C.dim, fontSize: 11, lineHeight: 1.6, maxWidth: 900 }}>
-            Realizado es neto de comisiones y solo cuenta lotes ya vendidos; como el bot no vende con pérdida, el realizado siempre es positivo y lo malo queda en el latente: el número que vale es el resultado total. Latente valúa lo que tiene el bot a la punta compradora. Sin corte: el bot no vende con pérdida; la exposición máxima es lo que tendría invertido con todos los escalones y el refuerzo cargados. Tocá un papel para ver sus lotes, sus órdenes y las operaciones del día. Desde esta pantalla no se enciende ni se apaga nada.
+            Realizado es neto de comisiones y solo cuenta lotes ya vendidos; como el bot no vende con pérdida, el realizado siempre es positivo y lo malo queda en el latente: el número que vale es el resultado total. Latente valúa lo que tiene el bot al último precio operado, igual que Matriz. Sin corte: el bot no vende con pérdida; la exposición máxima es lo que tendría invertido con todos los escalones y el refuerzo cargados. Tocá un papel para ver sus lotes, sus órdenes y las operaciones del día. Desde esta pantalla no se enciende ni se apaga nada.
           </div>
         </>
       )}

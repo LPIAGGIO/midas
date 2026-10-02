@@ -105,7 +105,10 @@ async function pasada() {
     const tenencia = niveles.reduce((a, n) => a + n.tenencia, 0);
     const costo = niveles.reduce((a, n) => a + n.costo, 0);
     const p = px[b.ticker] || {};
-    const ref = p.bid || p.last || null;
+    // Valuacion al ULTIMO OPERADO, como Matriz (02/10/2026: valuando a la punta
+    // compradora, despues del cierre el latente de la 72404 daba -184.505 contra
+    // -94.570 de Matriz; fuera de rueda la punta queda lejos del ultimo precio).
+    const ref = p.last || p.bid || null;
     const cfg = b.env;
     const lote = Number(cfg.SCALP_LOTE || 2), max = Number(cfg.SCALP_MAX || 10);
     const delDia = S.dia === hoy;
