@@ -97,7 +97,8 @@ async function main() {
   if (!DRY && !process.argv.includes("--forzar") && hm < 1700) { console.log(`son las ${hm}: el resumen sale después de las 17:00`); return; }
   const bots = fs.readdirSync(RAIZ).filter((d) => /^cocos\d*-scalp/.test(d)).map((d) => leerBot(path.join(RAIZ, d))).filter((b) => b && b.ev.length)
     .sort((a, b) => a.cuenta.localeCompare(b.cuenta) || a.tk.localeCompare(b.tk));
-  if (!bots.length) { console.log("sin operaciones reales de scalp hoy: no mando nada"); return; }
+  const marca = path.join(__dirname, "logs", `resumen-enviado-${hoy}`);
+  if (!DRY && !process.argv.includes("--forzar") && fs.existsSync(marca)) { console.log("el resumen de hoy ya se mandó"); return; }
   const partes = bots.map(armar);
   const mensajes = partes.map((p) => p.texto);
   if (bots.length > 1) {
@@ -115,6 +116,46 @@ async function main() {
     else L[L.length - 1] = `<b>Total: ${pesos(general)}</b>`;
     mensajes.push(L.join("\n"));
   }
+  if (!process.argv.includes("--detalle")) {
+    // Mensaje único: estado de cada bot (scalp_estado) + lo realizado hoy (logs).
+    const E0 = env();
+    const sb0 = createClient(E0.SUPABASE_URL, E0.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false }, realtime: { transport: WebSocket } });
+    const { data: est } = await sb0.from("scalp_estado").select("cuenta,ticker,tenencia,costo,latente,niveles,config,real").eq("user_id", USER_ID);
+    const { data: hist } = await sb0.from("scalp_resultados").select("fecha,pnl").eq("user_id", USER_ID);
+    const hoyPorBot = new Map(bots.map((b, i) => [`${b.cuenta}|${b.tk}`, partes[i]]));
+    const filas = (est || []).filter((f) => f.real);
+    if (!filas.length && !bots.length) { console.log("sin bots de scalp reales: no mando nada"); return; }
+    const sg = (n) => (n > 0 ? "+" : n < 0 ? "−" : " ") + Math.abs(Math.round(n)).toLocaleString("es-AR");
+    const orden = (c) => (c === "72404" ? "0" : "1" + c);
+    const cuentas = [...new Set(filas.map((f) => f.cuenta))].sort((a, b) => orden(a).localeCompare(orden(b)));
+    const L = [`<b>SCALP · cierre ${hoy.split("-").reverse().join("/")}</b>`];
+    let tReal = 0, tLat = 0, tInv = 0, tVentas = 0;
+    for (const c of cuentas) {
+      const fs_ = filas.filter((f) => f.cuenta === c).sort((a, b) => a.ticker.localeCompare(b.ticker));
+      let real = 0, lat = 0, inv = 0, ventas = 0;
+      const lineas = ["papel  realizado  v  esc    latente"];
+      for (const f of fs_) {
+        const p = hoyPorBot.get(`${c}|${f.ticker}`) || { total: 0, vueltas: 0 };
+        const esc = (f.niveles || []).filter((n) => !n.tipo || n.tipo === "escalon").length;
+        const ext = (f.niveles || []).filter((n) => n.tipo === "extra").length;
+        const tope = (f.config && f.config.escalones) || 5;
+        real += p.total; lat += Number(f.latente) || 0; inv += Number(f.costo) || 0; ventas += p.vueltas;
+        lineas.push(`${f.ticker.padEnd(5)} ${sg(p.total).padStart(10)} ${String(p.vueltas).padStart(2)}  ${esc}/${tope}${ext ? "+" + ext : "  "} ${(Number(f.tenencia) > 0 ? sg(Number(f.latente) || 0) : "—").padStart(9)}`);
+      }
+      L.push("", `<b>Cuenta ${c}</b>`, `<pre>${lineas.join("\n")}</pre>`, `Realizado ${sg(real)} en ${ventas} ventas · latente ${sg(lat)} · invertido $${Math.round(inv).toLocaleString("es-AR")}`);
+      tReal += real; tLat += lat; tInv += inv; tVentas += ventas;
+    }
+    const acum = (hist || []).filter((h) => h.fecha !== hoy).reduce((a, h) => a + Number(h.pnl || 0), 0) + tReal;
+    const ruedas = new Set((hist || []).map((h) => h.fecha).concat([hoy])).size;
+    L.push("", "<b>Total del día</b>",
+      `Realizado ${sg(tReal)} en ${tVentas} ventas`,
+      `Latente ${sg(tLat)} (lo que sigue abierto)`,
+      `<b>Resultado: ${sg(tReal + tLat)}</b>${tInv > 0 ? ` · ${((tReal + tLat) / tInv * 100).toFixed(2).replace(".", ",")}% de lo invertido` : ""}`,
+      `Invertido $${Math.round(tInv).toLocaleString("es-AR")}`,
+      "", `Acumulado ${ruedas} ${ruedas === 1 ? "rueda" : "ruedas"}: realizado ${sg(acum)} · con el latente de hoy ${sg(acum + tLat)}`,
+      "v = ventas · esc = escalones cargados · lo abierto se arrastra a la próxima rueda");
+    mensajes.length = 0; mensajes.push(L.join("\n"));
+  } else if (!bots.length) { console.log("sin operaciones reales de scalp hoy: no mando nada"); return; }
   if (DRY) { console.log(mensajes.join("\n\n────────\n\n")); return; }
   const E = env();
   const sb = createClient(E.SUPABASE_URL, E.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false }, realtime: { transport: WebSocket } });
@@ -131,6 +172,7 @@ async function main() {
       if (!r.ok) throw new Error(`Telegram HTTP ${r.status} ${(await r.text()).slice(0, 150)}`);
     }
   }
+  fs.writeFileSync(marca, new Date().toISOString());
   console.log(`resumen enviado: ${mensajes.length} mensajes`);
 }
 main().then(() => process.exit(0)).catch((e) => { console.error(`[resumen scalp] ${e.message}`); process.exit(1); });
