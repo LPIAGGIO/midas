@@ -642,11 +642,11 @@ async function futuresSettledToday(dateStr) {
     .select("settlement_ts").like("symbol", "DLR/%").not("settlement_ts", "is", null)
     .order("settlement_ts", { ascending: false }).limit(1);
   if (!data || !data.length || !data[0].settlement_ts) return false;
-  // En hora ARGENTINA: el settle de ayer se publica 21:00 ART = 00:00 UTC de
-  // hoy, y comparando el string crudo daba "settle de hoy" cuando era el de
-  // ayer (30/09/2026: DLRNOV26 −50.000 contra el settle viejo).
-  const fechaArt = new Date(data[0].settlement_ts).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-  return fechaArt === dateStr;
+  // settlement_ts es una FECHA sin hora (campo STLD del feed, guardada a las
+  // 00:00 UTC): es la fecha de la rueda del ajuste y se compara tal cual. El
+  // 30/09/2026 se la paso a hora argentina y quedaba siempre un dia atras
+  // (ver research/fase2/patch_settle_fecha.py).
+  return new Date(data[0].settlement_ts).toISOString().slice(0, 10) === dateStr;
 }
 
 // Bloque de futuros (P&L del dia settle-based por ticker). Reutilizado por el

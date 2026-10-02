@@ -60,12 +60,11 @@ function rowToPriceEntry(row, nowMs) {
   const reference = row.reference != null ? Number(row.reference) : null;
   const midpoint = bid != null && offer != null ? (bid + offer) / 2 : null;
   const lastDate = row.last_ts ? new Date(row.last_ts).getTime() : null;
-  // Fecha (hora argentina) del settlement que trae la fila: el front compara
-  // contra "hoy" para saber si ya es el ajuste del dia. OJO: el settle de ayer
-  // se publica 21:00 ART = 00:00 UTC de hoy; en UTC parece de hoy y no lo es.
-  const settlementDate = row.settlement_ts
-    ? new Date(row.settlement_ts).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
-    : null;
+  // Fecha del settlement que trae la fila: el front compara contra "hoy" para
+  // saber si ya es el ajuste del dia. settlement_ts es una FECHA sin hora (el
+  // campo STLD del feed, guardado a las 00:00 UTC): se lee tal cual, SIN pasar
+  // a hora argentina (eso la corria un dia para atras; ver patch_settle_fecha.py).
+  const settlementDate = row.settlement_ts ? new Date(row.settlement_ts).toISOString().slice(0, 10) : null;
   const lastAge = lastDate != null ? nowMs - lastDate : Infinity;
 
   // Tamaños de las puntas (para order-book imbalance) + volumen.
