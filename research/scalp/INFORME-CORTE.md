@@ -113,3 +113,24 @@ fue el horario de entrada, no una ventaja repetible. La única variante que
 mejora un poco en las dos muestras largas es B con grilla 1,5 veces más ancha
 (+2% a +6% de resultado, 2% menos de peor momento), dentro del ruido y a favor
 del sesgo conocido de las velas gruesas hacia grillas anchas.
+
+## Hora de arranque (02/10/2026)
+
+LP: "¿y si una cuenta arranca 2 horas después?". `horario.py`: la cuenta no
+opera (ni compra ni vende) antes de la hora indicada; lo arrastrado sigue.
+
+| Arranque | 5 min, 43 ruedas | Horario, 730 ruedas | Vueltas (horario) | Suma de peores (horario) |
+|---|---:|---:|---:|---:|
+| 10:35 (actual) | +2.646 | +25.111 | 5.543 | −12.914 |
+| 11:35 | +3.188 | +29.290 | 4.911 | −12.535 |
+| 12:35 | +3.602 | +27.900 | 4.167 | −12.590 |
+| 13:35 | +3.472 | +28.507 | 3.681 | −12.596 |
+| 14:35 | +3.183 | +28.412 | 3.234 | −12.534 |
+
+Arrancar 11:35 mejora en 9 de 9 papeles (horario) y 7 de 9 (5 min), y en los
+cuatro años de la muestra horaria (2023 +2.103→+2.468, 2024 +6.543→+7.564,
+2025 +7.626→+9.051, 2026 +11.501→+12.789). Más tarde que 11:35 no suma de
+forma consistente. La mejora no viene de desfasar una cuenta contra la otra
+sino de NO operar la primera hora: menos vueltas, pero mejores (la grilla
+compra caídas de la apertura que suelen seguir). Aplica a las dos cuentas.
+Reserva: mismo sesgo de dirección que favorece a las grillas anchas.
