@@ -4388,6 +4388,23 @@ function parseMovimientosCsv(text, existing) {
 }
 
 /** Hook: filas de libro_movimientos del usuario. */
+// Lee TODAS las filas del libro de un usuario, paginando de a 1.000 (el tope
+// por consulta de Supabase). 02/10/2026: con 1.011 filas una lectura simple
+// devolvía 1.000 y la derivación armaba 5.250 YPFD fantasma (las ventas que
+// cerraban la posición habían quedado afuera). El orden por nro_comprobante
+// es estable, así que ninguna fila se repite ni se saltea entre páginas.
+async function leerLibroCompleto(userId, columnas = "*") {
+  const todas = [];
+  for (let desde = 0; ; desde += 1000) {
+    const { data, error } = await supabase.from("libro_movimientos").select(columnas)
+      .eq("user_id", userId).order("nro_comprobante", { ascending: true }).range(desde, desde + 999);
+    if (error) return { data: null, error };
+    todas.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return { data: todas, error: null };
+}
+
 function useLibroMovimientos() {
   const { user } = useAuth();
   const [rows, setRows] = useState([]);
@@ -4399,13 +4416,12 @@ function useLibroMovimientos() {
     (async () => {
       if (!user) { setRows([]); setLoading(false); return; }
       setLoading(true);
-      const { data, error } = await supabase
-        .from("libro_movimientos")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("fecha_ejecucion", { ascending: false })
-        .order("nro_comprobante", { ascending: false });
-      if (!cancel) { setRows(error ? [] : (data || [])); setLoading(false); }
+      const { data, error } = await leerLibroCompleto(user.id);
+      // Mismo orden que antes: más nuevo primero, por fecha y comprobante.
+      const ord = (data || []).slice().sort((a, b) =>
+        (a.fecha_ejecucion < b.fecha_ejecucion ? 1 : a.fecha_ejecucion > b.fecha_ejecucion ? -1 : 0) ||
+        String(b.nro_comprobante).localeCompare(String(a.nro_comprobante), undefined, { numeric: true }));
+      if (!cancel) { setRows(error ? [] : ord); setLoading(false); }
     })();
     return () => { cancel = true; };
   }, [user, tick]);
@@ -5362,8 +5378,10 @@ function ImportacionesView() {
         if (error) { setImporting(false); setResult({ err: error.message }); return; }
       }
     }
-    const { data: fresh } = await supabase.from("libro_movimientos").select("*").eq("user_id", user.id);
-    const derived = deriveFromLedger(fresh || []);
+    const { data: fresh, error: errLibro } = await leerLibroCompleto(user.id);
+    // Sin el libro entero NO se deriva: una lectura a medias fabrica tenencias.
+    if (errLibro || !fresh) { setImporting(false); setResult({ err: `No pude leer el libro completo: ${errLibro?.message || "sin datos"}` }); return; }
+    const derived = deriveFromLedger(fresh);
     /* DERIVACIÓN DE POSICIONES: PRENDIDA de nuevo el 27/09/2026 (pedido de LP:
      * "cuando se sube el archivo nuevo que arme todo lo que pueda"). Estaba
      * apagada desde el 17/09 porque fabricaba tenencias fantasma: las letras
@@ -34745,7 +34763,7 @@ function PnlPorInstrumentoModule() {
   useEffect(() => {
     if (!user) return;
     let cancel = false;
-    supabase.from("libro_movimientos").select("comision,ddmm,iva,monto_bruto,categoria").eq("user_id", user.id).limit(8000)
+    leerLibroCompleto(user.id, "nro_comprobante,comision,ddmm,iva,monto_bruto,categoria")
       .then(({ data }) => {
         if (cancel || !data || !data.length) return;
         let fees = 0, vol = 0;
