@@ -42,10 +42,13 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0):
     """corte=None → holdea sin limite. Devuelve metricas en USD."""
+    # doble: con la grilla llena, si el precio cae a ancla*(1 - doble*profundidad) compra
+    # OTRA VEZ la misma cantidad que tiene y pasa a salir todo junto en promedio + gan.
+    X = 99
     # permitido: fechas en las que se puede ABRIR un ciclo nuevo (None = siempre)
-    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True)
+    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV)
     lots = {}          # k -> (precio, unidades, costo_usd)
     por_anio = {}
 
@@ -74,7 +77,11 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                     if E['ok'] and E['reent'] is not None and E['reent'] >= p1:
                         cand.append((min(E['reent'], pos), 'r', 0))
                 else:
-                    h = max(lots) if lots else -1
+                    h = max((k for k in lots if k != X), default=-1)
+                    if doble is not None and h == NIV - 1 and X not in lots:
+                        px = E['ancla'] * (1 - doble * paso * (NIV - 1))
+                        if px >= p1:
+                            cand.append((min(px, pos), 'x', X))
                     if h + 1 < NIV:
                         px = E['ancla'] * (1 - paso * (h + 1))
                         if px >= p1:
@@ -92,6 +99,10 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                     comprar(0, ej)
                 elif tipo == 'b':
                     comprar(k, ej)
+                elif tipo == 'x':
+                    u = frac * sum(v[1] for v in lots.values())   # frac=0.5: compra la mitad de lo que tiene
+                    lots[X] = (ej, u, u * ej / E['fx'])
+                    E['capmax'] = max(E['capmax'], sum(v[2] for v in lots.values()))
                 else:
                     g = sum(vender(kk, ej, fecha) for kk in list(lots))
                     E['cortes'] += 1
@@ -103,6 +114,16 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                 pos = px
         else:
             while lots:
+                if X in lots:
+                    ut = sum(v[1] for v in lots.values())
+                    obj = sum(v[0] * v[1] for v in lots.values()) / ut * (1 + gan)
+                    if obj > p1:
+                        return
+                    for kk in list(lots):
+                        vender(kk, p1 if salto else obj, fecha)
+                    E['reent'] = E['ancla']
+                    E['ancla'] = None
+                    return
                 k = min(lots, key=lambda kk: lots[kk][0])
                 obj = lots[k][0] * (1 + gan)
                 if obj > p1:
@@ -145,7 +166,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         peor_abierto = min(peor_abierto, ab)
         eq.append(E['real'] + ab)
         if fecha != prev_f:
-            if len(lots) == NIV:
+            if len(lots) >= NIV:
                 cargado += 1
                 racha += 1
                 racha_max = max(racha_max, racha)
@@ -159,7 +180,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         dd = min(dd, e - pico)
     dias = len({b[0] for b in bars})
     return dict(total=eq[-1], real=E['real'], abierto=eq[-1] - E['real'], rondas=E['rondas'], cortes=E['cortes'], perd=E['perd'], dd=dd,
-                peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio)
+                capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio)
 
 
 CORTES = [0.05, 0.075, 0.10, 0.15, 0.20, 0.30, None]
