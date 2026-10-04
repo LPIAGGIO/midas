@@ -1,0 +1,113 @@
+ULTIMOS 2 AÑOS: 2024-09-27 a 2026-10-01 (504 ruedas). Dias con los semis (SMH) cayendo 2% o mas: 79
+CEDEARs con historia completa, monto operado >= $30M y spread <= 1,2% en la foto del ultimo cierre: 100
+
+A) LOS MENOS ATADOS A LOS SEMIS (correlacion diaria con SMH, ultimos 2 años)
+   papel   correl.   2a antes   dia malo semis sube esos dias  volatil.   monto $M
+   KO        -0.24       0.03            0.61%            70%       18%       1672
+   VZ        -0.23       0.01            0.73%            68%       23%         67
+   PEP       -0.17      -0.02            0.41%            57%       21%        472
+   MCD       -0.14       0.11            0.28%            59%       19%       1378
+   ABT       -0.11       0.14            0.32%            57%       25%         78
+   XOM        0.00       0.12            0.17%            59%       25%        288
+   ADBE       0.03       0.54            0.05%            52%       38%        249
+   UNH        0.03      -0.03            0.03%            53%       44%        241
+   WMT        0.04       0.15            0.28%            62%       25%        362
+   CVX        0.05       0.20            0.02%            53%       24%        201
+   NEE        0.08       0.12           -0.10%            48%       25%         64
+   LLY        0.08       0.19           -0.02%            54%       38%        564
+   MA         0.09       0.48           -0.00%            54%       22%        150
+   PFE        0.09       0.06           -0.27%            44%       24%        114
+   AMGN       0.11       0.14            0.00%            49%       28%        149
+   CRM        0.11       0.47           -0.15%            43%       40%        103
+   V          0.12       0.41           -0.09%            49%       22%        343
+   PBR        0.12       0.07           -0.43%            43%       32%       4627
+   IBM        0.13       0.35           -0.56%            41%       42%       3001
+   NOW        0.13       0.53           -0.38%            39%       49%        457
+   NFLX       0.13       0.48           -0.44%            46%       35%        930
+   SPOT       0.15       0.42           -0.71%            47%       45%       1007
+   XLE        0.17       0.25           -0.18%            56%       24%        662
+   MRNA       0.18       0.28           -1.59%            33%      102%       1478
+   NKE        0.18       0.31           -0.59%            34%       38%       2753
+   HD         0.19       0.45           -0.46%            38%       24%         36
+   MELI       0.19       0.44           -0.84%            46%       40%       3813
+   PATH       0.20       0.42           -0.86%            38%       59%         85
+   ARCO       0.21       0.24           -0.65%            32%       35%        140
+   BKNG       0.21       0.50           -0.64%            38%       33%        126
+   VIST       0.21       0.22           -0.98%            39%       50%       6149
+   NIO        0.22       0.35           -1.67%            29%       60%        238
+   ...
+   XLE        0.17       0.25           -0.18%            56%       24%        662
+   GLD        0.22       0.20           -0.43%            48%       24%       1492
+   MSFT       0.31       0.62           -0.71%            32%       29%       2887
+   SLV        0.32       0.26           -1.66%            39%       50%        614
+   AAPL       0.34       0.56           -0.61%            38%       29%       2832
+   EWZ        0.38       0.19           -0.87%            29%       25%       5686
+   GOOGL      0.40       0.51           -0.98%            29%       32%       6967
+   META       0.41       0.47           -1.36%            28%       39%       2850
+   SNDK       0.62       0.67           -5.20%            22%       96%       7387
+   INTC       0.63       0.57           -3.87%             8%       69%       2676
+   AMD        0.77       0.79           -4.56%             1%       62%       7664
+   NVDA       0.77       0.86           -3.55%             4%       44%      27462
+   SPY        0.79       0.80           -1.17%             6%       16%       8265
+   MU         0.80       0.74           -5.14%             5%       71%      17949
+
+B) CANASTAS (elegidas con la correlacion de 2022-09-26 a 2024-09-26; medidas en los ultimos 2 años)
+   actual (9 de hoy)                      MU SNDK NVDA GOOGL AMD INTC META AAPL MSFT
+                                          correlacion media 0.33 · apuestas independientes 2.5 · peor racha de 20 ruedas -23.7%
+   5 semis + 4 defensivos                 MU SNDK NVDA AMD INTC UNH PEP VZ KO
+                                          correlacion media 0.12 · apuestas independientes 4.5 · peor racha de 20 ruedas -20.8%
+   mitad y mitad (4 de hoy + 5 opuestos)  MU NVDA META GOOGL UNH PBR VZ PFE BBD
+                                          correlacion media 0.12 · apuestas independientes 4.7 · peor racha de 20 ruedas -16.2%
+   MU + 8 opuestos                        MU UNH PBR META VZ MRNA LLY BBD RGTI
+                                          correlacion media 0.08 · apuestas independientes 5.4 · peor racha de 20 ruedas -15.3%
+
+   HISTORIA REAL de los ultimos 2 años (grilla sin corte, refuerzo 50%; % sobre el capital maximo de la canasta, USD 31050)
+   canasta                                 resultado peor momento    vueltas    result/peor
+   actual (9 de hoy)                           52.8%       -20.9%       3547           2.53
+   5 semis + 4 defensivos                      40.9%       -15.1%       3211           2.70
+   mitad y mitad (4 de hoy + 5 opuestos)       23.2%       -15.0%       2423           1.55
+   MU + 8 opuestos                             25.1%       -15.7%       2209           1.60
+
+C) MONTE CARLO: 1000 años sinteticos de 250 ruedas (bloques de 10 ruedas de los ultimos 2 años) · 41 s
+   % anual sobre el capital maximo de la canasta
+   canasta                                  mediana   malo 5%  bueno 5%  años neg. |   peor: med.     peor: 5%     peor: 1% | med/peor5
+   actual (9 de hoy)                          22.6%     -3.9%     38.9%         7% |        -6.6%       -21.6%       -29.2% |      1.04
+   5 semis + 4 defensivos                     16.2%     -5.9%     32.3%         9% |        -6.8%       -19.8%       -26.0% |      0.82
+   mitad y mitad (4 de hoy + 5 opuestos)       7.4%     -8.4%     18.6%        21% |        -5.9%       -16.5%       -22.8% |      0.45
+   MU + 8 opuestos                             9.7%     -9.1%     26.1%        19% |        -7.9%       -19.0%       -23.4% |      0.51
+
+   Por papel (mediana y 5% malo del resultado anual, % sobre el capital del papel USD 3450)
+   AAPL   paso 0.7% · mediana    8.7% · malo 5%   -19.1% · años negativos  28% · actual
+   AMD    paso 1.0% · mediana   31.7% · malo 5%   -25.9% · años negativos  15% · actual + 5 semis + 4 defensivos
+   BBD    paso 1.0% · mediana   12.9% · malo 5%   -29.1% · años negativos  30% · mitad y mitad + MU + 8 opuestos
+   GOOGL  paso 0.7% · mediana   16.0% · malo 5%   -14.5% · años negativos  16% · actual + mitad y mitad
+   INTC   paso 1.0% · mediana   30.9% · malo 5%   -31.3% · años negativos  16% · actual + 5 semis + 4 defensivos
+   KO     paso 0.5% · mediana    4.8% · malo 5%   -13.5% · años negativos  33% · 5 semis + 4 defensivos
+   LLY    paso 0.7% · mediana    3.5% · malo 5%   -34.7% · años negativos  44% · MU + 8 opuestos
+   META   paso 1.0% · mediana    3.9% · malo 5%   -35.3% · años negativos  43% · actual + mitad y mitad + MU + 8 opuestos
+   MRNA   paso 1.5% · mediana   15.8% · malo 5%   -52.4% · años negativos  36% · MU + 8 opuestos
+   MSFT   paso 0.7% · mediana    1.8% · malo 5%   -29.7% · años negativos  47% · actual
+   MU     paso 1.0% · mediana   45.0% · malo 5%    -6.9% · años negativos   7% · actual + 5 semis + 4 defensivos + mitad y mitad + MU + 8 opuestos
+   NVDA   paso 1.0% · mediana   17.6% · malo 5%   -24.1% · años negativos  23% · actual + 5 semis + 4 defensivos + mitad y mitad
+   PBR    paso 1.0% · mediana    7.1% · malo 5%   -27.9% · años negativos  35% · mitad y mitad + MU + 8 opuestos
+   PEP    paso 0.5% · mediana  -15.3% · malo 5%   -36.9% · años negativos  85% · 5 semis + 4 defensivos
+   PFE    paso 0.7% · mediana   -1.9% · malo 5%   -28.3% · años negativos  56% · mitad y mitad
+   RGTI   paso 1.5% · mediana   29.2% · malo 5%   -54.3% · años negativos  28% · MU + 8 opuestos
+   SNDK   paso 1.5% · mediana   59.9% · malo 5%     3.0% · años negativos   5% · actual + 5 semis + 4 defensivos
+   UNH    paso 0.7% · mediana  -19.4% · malo 5%   -59.3% · años negativos  72% · 5 semis + 4 defensivos + mitad y mitad + MU + 8 opuestos
+   VZ     paso 0.7% · mediana   -0.7% · malo 5%   -26.4% · años negativos  51% · 5 semis + 4 defensivos + mitad y mitad + MU + 8 opuestos
+
+E) PRUEBA DE ESTRES: 1000 años sinteticos armados con las 251 ruedas de 2022 (SMH -34% en el año)
+   canasta                                  mediana   malo 5%  bueno 5%  años neg. |   peor: med.     peor: 5%     peor: 1%
+   actual (9 de hoy)                         -40.0%    -62.7%     -8.4%        98% |       -44.0%       -63.6%       -68.9%
+   5 semis + 4 defensivos                    -25.8%    -45.5%     -1.4%        96% |       -29.5%       -46.7%       -52.6%
+   mitad y mitad (4 de hoy + 5 opuestos)     -24.5%    -43.1%     -4.2%        98% |       -27.7%       -44.9%       -51.8%
+   MU + 8 opuestos                           -25.3%    -41.6%     -7.0%        99% |       -28.8%       -43.7%       -49.8%
+   Por papel en 2022 (mediana del resultado anual, % sobre el capital del papel): AAPL -26% · AMD -51% · BBD -15% · GOOGL -37% · INTC -44% · KO 2% · LLY 12% · META -57% · MRNA -28% · MSFT -27% · MU -40% · NVDA -48% · PBR -5% · PEP 2% · PFE -15% · RGTI -85% · SNDK -45% · UNH 3% · VZ -22%
+
+D) CONTROL DE AZAR: 300 canastas de 9 al azar entre 84 papeles, 200 años sinteticos · 62 s
+   al azar: mediana del resultado 5.6% (de -2.1% a 14.4%) · peor momento 5%: -25.3% (de -32.6% a -20.3%) · resultado/peor: 0.23 (de -0.07 a 0.62)
+   actual (9 de hoy)                      resultado 23.3% (le gana al 100% del azar) · peor 5% -23.2% (mejor que el 73%) · resultado/peor 1.00 (mejor que el 100%)
+   5 semis + 4 defensivos                 resultado 17.1% (le gana al 98% del azar) · peor 5% -21.0% (mejor que el 91%) · resultado/peor 0.82 (mejor que el 99%)
+   mitad y mitad (4 de hoy + 5 opuestos)  resultado 8.2% (le gana al 67% del azar) · peor 5% -16.9% (mejor que el 100%) · resultado/peor 0.48 (mejor que el 86%)
+   MU + 8 opuestos                        resultado 9.2% (le gana al 72% del azar) · peor 5% -19.0% (mejor que el 98%) · resultado/peor 0.48 (mejor que el 86%)

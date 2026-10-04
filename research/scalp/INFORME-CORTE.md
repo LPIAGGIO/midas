@@ -157,3 +157,48 @@ en resultado por unidad de peor momento (5% a 17%). La variante de 1 hora es
 la única que mejora también sobre el capital máximo en las dos muestras.
 Mi pronóstico previo ("va a dar parecido a la grilla angosta") fue errado en
 términos absolutos.
+
+## Canasta balanceada y Monte Carlo (04/10/2026)
+
+LP: "cuando bajan los semis, ¿qué sube? ¿cuál es el opuesto? armamos algo
+balanceado y simulamos todos los escenarios estilo Monte Carlo de los últimos 2
+años". `balance.py` (salida completa en `balance-salida.txt`). Diario, USD, 100
+CEDEARs líquidos; canastas elegidas con la correlación de los 2 años ANTERIORES;
+1.000 años sintéticos de 250 ruedas con bloques de 10 ruedas, las mismas para
+todos los papeles; grilla sin corte con refuerzo 50% (sin regla del lateral).
+
+**No hay opuesto.** Los 79 días en que SMH cayó 2% o más: MU −5,1%, SNDK −5,2%,
+AMD −4,6%. Lo más "contrario" entre los líquidos: KO +0,6% (sube 70% de esos
+días, correlación −0,24), VZ +0,7%, PEP +0,4%, MCD +0,3%. El oro NO es opuesto:
+GLD correlación +0,22 y −0,4% esos días; las mineras (GDX, NEM, KGC) −1,1% a
+−1,5%. Brasil (EWZ) +0,38. Lo único con correlación negativa de verdad son los
+ETF inversos (QQQD −0,68, AMDD −0,76, VXX −0,66), que perdieron 40% a 91% en los
+2 años: no sirven para una grilla que holdea.
+
+| Canasta | N efectivo | MC 2 años: mediana anual | año malo (5%) | peor momento (5%) | Estrés 2022: mediana | peor (1%) |
+|---|---:|---:|---:|---:|---:|---:|
+| actual (9 de hoy) | 2,5 | +22,6% | −3,9% | −21,6% | −40,0% | −68,9% |
+| 5 semis + KO PEP VZ UNH | 4,5 | +16,2% | −5,9% | −19,8% | −25,8% | −52,6% |
+| MU NVDA META GOOGL + UNH PBR VZ PFE BBD | 4,7 | +7,4% | −8,4% | −16,5% | −24,5% | −51,8% |
+| MU + 8 opuestos | 5,4 | +9,7% | −9,1% | −19,0% | −25,3% | −49,8% |
+
+(% sobre el capital máximo de la canasta. Estrés = años armados con las ruedas
+de 2022, SMH −34%.)
+
+- Balancear baja el peor momento poco (2 a 5 puntos) y el resultado mucho (6 a
+  15 puntos) en los últimos 2 años; en un 2022 ahorra unos 15 puntos, pero
+  todas las canastas pierden en 96% a 99% de los años.
+- Los defensivos no suben cuando caen los semis: quedan en cero (KO +2%, PEP
+  +2% en 2022). Diluyen, no compensan. Y la grilla no rota en papeles quietos.
+- Riesgo de papel suelto: UNH era de los menos atados a los semis en la ventana
+  de selección y la grilla pierde 19% mediano con él (72% de años negativos).
+- Achicar la canasta actual al 65% da casi lo mismo que "5 semis + 4
+  defensivos": +14,6% / estrés −25,8% / peor momento −13,9%.
+- Control de azar (300 canastas de 9 al azar): la actual le gana al 100% en
+  resultado y al 73% en peor momento. El "edge" de la actual es que son los
+  papeles que más subieron en la muestra.
+
+Reservas: en dólares (el CCL es un factor común que no se balancea); velas
+diarias; liquidez de un solo día; el Monte Carlo solo reordena lo que pasó en
+la ventana (2 años alcistas para semis), por eso se agregó el estrés con 2022;
+la ventana de selección pisa 3 meses de 2022.
