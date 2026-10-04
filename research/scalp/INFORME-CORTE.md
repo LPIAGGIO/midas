@@ -202,3 +202,32 @@ Reservas: en dólares (el CCL es un factor común que no se balancea); velas
 diarias; liquidez de un solo día; el Monte Carlo solo reordena lo que pasó en
 la ventana (2 años alcistas para semis), por eso se agregó el estrés con 2022;
 la ventana de selección pisa 3 meses de 2022.
+
+## Defensivos con disparador (04/10/2026)
+
+LP: "si viene un cisne negro y se hacen mierda los semis, mantener los malos
+holdeando y empezar a operar defensivos hasta que recuperen". `defensivos.py`
+(salida en `defensivos-salida.txt`). Historia real 10/2018 a 10/2026, diario,
+USD. Disparador: SMH X% abajo de su máximo de un año; se apaga al volver a −5%.
+Plata nueva en 5 grillas (sin corte, refuerzo 50%), valuadas al apagar.
+
+| Disparador | Episodios | Tiempo prendido | Defensivos de manual (KO PEP MCD WMT JNJ) | Menos atados a SMH (elegidos ese día) | Semis nuevos al precio caído |
+|---|---:|---:|---:|---:|---:|
+| −10% | 15 | 48% | −1,6% anual, peor −22,5% | −5,8% anual, peor −32,3% | +6,8% anual, peor −43,2% |
+| −15% | 7 | 40% | −1,0% anual, peor −19,5% | −7,3% anual, peor −29,5% | +9,2% anual, peor −41,4% |
+| −20% | 5 | 35% | −2,4% anual, peor −19,5% | −11,6% anual, peor −31,0% | +10,8% anual, peor −40,7% |
+
+- Los defensivos de manual dan cero o algo negativo en los episodios: +2,8% en
+  todo 2022 (14 meses), −19,5% de peor momento en marzo 2020 (cayó todo junto).
+- Elegir "los menos atados a los semis" con datos elige oro, mineras, MRNA, UNH:
+  no son defensivos y pierden más.
+- Siempre prendidos (reeligiendo cada año): −1,7% anual, peor −50,5%.
+- La misma plata en grillas nuevas de semis, ancladas al precio ya caído, rinde
+  más (+7% a +11% anual) pero perdió 17% en 2022 y llegó a −41%.
+- Dato de hoy: con el disparador de −10% o −15% estamos DENTRO de un episodio
+  desde julio 2026 (SMH no volvió a 5% de su máximo). En este episodio los
+  defensivos perdieron 4% a 7% y los semis nuevos ganaron 9%.
+
+Veredicto: operar defensivos durante la caída no recupera nada. La plata nueva
+en una crisis rinde más en caución, o en los mismos semis más abajo si se
+tolera el riesgo de un 2022.

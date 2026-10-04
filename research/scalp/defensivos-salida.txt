@@ -1,0 +1,50 @@
+
+=== DISPARADOR: SMH 10% abajo de su maximo de un año · se apaga al volver a −5% · 15 episodios desde 2018-10-25
+   episodio                ruedas  SMH peor | defensivos elegidos           result.     peor vueltas |    semis     peor
+   2018-10-25 a 2019-03-15     96      -11% | GLD HMY SLV PAAS NEE             2.5%    -6.8%     397 |     4.5%   -18.2% | KO PEP MCD WMT JNJ   -0.9%   -9.4%
+   2019-05-13 a 2019-07-12     43       -7% | HMY GLD PAAS NEE SLV             3.8%    -1.9%     298 |     4.8%    -6.9% | KO PEP MCD WMT JNJ    1.0%   -0.6%
+   2019-08-05 a 2019-09-05     23        0% | HMY GLD PAAS NEE VZ              1.6%     0.0%     206 |     3.1%    -1.4% | KO PEP MCD WMT JNJ    1.7%   -0.6%
+   2020-02-25 a 2020-06-03     70      -25% | GLD HMY NEE PAAS SLV            -2.4%   -32.3%     205 |     0.9%   -26.7% | KO PEP MCD WMT JNJ   -4.6%  -22.5%
+   2020-09-08 a 2020-09-29     16        0% | GLD HMY HUT PAAS SLV            -1.5%    -7.6%      79 |     3.8%    -0.1% | KO PEP MCD WMT JNJ    0.2%   -1.6%
+   2021-03-04 a 2021-03-31     20       -2% | MRNA GLD HMY HUT PAAS           -1.6%    -5.1%     126 |     3.0%    -1.6% | KO PEP MCD WMT JNJ    0.7%   -0.1%
+   2021-05-12 a 2021-05-25     10        0% | MRNA GLD HMY HUT SLV             2.7%    -1.7%      86 |     1.5%    -0.4% | KO PEP MCD WMT JNJ    0.6%   -0.3%
+   2022-01-20 a 2023-03-31    301      -37% | MRNA GLD KEEL HMY VST           -7.4%   -25.5%     533 |   -19.4%   -43.2% | KO PEP MCD WMT JNJ    2.9%   -7.7%
+   2023-09-20 a 2023-11-10     38       -4% | VZ GLD PBR PFE HMY              -0.8%    -4.6%     141 |     4.3%    -6.2% | KO PEP MCD WMT JNJ   -2.6%   -6.0%
+   2024-04-18 a 2024-05-06     13       -5% | VZ PBR AMGN UNH BBD              0.5%    -0.4%      71 |     1.5%    -2.9% | KO PEP MCD WMT JNJ    0.4%   -0.2%
+   2024-07-19 a 2025-06-24    233      -27% | UNH PBR VZ PEP PFE             -12.7%   -15.6%     489 |     3.7%   -26.0% | KO PEP MCD WMT JNJ   -1.7%   -5.4%
+   2025-11-20 a 2025-11-28      6        0% | KO PEP VZ ABT MCD                0.4%    -0.1%      42 |    -2.2%    -8.0% | KO PEP MCD WMT JNJ    0.3%   -0.2%
+   2026-03-06 a 2026-04-08     23       -5% | KO VZ PEP MCD ABT               -1.9%    -2.6%     106 |     4.5%   -10.4% | KO PEP MCD WMT JNJ   -0.4%   -2.9%
+   2026-06-05 a 2026-06-11      5        0% | KO VZ PEP MCD ABT                0.2%    -0.0%      32 |     2.8%    -3.1% | KO PEP MCD WMT JNJ    0.3%    0.0%
+   2026-07-02 a 2026-10-01     64      -15% | KO VZ PEP MCD ABT               -5.4%    -5.4%     315 |     9.1%   -20.1% | KO PEP MCD WMT JNJ   -3.9%   -3.9%
+   SUMA de los episodios: 961 ruedas prendido (48% del tiempo) · defensivos -22.2% (-5.8% anual mientras esta prendido, peor momento -32.3%) · semis nuevos +26.0% (6.8% anual, peor momento -43.2%) · KO PEP MCD WMT JNJ -6.1% (-1.6% anual, peor momento -22.5%)
+
+=== DISPARADOR: SMH 15% abajo de su maximo de un año · se apaga al volver a −5% · 7 episodios desde 2018-10-25
+   episodio                ruedas  SMH peor | defensivos elegidos           result.     peor vueltas |    semis     peor
+   2018-10-25 a 2019-03-15     96      -11% | GLD HMY SLV PAAS NEE             2.5%    -6.8%     397 |     4.5%   -18.2% | KO PEP MCD WMT JNJ   -0.9%   -9.4%
+   2019-05-20 a 2019-07-12     38       -3% | HMY GLD PAAS NEE SLV             3.6%    -0.5%     286 |     6.3%    -3.4% | KO PEP MCD WMT JNJ    0.7%   -1.0%
+   2020-03-09 a 2020-06-03     61      -16% | GLD HMY PAAS SLV NEE             0.1%   -29.5%     225 |    12.4%   -15.5% | KO PEP MCD WMT JNJ   -0.1%  -19.5%
+   2021-03-08 a 2021-03-31     18        0% | MRNA GLD HMY HUT PAAS           -2.1%    -5.5%     102 |     2.3%    -1.7% | KO PEP MCD WMT JNJ    0.5%   -0.0%
+   2022-01-25 a 2023-03-31    298      -34% | MRNA GLD KEEL HMY VST           -7.7%   -25.8%     527 |   -17.6%   -41.4% | KO PEP MCD WMT JNJ    2.8%   -7.8%
+   2024-07-25 a 2025-06-24    229      -24% | UNH PBR VZ PEP PFE             -12.8%   -15.6%     477 |    12.0%   -17.9% | KO PEP MCD WMT JNJ   -1.0%   -4.7%
+   2026-07-17 a 2026-10-01     54       -9% | KO VZ PEP MCD ABT               -6.8%    -6.8%     239 |     9.1%   -17.3% | KO PEP MCD WMT JNJ   -5.2%   -5.2%
+   SUMA de los episodios: 794 ruedas prendido (40% del tiempo) · defensivos -23.1% (-7.3% anual mientras esta prendido, peor momento -29.5%) · semis nuevos +29.1% (9.2% anual, peor momento -41.4%) · KO PEP MCD WMT JNJ -3.2% (-1.0% anual, peor momento -19.5%)
+
+=== DISPARADOR: SMH 20% abajo de su maximo de un año · se apaga al volver a −5% · 5 episodios desde 2018-10-25
+   episodio                ruedas  SMH peor | defensivos elegidos           result.     peor vueltas |    semis     peor
+   2018-10-26 a 2019-03-15     95      -10% | GLD HMY PAAS SLV NEE             3.4%    -6.0%     422 |     4.4%   -18.4% | KO PEP MCD WMT JNJ   -1.0%   -9.5%
+   2020-03-09 a 2020-06-03     61      -16% | GLD HMY PAAS SLV NEE             0.1%   -29.5%     225 |    12.4%   -15.5% | KO PEP MCD WMT JNJ   -0.1%  -19.5%
+   2022-03-07 a 2023-03-31    270      -29% | MRNA HMY GLD KEEL PFE          -15.5%   -31.0%     343 |   -16.2%   -40.7% | KO PEP MCD WMT JNJ    2.1%   -8.5%
+   2024-08-02 a 2025-06-24    223      -18% | UNH VZ PBR PEP PFE             -12.3%   -15.2%     478 |    16.3%   -14.2% | KO PEP MCD WMT JNJ   -2.3%   -6.0%
+   2026-07-28 a 2026-10-01     47       -5% | KO VZ PEP MCD ABT               -7.7%    -7.7%     201 |    12.8%    -4.3% | KO PEP MCD WMT JNJ   -5.5%   -5.5%
+   SUMA de los episodios: 696 ruedas prendido (35% del tiempo) · defensivos -32.0% (-11.6% anual mientras esta prendido, peor momento -31.0%) · semis nuevos +29.7% (10.8% anual, peor momento -40.7%) · KO PEP MCD WMT JNJ -6.7% (-2.4% anual, peor momento -19.5%)
+
+=== DEFENSIVOS SIEMPRE PRENDIDOS (se reeligen cada 252 ruedas)
+   2018-10-25 a 2019-10-28 · SMH  +41% · GLD HMY SLV PAAS NEE             8.0% · peor   -6.8% · 1020 vueltas
+   2019-10-28 a 2020-10-27 · SMH  +39% · HMY GLD PAAS NEE SLV            11.4% · peor  -26.7% · 1075 vueltas
+   2020-10-27 a 2021-10-27 · SMH  +49% · GLD HMY HUT PAAS SLV            17.7% · peor   -6.6% · 658 vueltas
+   2021-10-27 a 2022-10-27 · SMH  -31% · MRNA KEEL GLD HMY HUT          -44.7% · peor  -50.5% · 330 vueltas
+   2022-10-27 a 2023-10-30 · SMH  +49% · VZ PFE GLD HMY XOM              -1.6% · peor   -7.7% · 614 vueltas
+   2023-10-30 a 2024-10-30 · SMH  +82% · VZ GLD PBR PFE HMY              10.9% · peor   -1.0% · 823 vueltas
+   2024-10-30 a 2025-11-03 · SMH  +46% · PEP UNH VZ KO PFE              -10.0% · peor  -14.3% · 432 vueltas
+   2025-11-03 a 2026-10-01 · SMH  +69% · KO PEP VZ UNH ABT               -5.6% · peor   -5.8% · 638 vueltas
+   PROMEDIO -1.7% anual · peor momento -50.5%
