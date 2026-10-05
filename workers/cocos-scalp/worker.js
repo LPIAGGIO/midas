@@ -416,8 +416,26 @@ async function nuevoDia() {
   log(`arranco la rueda con ${n} papeles de ayer · ancla ${S.ancla ? pesos(S.ancla) : "—"}${HORA_COMPRAS > HORA_INICIO ? ` · hasta las ${HORA_COMPRAS} solo vendo, no compro` : ""}`);
 }
 
+// Antes de abrir la rueda: ¿la cuenta ya informa los papeles que el bot lleva?
+// El informe de posiciones de Cocos arranca vacío a la mañana. Mientras informe
+// menos, no se abre la rueda ni se manda nada; se vuelve a mirar cada minuto.
+// A los 30 minutos se deja pasar y nuevoDia() aplica su freno.
+const esperaTen = { desde: 0, ult: 0, aviso: 0 };
+async function tenenciaLista() {
+  const n = heldTot();
+  if (!REAL || n === 0) return true;
+  if (esperaTen.desde && Date.now() - esperaTen.ult < 60_000) return false;
+  const t = await tenenciaCuenta().catch(() => null);
+  if (t == null || t >= n) { if (esperaTen.desde) log(`la cuenta ya informa ${t ?? "?"} ${TK}: abro la rueda`); esperaTen.desde = 0; return true; }
+  esperaTen.ult = Date.now();
+  if (!esperaTen.desde) esperaTen.desde = Date.now();
+  if (Date.now() - esperaTen.desde > 30 * 60_000) { esperaTen.desde = 0; return true; }
+  if (Date.now() - esperaTen.aviso > 5 * 60_000) { esperaTen.aviso = Date.now(); log(`la cuenta informa ${t} ${TK} y llevo ${n}: espero a que Cocos cargue las posiciones (no mando nada)`); }
+  return false;
+}
+
 async function ciclo() {
-  if (S.dia !== diaAr()) { if (!esHabil() || hhmmAr() < HORA_INICIO) return; await nuevoDia(); }
+  if (S.dia !== diaAr()) { if (!esHabil() || hhmmAr() < HORA_INICIO) return; if (!(await tenenciaLista())) return; await nuevoDia(); }
   const b = await libro();
   await sincronizar(b);
   if (S.fin) return;
@@ -542,7 +560,7 @@ async function main() {
     log(`sincronizado · tengo ${heldTot()} (cuenta ${ten ?? "?"}) · órdenes vivas ${vivas().length} · P&L ${pesos(S.pnl)} · ${S.rondas} ventas`);
     guardar(); process.exit(0);
   }
-  if (S.dia !== diaAr() && esHabil() && hhmmAr() >= HORA_INICIO) await nuevoDia();
+  if (S.dia !== diaAr() && esHabil() && hhmmAr() >= HORA_INICIO && (await tenenciaLista())) await nuevoDia();
   if (heldTot() > 0 && (pasoC() !== PASO || ganC() !== GANANCIA)) log(`ciclo abierto con paso ${(pasoC() * 100).toFixed(2)}% y ganancia ${(ganC() * 100).toFixed(2)}%: termina así; el paso ${(PASO * 100).toFixed(2)}% rige desde el próximo ciclo`);
   if (S.fin) log(`el día ya se cerró (${S.fin}). Mañana retoma solo.`);
   if (REAL && disp != null && b.ask > 0 && disp < EXPO_MAX * b.ask * 1.01) { log(`ERROR disponible ${pesos(disp)} menor a la exposición máxima ${pesos(MAX * b.ask)}: no arranco`); process.exit(1); }
