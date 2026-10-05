@@ -494,8 +494,9 @@ async function ciclo() {
   // Compra: una sola apoyada, en el escalón siguiente al más bajo con papeles.
   let h = -1; S.niveles.forEach((n, k) => { if (k < NIVELES && n.held > 0) h = k; });
   const deseado = h + 1;
+  const llena = h === NIVELES - 1;               // los 5 escalones tienen papeles (aunque alguno esté a medias)
   const compras = vs.filter((o) => o.lado === "BUY" && !esExtra(o.nivel));
-  for (const c of compras) if (c.nivel !== deseado && c.cum === 0 && !(c.nivel === NIVEL_REF && totG >= MAX)) await cancelar(c, "la grilla se movió");
+  for (const c of compras) if (c.nivel !== deseado && c.cum === 0 && !(c.nivel === NIVEL_REF && llena)) await cancelar(c, "la grilla se movió");
   const c0 = compras.find((c) => c.nivel === 0 && c.cum === 0);
   const enReentrada = S.reentrada && Date.now() < S.reentrada.hasta;
   const tarde = hm >= HORA_ULTIMO_CICLO;
@@ -504,7 +505,7 @@ async function ciclo() {
   if (c0 && h === -1 && tarde) await cancelar(c0, "ya no se abren ciclos nuevos hoy");
   else if (c0 && h === -1 && !enReentrada && b.bid > c0.px * 1.001 && Date.now() - c0.t > 60_000) await cancelar(c0, "el precio se alejó");
   // Refuerzo: grilla llena, sin refuerzo previo en este ciclo.
-  if (REFUERZO_FRAC > 0 && !S.reforzado && !compras.length && S.ancla && totG >= MAX && ref.held === 0 && !pausaCompras && !temprano) {
+  if (REFUERZO_FRAC > 0 && !S.reforzado && !compras.length && S.ancla && llena && ref.held === 0 && !pausaCompras && !temprano) {
     const pxRef = alTick(S.ancla * (1 - REFUERZO_MULT * pasoC() * (NIVELES - 1)), "abajo");
     const qtyRef = Math.round(totG * REFUERZO_FRAC);
     if (qtyRef > 0) await colocar("BUY", NIVEL_REF, qtyRef, Math.min(pxRef, b.ask));
