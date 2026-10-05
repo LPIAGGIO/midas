@@ -151,7 +151,18 @@ async function api(metodo, ruta, reintento = true) {
 const simbolo = () => `MERV - XMEV - ${TK} - 24hs`;
 const q = (o) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
 let TICK = 1;
-const alTick = (px, modo) => { const n = px / TICK; const k = modo === "arriba" ? Math.ceil(n - 1e-9) : Math.floor(n + 1e-9); return Math.round(k * TICK * 1000) / 1000; };
+// BYMA cambia el salto mínimo según el precio; Primary informa uno solo (el de
+// la banda donde cotiza hoy). Si el precio pedido cae en otra banda se usa el
+// mínimo común múltiplo del tick informado y el de esa banda.
+const tickBanda = (px) => (px < 10000 ? 5 : px < 20000 ? 10 : px < 50000 ? 20 : 25);
+const mcd = (a, b) => (b ? mcd(b, a % b) : a);
+const tickDe = (px) => { const tb = tickBanda(px); return !Number.isInteger(TICK) || TICK < 5 || TICK === tb ? TICK : (TICK * tb) / mcd(TICK, tb); };
+const redondear = (px, t, modo) => (modo === "arriba" ? Math.ceil(px / t - 1e-9) : Math.floor(px / t + 1e-9)) * t;
+const alTick = (px, modo) => {
+  let r = redondear(px, tickDe(px), modo);
+  if (tickDe(r) !== tickDe(px)) r = redondear(r, tickDe(r), modo);     // el redondeo cruzó de banda
+  return Math.round(r * 1000) / 1000;
+};
 async function disponible24() {
   const j = await api("GET", `/rest/risk/accountReport/${CUENTA}`);
   return Number(j?.accountData?.detailedAccountReports?.["1"]?.availableToOperate?.total) || 0;
@@ -291,6 +302,7 @@ if (REAL && !CHEQUEO) {
 }
 normalizar();
 const guardar = () => { if (!CHEQUEO) fs.writeFileSync(ARCH, JSON.stringify(S)); };
+let rechMercado = 0;                              // rechazos del mercado seguidos; solo los borra una ejecución
 let rechazos = 0, pausaCompras = 0, ultimoResumen = 0, ultimaTenencia = 0, excesos = 0;
 
 async function colocar(lado, nivel, qty, px) {
@@ -308,7 +320,7 @@ async function colocar(lado, nivel, qty, px) {
 }
 function aplicarFill(o, cum, avg) {
   const dq = cum - o.cum; if (!(dq > 0)) return;
-  S.ultOp = Date.now();
+  S.ultOp = Date.now(); rechMercado = 0;
   const dN = cum * avg - o.cum * o.avg;
   const L = S.niveles[o.nivel];
   if (o.lado === "BUY") {
@@ -344,7 +356,7 @@ async function sincronizar(b) {
     const st = String(e.status || "").toUpperCase();
     if (FINAL.has(st)) {
       o.final = true;
-      if (st === "REJECTED") { rechazos++; log(`ERROR orden rechazada por el mercado: ${e.text || ""}`); }
+      if (st === "REJECTED") { rechazos++; rechMercado++; log(`ERROR orden rechazada por el mercado (${o.lado} ${o.qty} × ${o.px}): ${e.text || ""}`); }
     }
   }
   guardar();
@@ -443,7 +455,7 @@ async function ciclo() {
   const hm = hhmmAr();
   if (hm >= HORA_CIERRE) return CIERRE_VENDE ? liquidar("hora de cierre") : cerrarDia();
   if (!esHabil() || hm < HORA_INICIO) return;
-  if (rechazos >= 3) { for (const o of vivas()) await cancelar(o, "rechazos"); S.fin = "tres órdenes rechazadas seguidas"; guardar(); log(`ERROR ${S.fin}: me detengo, revisar a mano (tengo ${heldTot()} papeles)`); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\nTres órdenes rechazadas seguidas: me detuve con ${heldTot()} papeles. Revisar a mano.`); return; }
+  if (rechazos >= 3 || rechMercado >= 5) { for (const o of vivas()) await cancelar(o, "rechazos"); S.fin = rechMercado >= 5 ? "cinco órdenes rechazadas por el mercado" : "tres órdenes rechazadas seguidas"; guardar(); log(`ERROR ${S.fin}: me detengo, revisar a mano (tengo ${heldTot()} papeles)`); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\nTres órdenes rechazadas seguidas: me detuve con ${heldTot()} papeles. Revisar a mano.`); return; }
   if (!(b.bid > 0) || !(b.ask > 0)) return;                       // sin libro no se decide nada
   const tot = heldTot();
   const abierto = tot > 0 ? tot * b.bid - S.niveles.reduce((a, n) => a + n.costo, 0) : 0;
