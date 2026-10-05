@@ -1,0 +1,58 @@
+RUEDA DEL 2026-10-05 · velas de 1 minuto en pesos · 9 papeles
+
+1) EL SIMULADOR CONTRA LO QUE PASO (misma configuracion que corrio cada cuenta)
+                                                               dia  realizado    latente  ventas    cap $M
+   72404 simulada (compra 10:35, escalon 1x)               -302135      69635    -532243      17      35.6   real: -272988
+   3893 simulada (compra 12:00, escalon 1,5x)              -214397      52039    -336778      10      30.6   real: -198092
+
+2) QUE EXPLICA LA DIFERENCIA ENTRE CUENTAS (cada cuenta con su estado de apertura)
+                                                               dia  realizado    latente  ventas    cap $M
+   estado de la 72404 · compra 10:35 · escalon 1x          -302135      69635    -532243      17      35.6
+   estado de la 72404 · compra 12:00 · escalon 1x          -288945      54992    -504409      13      31.5
+   estado de la 72404 · compra 10:35 · escalon 1,5x        -302983      70244    -533699      15      35.6
+   estado de la 72404 · compra 12:00 · escalon 1,5x        -306245      45462    -512179      10      32.0
+   estado de la 3893 · compra 10:35 · escalon 1x           -196259      97541    -364141      22      34.1
+   estado de la 3893 · compra 12:00 · escalon 1x           -188503      63463    -322307      14      29.1
+   estado de la 3893 · compra 10:35 · escalon 1,5x         -197812      96255    -364409      19      33.1
+   estado de la 3893 · compra 12:00 · escalon 1,5x         -214397      52039    -336778      10      30.6
+
+3) QUE HUBIERA SIDO LO MEJOR HOY (suma de las dos cuentas, cada una con su estado de apertura)
+                                                               dia  realizado    latente  ventas    cap $M
+   compra 1400 · escalon 1,0x · lateral no · recompra libre    -450315      71162    -752290      10      46.1
+   compra 1400 · escalon 1,0x · lateral no · recompra con tope    -450315      71162    -752290      10      46.1
+   compra 1400 · escalon 1,5x · lateral no · recompra libre    -454210      66823    -751846       9      45.1
+   compra 1400 · escalon 1,5x · lateral no · recompra con tope    -454210      66823    -751846       9      45.1
+   compra 1400 · escalon 1,0x · lateral si · recompra libre    -455020      82859    -768693      15      54.1
+   compra 1400 · escalon 1,0x · lateral si · recompra con tope    -455020      82859    -768693      15      54.1
+   compra 1035 · escalon 1,5x · lateral no · recompra libre    -458230     134464    -823508      21      50.2
+   compra 1035 · escalon 1,0x · lateral no · recompra con tope    -460409     129389    -820611      21      49.1
+   compra 1035 · escalon 1,5x · lateral no · recompra con tope    -464466     121811    -817090      19      49.1
+   compra 1400 · escalon 1,5x · lateral si · recompra libre    -475688      74708    -781209      12      54.6
+   compra 1400 · escalon 1,5x · lateral si · recompra con tope    -475688      74708    -781209      12      54.6
+   compra 1200 · escalon 1,0x · lateral si · recompra libre    -477448     118455    -826716      27      60.6
+   compra 1200 · escalon 1,0x · lateral si · recompra con tope    -477448     118455    -826716      27      60.6
+   compra 1200 · escalon 1,0x · lateral no · recompra libre    -478865      88520    -798198      14      48.1
+   compra 1200 · escalon 1,0x · lateral no · recompra con tope    -478865      88520    -798198      14      48.1
+   compra 1035 · escalon 1,0x · lateral no · recompra libre    -479166     121811    -831791      19      51.2
+   compra 1035 · escalon 1,0x · lateral si · recompra con tope    -481201     169848    -881863      38      65.1
+   compra 1135 · escalon 1,5x · lateral no · recompra libre    -487066      73272    -791152      10      46.1
+   compra 1135 · escalon 1,5x · lateral no · recompra con tope    -487066      73272    -791152      10      46.1
+   compra 1135 · escalon 1,0x · lateral no · recompra libre    -488254      73272    -792339      10      47.1
+   compra 1135 · escalon 1,0x · lateral no · recompra con tope    -488254      73272    -792339      10      47.1
+   compra 1200 · escalon 1,5x · lateral no · recompra libre    -493956      73272    -798041      10      46.1
+   compra 1200 · escalon 1,5x · lateral no · recompra con tope    -493956      73272    -798041      10      46.1
+   compra 1035 · escalon 1,0x · lateral si · recompra libre    -498394     167176    -896384      39      69.7
+   compra 1035 · escalon 1,5x · lateral si · recompra con tope    -500700     160173    -891686      34      67.6
+   compra 1035 · escalon 1,5x · lateral si · recompra libre    -500795     166500    -898109      34      68.7
+   compra 1200 · escalon 1,5x · lateral si · recompra libre    -520642      97502    -848957      20      62.6
+   compra 1200 · escalon 1,5x · lateral si · recompra con tope    -520642      97502    -848957      20      62.6
+   compra 1135 · escalon 1,5x · lateral si · recompra libre    -520810     100018    -851642      20      64.1
+   compra 1135 · escalon 1,5x · lateral si · recompra con tope    -520810     100018    -851642      20      64.1
+   compra 1135 · escalon 1,0x · lateral si · recompra libre    -523137      98206    -852156      20      64.1
+   compra 1135 · escalon 1,0x · lateral si · recompra con tope    -523137      98206    -852156      20      64.1
+   (sin comprar nada en todo el dia, solo vendiendo lo arrastrado:)
+   solo ventas                                             -375071      58999    -664883       7      25.1
+
+4) LA REGLA DE LA RECOMPRA EN LAS MUESTRAS LARGAS (9 papeles, USD, lote 460, sin corte, refuerzo 50%)
+   5 minutos, 43 ruedas   recompra libre     2646 (peor    -2794) · con tope la primera hora     2676 (peor    -2765) · diferencia +1.1% · mejora en 6 de 9 · veces que actuo: 38
+   horario, ~730 ruedas   recompra libre    22813 (peor   -12998) · con tope la primera hora    22462 (peor   -12944) · diferencia -1.5% · mejora en 6 de 9 · veces que actuo: 280

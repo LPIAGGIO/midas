@@ -1,0 +1,70 @@
+VELAS DE 5 MINUTOS · 9 papeles · desde las 9:35 de NY (10:35 de aca, cuando arranca el bot)
+
+  Salto de apertura entre +0.5% y +1.0% (44 casos)
+   a los 30 min vs 9:35               n=  44 · promedio +0.14% · mediana +0.04% · sube 52% de las veces
+   a los 60 min vs 9:35               n=  44 · promedio +0.18% · mediana -0.10% · sube 45% de las veces
+   al cierre vs 9:35                  n=  44 · promedio +0.20% · mediana -0.04% · sube 48% de las veces
+   maximo de los primeros 30 min: mediana +0.58% · minimo de la primera hora: mediana -0.65%
+
+  Salto de apertura entre +1.0% y +2.0% (53 casos)
+   a los 30 min vs 9:35               n=  53 · promedio -0.32% · mediana -0.30% · sube 42% de las veces
+   a los 60 min vs 9:35               n=  53 · promedio -0.24% · mediana -0.19% · sube 45% de las veces
+   al cierre vs 9:35                  n=  53 · promedio -0.33% · mediana -0.63% · sube 36% de las veces
+   maximo de los primeros 30 min: mediana +0.61% · minimo de la primera hora: mediana -0.98%
+
+  Salto de apertura entre +2.0% y mas (44 casos)
+   a los 30 min vs 9:35               n=  44 · promedio +0.03% · mediana +0.37% · sube 52% de las veces
+   a los 60 min vs 9:35               n=  44 · promedio +0.16% · mediana +0.42% · sube 55% de las veces
+   al cierre vs 9:35                  n=  44 · promedio +0.27% · mediana +0.33% · sube 57% de las veces
+   maximo de los primeros 30 min: mediana +1.20% · minimo de la primera hora: mediana -0.97%
+
+  Salto de apertura entre -1.0% y -0.5% (32 casos)
+   a los 30 min vs 9:35               n=  32 · promedio +0.21% · mediana +0.12% · sube 53% de las veces
+   a los 60 min vs 9:35               n=  32 · promedio +0.12% · mediana -0.03% · sube 47% de las veces
+   al cierre vs 9:35                  n=  32 · promedio +0.41% · mediana +0.25% · sube 56% de las veces
+   maximo de los primeros 30 min: mediana +0.62% · minimo de la primera hora: mediana -0.61%
+
+  Salto de apertura entre -2.0% y -1.0% (31 casos)
+   a los 30 min vs 9:35               n=  31 · promedio +0.10% · mediana -0.01% · sube 48% de las veces
+   a los 60 min vs 9:35               n=  31 · promedio +0.20% · mediana +0.06% · sube 55% de las veces
+   al cierre vs 9:35                  n=  31 · promedio +0.24% · mediana +0.39% · sube 58% de las veces
+   maximo de los primeros 30 min: mediana +0.83% · minimo de la primera hora: mediana -0.59%
+
+  Salto de apertura entre -900.0% y -2.0% (34 casos)
+   a los 30 min vs 9:35               n=  34 · promedio +0.38% · mediana +0.14% · sube 56% de las veces
+   a los 60 min vs 9:35               n=  34 · promedio +0.65% · mediana +0.21% · sube 56% de las veces
+   al cierre vs 9:35                  n=  34 · promedio +0.64% · mediana +0.54% · sube 56% de las veces
+   maximo de los primeros 30 min: mediana +0.99% · minimo de la primera hora: mediana -0.91%
+
+
+VELAS HORARIAS · 9 papeles · ~3 años · apertura contra el cierre de la primera hora y del dia
+
+  Salto de apertura entre +0.5% y +1.0% (751 casos)
+   primera hora vs apertura           n= 751 · promedio +0.00% · mediana -0.07% · sube 48% de las veces
+   cierre vs apertura                 n= 751 · promedio +0.03% · mediana +0.00% · sube 50% de las veces
+   primera hora por año: 2023 +0.22% (n=50) · 2024 +0.04% (n=283) · 2025 +0.09% (n=250) · 2026 -0.24% (n=168)
+
+  Salto de apertura entre +1.0% y +2.0% (723 casos)
+   primera hora vs apertura           n= 723 · promedio +0.11% · mediana +0.14% · sube 54% de las veces
+   cierre vs apertura                 n= 723 · promedio +0.14% · mediana +0.12% · sube 53% de las veces
+   primera hora por año: 2023 +0.24% (n=43) · 2024 +0.09% (n=246) · 2025 +0.25% (n=254) · 2026 -0.09% (n=180)
+
+  Salto de apertura entre +2.0% y mas (652 casos)
+   primera hora vs apertura           n= 652 · promedio +0.03% · mediana +0.12% · sube 52% de las veces
+   cierre vs apertura                 n= 652 · promedio +0.12% · mediana +0.07% · sube 51% de las veces
+   primera hora por año: 2023 +0.25% (n=13) · 2024 -0.09% (n=138) · 2025 +0.07% (n=233) · 2026 +0.04% (n=268)
+
+  Salto de apertura entre -1.0% y -0.5% (652 casos)
+   primera hora vs apertura           n= 652 · promedio -0.09% · mediana -0.08% · sube 47% de las veces
+   cierre vs apertura                 n= 652 · promedio +0.01% · mediana +0.06% · sube 52% de las veces
+   primera hora por año: 2023 -0.41% (n=38) · 2024 -0.17% (n=214) · 2025 +0.01% (n=228) · 2026 -0.04% (n=172)
+
+  Salto de apertura entre -2.0% y -1.0% (549 casos)
+   primera hora vs apertura           n= 549 · promedio +0.00% · mediana -0.07% · sube 47% de las veces
+   cierre vs apertura                 n= 549 · promedio +0.19% · mediana +0.13% · sube 53% de las veces
+   primera hora por año: 2023 -0.26% (n=27) · 2024 -0.13% (n=156) · 2025 -0.01% (n=215) · 2026 +0.21% (n=151)
+
+  Salto de apertura entre -900.0% y -2.0% (486 casos)
+   primera hora vs apertura           n= 486 · promedio +0.30% · mediana +0.20% · sube 53% de las veces
+   cierre vs apertura                 n= 486 · promedio +0.09% · mediana +0.06% · sube 51% de las veces
+   primera hora por año: 2023 -0.31% (n=6) · 2024 +0.07% (n=100) · 2025 +0.24% (n=187) · 2026 +0.49% (n=193)

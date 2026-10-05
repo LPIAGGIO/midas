@@ -251,3 +251,57 @@ Preguntas de `mazda_miata` (moltbook). `atr.py` (salida en `atr-salida.txt`);
   2,34 · 2,69 · 2,87. Más ancho es mejor siempre, con menos vueltas y menos
   capital cargado. En 5 minutos (43 ruedas) el resultado es plano (2.565 a
   2.964) y el peor momento mejora con el ancho (−3.267 a −1.873).
+
+## La rueda del 05/10/2026: qué pasó, qué hubiera sido mejor y la recompra
+
+Primera rueda con las dos cuentas completas, lateral, refuerzo habilitado y la
+3893 con escalón 1,5x y compras desde las 12:00. Día bajista para los semis
+(INTC −3,7%, MU −2,2%, SNDK −2,0% en pesos). `hoy.py`, `gap.py`,
+`hoy_bajar.py`, `estado_apertura.js`; salidas en `hoy-salida.txt` y
+`gap-salida.txt`.
+
+**Resultado real del día (realizado + cambio del latente contra el viernes):**
+72404 −272.988 · 3893 −198.092 · diferencia 74.896 a favor de la 3893. (El
+"neto" del pulso, −430k y −266k, incluye el latente que ya venía del viernes:
+−157k y −68k.) Por papel, la 3893 quedó mejor en MU (+35.000), SNDK (+16.000),
+INTC (+12.600) y AMD (+12.400), y algo peor en NVDA, MSFT y META.
+
+**Qué explica la diferencia (simulación de la rueda, velas de 1 minuto en
+pesos, desde el estado real de apertura; el simulador da −302k y −214k contra
+−273k y −198k reales):**
+
+| Estado de apertura | 10:35 · 1x | 12:00 · 1x | 10:35 · 1,5x | 12:00 · 1,5x |
+|---|---:|---:|---:|---:|
+| el de la 72404 ($17,0M cargados) | −302.135 | −288.945 | −302.983 | −306.245 |
+| el de la 3893 ($11,1M cargados) | −196.259 | −188.503 | −197.812 | −214.397 |
+
+- La diferencia entre cuentas es casi toda el punto de partida: la 72404 abrió
+  con más lotes de INTC, MU y SNDK. Con la MISMA configuración las separan
+  106.000.
+- Comprar desde las 12:00 ayudó poco (8.000 a 13.000). El escalón ancho no
+  ayudó hoy (igual a las 10:35; 26.000 peor a las 12:00, por menos ventas en un
+  día de rango angosto).
+- Lo mejor hoy hubiera sido no comprar nada (−375.000 las dos cuentas, contra
+  −450.000 a −523.000 de las 32 variantes): en un día que cae, toda compra
+  suma pérdida. Entre variantes la dispersión es 15%: ruido de un día.
+- El lateral costó entre 5.000 y 30.000 según la variante (compra más en un
+  día que siguió bajando).
+
+**Demorar la VENTA cuando abre con salto (idea de LP): no suma.** Después de un
+salto para arriba, a los 30 minutos el precio está +0,14% / −0,32% / +0,03%
+(saltos de 0,5-1% / 1-2% / más de 2%; 141 casos en 5 minutos) y sube 42% a 52%
+de las veces. En horario, 2.126 casos: primera hora entre 0,00% y +0,11%.
+
+**Demorar la RECOMPRA tras una venta en el salto de apertura** (no reabrir por
+encima del objetivo de esa venta durante la primera hora; caso MSFT, que vendió
+a $28.320 y recompró a $28.300 a los 21 minutos): hoy hubiera mejorado 17.000
+a 19.000 con compras desde las 10:35. En las muestras largas es neutro: +1,1%
+en 5 minutos (38 veces que actuó), −1,5% en horario (280 veces); mejora en 6
+de 9 papeles en las dos. No hay evidencia para adoptarla. La regla más amplia
+ya medida (no operar la primera hora) daba +17% a +20%.
+
+**Incidentes del día:** informe de posiciones de Cocos vacío hasta ~10:00
+(parche de espera de tenencia); refuerzo que no se habilitaba con un escalón a
+medias; tick de BYMA por banda de precio (META ≥ $50.000: 664 rechazos,
+corregido 12:47 y freno a los 5 rechazos del mercado). Lateral: 40 lotes extra.
+Refuerzos: ninguno.
