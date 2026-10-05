@@ -1,0 +1,64 @@
+
+==============================================================================================================
+HORARIO · 10/2023 a 09/2026 (SNDK desde 02/2025) · USD, lote 460
+   variante (suma 9 papeles)   resultado  suma peores  result/peor   vueltas  capital medio result/cap.medio
+   paso fijo (hoy)                       22813       -12998         1.76      6363          23208            98.3%
+   por volatilidad, paso medio igual     23273       -12960         1.80      6773          23522            98.9%
+   por volatilidad, k=0,30               21717       -12996         1.67      7512          24169            89.9%
+   fijo 0.50 veces el paso               18894       -13386         1.41     10410          25742            73.4%
+   fijo 0.75 veces el paso               20986       -13192         1.59      7723          24445            85.8%
+   fijo 1.00 veces el paso               22813       -12998         1.76      6363          23208            98.3%
+   fijo 1.50 veces el paso               23805       -12448         1.91      4494          20967           113.5%
+   fijo 2.00 veces el paso               22966       -12055         1.91      3298          19618           117.1%
+   por volatilidad, paso medio igual: resultado 23273 · la familia de pasos fijos con el MISMO peor momento da 22882 → diferencia +391 (+1.7%)
+   por volatilidad, k=0,30: resultado 21717 · la familia de pasos fijos con el MISMO peor momento da 22818 → diferencia -1101 (-4.8%)
+
+   Por papel (paso medio igual):          vol.dia       k |  F result    F peor | Vm result   Vm peor | mejora r/p
+   MU                                       3.77%    0.26 |      5196     -1932 |      5097     -1962 |     -0.09   (vueltas 1044 → 1119)
+   SNDK                                     6.27%    0.24 |      4455     -1743 |      4509     -1680 |     +0.13   (vueltas 888 → 817)
+   NVDA                                     2.80%    0.36 |      3119     -1040 |      3047      -915 |     +0.33   (vueltas 882 → 975)
+   GOOGL                                    1.86%    0.38 |      1811      -873 |      1725      -873 |     -0.10   (vueltas 827 → 834)
+   AMD                                      3.46%    0.29 |      2972     -2164 |      3163     -2157 |     +0.09   (vueltas 705 → 720)
+   INTC                                     3.72%    0.27 |      2068     -1967 |      2233     -1972 |     +0.08   (vueltas 600 → 576)
+   META                                     2.19%    0.46 |      1461     -1074 |      1992     -1133 |     +0.40   (vueltas 491 → 615)
+   AAPL                                     1.55%    0.45 |      1156     -1061 |       951     -1093 |     -0.22   (vueltas 571 → 585)
+   MSFT                                     1.51%    0.46 |       574     -1145 |       555     -1175 |     -0.03   (vueltas 355 → 532)
+   Mejora en resultado/peor: 5 de 9 papeles · correlacion de rangos entre la mejora y la volatilidad media del papel: +0.35
+
+   Por regimen de volatilidad (terciles de cada papel): resultado y resultado por capital cargado
+   regimen                 F           Vm  F / cap.cargado Vm / cap.cargado
+   vol. baja            6173         5541          254.67%          215.89%
+   vol. media           4584         4705          176.92%          178.54%
+   vol. alta           11658        12640          423.25%          471.33%
+
+==============================================================================================================
+DIARIO · 10 años (SNDK desde 02/2025) · USD, lote 460
+   variante (suma 9 papeles)   resultado  suma peores  result/peor   vueltas  capital medio result/cap.medio
+   paso fijo (hoy)                       39178       -16757         2.34     10598          22897           171.1%
+   por volatilidad, paso medio igual     37634       -16605         2.27     11721          23509           160.1%
+   por volatilidad, k=0,30               34814       -16789         2.07     12721          24272           143.4%
+   fijo 0.50 veces el paso               29938       -17233         1.74     13848          25273           118.5%
+   fijo 0.75 veces el paso               34850       -17109         2.04     11861          24112           144.5%
+   fijo 1.00 veces el paso               39178       -16757         2.34     10598          22897           171.1%
+   fijo 1.50 veces el paso               43641       -16228         2.69      8326          21129           206.5%
+   fijo 2.00 veces el paso               45413       -15840         2.87      6622          19619           231.5%
+   por volatilidad, paso medio igual: resultado 37634 · la familia de pasos fijos con el MISMO peor momento da 40461 → diferencia -2827 (-7.0%)
+   por volatilidad, k=0,30: resultado 34814 · la familia de pasos fijos con el MISMO peor momento da 38780 → diferencia -3966 (-10.2%)
+
+   Por papel (paso medio igual):          vol.dia       k |  F result    F peor | Vm result   Vm peor | mejora r/p
+   MU                                       3.02%    0.33 |      6169     -1868 |      5995     -1869 |     -0.09   (vueltas 1226 → 1243)
+   SNDK                                     6.23%    0.24 |      3597     -1746 |      3460     -1693 |     -0.02   (vueltas 538 → 490)
+   NVDA                                     2.92%    0.34 |      7386     -2162 |      6680     -2057 |     -0.17   (vueltas 1669 → 1753)
+   GOOGL                                    1.73%    0.40 |      3336     -1427 |      3405     -1350 |     +0.18   (vueltas 1378 → 1609)
+   AMD                                      3.38%    0.30 |      6075     -2081 |      6202     -2106 |     +0.02   (vueltas 1370 → 1378)
+   INTC                                     2.50%    0.40 |      1844     -2445 |      1858     -2462 |     +0.00   (vueltas 481 → 540)
+   META                                     2.22%    0.45 |      4304     -2560 |      4072     -2600 |     -0.12   (vueltas 1154 → 1371)
+   AAPL                                     1.66%    0.42 |      3112     -1257 |      2875     -1271 |     -0.21   (vueltas 1309 → 1479)
+   MSFT                                     1.56%    0.45 |      3354     -1212 |      3087     -1197 |     -0.19   (vueltas 1473 → 1858)
+   Mejora en resultado/peor: 3 de 9 papeles · correlacion de rangos entre la mejora y la volatilidad media del papel: +0.47
+
+   Por regimen de volatilidad (terciles de cada papel): resultado y resultado por capital cargado
+   regimen                 F           Vm  F / cap.cargado Vm / cap.cargado
+   vol. baja           10829         8569          500.50%          358.28%
+   vol. media          19325        18521          738.67%          696.45%
+   vol. alta            8566        10085          291.12%          349.05%

@@ -231,3 +231,23 @@ Plata nueva en 5 grillas (sin corte, refuerzo 50%), valuadas al apagar.
 Veredicto: operar defensivos durante la caída no recupera nada. La plata nueva
 en una crisis rinde más en caución, o en los mismos semis más abajo si se
 tolera el riesgo de un 2022.
+
+## Reversión a la escala del escalón y escalón por volatilidad (04/10/2026)
+
+Preguntas de `mazda_miata` (moltbook). `atr.py` (salida en `atr-salida.txt`);
+`grilla5y.py` acepta ahora `dinamico` (paso por fecha, fijo dentro del ciclo).
+
+- **Reversión:** autocorrelación de retornos consecutivos, promedio de los 9
+  papeles: −0,03 a 1 hora (movimiento típico 0,8%), +0,03 a 2 horas, −0,05
+  diaria en 10 años, −0,01 diaria en los últimos 2. Cero práctico: no hay
+  rebote que la grilla coseche; es holdear con toma de ganancias.
+- **Escalón = k × volatilidad de 20 ruedas** (mismo paso medio que el fijo):
+  5 min +14% de resultado, horario +2%, diario −4%; contra la familia de pasos
+  fijos al mismo peor momento: +1,7% horario, −7% diario. La mejora por papel
+  sigue a la volatilidad media del papel (rangos +0,35 / +0,47) y por régimen
+  solo corre resultado del régimen quieto al movido. Es una perilla: NO se adopta.
+- **Familia de pasos fijos, resultado / peor momento:** horario 1,41 · 1,59 ·
+  1,76 · 1,91 · 1,91 a 0,5x · 0,75x · 1x · 1,5x · 2x; diario 1,74 · 2,04 ·
+  2,34 · 2,69 · 2,87. Más ancho es mejor siempre, con menos vueltas y menos
+  capital cargado. En 5 minutos (43 ruedas) el resultado es plano (2.565 a
+  2.964) y el peor momento mejora con el ancho (−3.267 a −1.873).
