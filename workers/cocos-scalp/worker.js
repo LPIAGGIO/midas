@@ -74,6 +74,11 @@ const MAX = Number(ENV.SCALP_MAX || 10);
 const NIVELES = Math.floor(MAX / LOTE);
 const PASO = Number(ENV.SCALP_PASO || 0.003);          // distancia entre escalones
 const GANANCIA = Number(ENV.SCALP_GANANCIA || 0.0025);  // objetivo por lote
+// El paso y la ganancia son del CICLO: se fijan cuando toma su ancla y no cambian
+// hasta que se vende todo. Un cambio en el .env rige desde el ciclo siguiente.
+// Los PREVIOS solo se usan la primera vez, si hay un ciclo abierto sin esos datos.
+const PASO_PREVIO = Number(ENV.SCALP_PASO_PREVIO || PASO);
+const GANANCIA_PREVIA = Number(ENV.SCALP_GANANCIA_PREVIA || GANANCIA);
 const CORTE = Number(ENV.SCALP_CORTE || 0.018);        // caída desde el ancla que corta todo
 // REFUERZO (LP 01/10/2026): con la grilla llena, si el precio cae a
 // ancla × (1 − REFUERZO_MULT × profundidad de la grilla) compra de una vez
@@ -268,7 +273,13 @@ function normalizar() {
   while (S.niveles.length < EXTRA_0 + LATERAL_MAX) S.niveles.push({ held: 0, costo: 0 });
   if (S.reforzado == null) S.reforzado = false;
   if (S.ultOp == null) S.ultOp = Date.now();     // última ejecución (para la regla del lateral)
+  if (S.paso == null || S.gan == null) {
+    const abierto = S.ancla != null || S.niveles.some((n) => n.held > 0);
+    S.paso = abierto ? PASO_PREVIO : PASO; S.gan = abierto ? GANANCIA_PREVIA : GANANCIA;
+  }
 }
+const pasoC = () => S.paso || PASO;              // paso del ciclo en curso
+const ganC = () => S.gan || GANANCIA;            // ganancia del ciclo en curso
 // Papeles que puede llegar a tener: grilla llena + refuerzo + extras del lateral.
 const EXPO_MAX = MAX * (1 + REFUERZO_FRAC) + (LATERAL_MIN > 0 ? LATERAL_MAX * Math.max(1, Math.round(LOTE * LATERAL_FRAC)) : 0);
 const heldGrilla = () => S.niveles.slice(0, NIVELES).reduce((a, n) => a + n.held, 0);
@@ -302,7 +313,7 @@ function aplicarFill(o, cum, avg) {
   const L = S.niveles[o.nivel];
   if (o.lado === "BUY") {
     L.held += dq; L.costo += dN; S.comprado += dN;
-    if (S.ancla == null) { S.ancla = avg; S.reentrada = null; }
+    if (S.ancla == null) { S.ancla = avg; S.reentrada = null; S.paso = PASO; S.gan = GANANCIA; }
     log(`COMPRA ejecutada · escalón ${o.nivel + 1} · ${dq} × ${pesos(dN / dq)} · tengo ${heldTot()}`);
   } else {
     const costo = L.held > 0 ? L.costo * (dq / L.held) : 0;
@@ -450,7 +461,7 @@ async function ciclo() {
     const costo = S.niveles.reduce((a, n) => a + n.costo, 0);
     S.niveles.forEach((n, k) => { n.held = k === 0 ? tot : 0; n.costo = k === 0 ? costo : 0; });
     S.reforzado = true; guardar();
-    log(`refuerzo: ${tot} papeles a un promedio de ${pesos(costo / tot)} · salida conjunta a ${pesos(alTick((costo / tot) * (1 + GANANCIA), "arriba"))}`);
+    log(`refuerzo: ${tot} papeles a un promedio de ${pesos(costo / tot)} · salida conjunta a ${pesos(alTick((costo / tot) * (1 + ganC()), "arriba"))}`);
     return;
   }
   // Ventas: cada escalón con papeles y sin compra en curso tiene su venta.
@@ -459,7 +470,7 @@ async function ciclo() {
     const L = S.niveles[k]; if (!(L.held > 0)) continue;
     if (vs.some((o) => o.lado === "BUY" && o.nivel === k)) continue;
     const v = vs.find((o) => o.lado === "SELL" && o.nivel === k);
-    if (!v) await colocar("SELL", k, L.held, alTick((L.costo / L.held) * (1 + GANANCIA), "arriba"));
+    if (!v) await colocar("SELL", k, L.held, alTick((L.costo / L.held) * (1 + ganC()), "arriba"));
     else if (!v.duda && v.qty - v.cum !== L.held) await cancelar(v, "cantidad distinta a la tenencia");
   }
   // Compra: una sola apoyada, en el escalón siguiente al más bajo con papeles.
@@ -476,14 +487,14 @@ async function ciclo() {
   else if (c0 && h === -1 && !enReentrada && b.bid > c0.px * 1.001 && Date.now() - c0.t > 60_000) await cancelar(c0, "el precio se alejó");
   // Refuerzo: grilla llena, sin refuerzo previo en este ciclo.
   if (REFUERZO_FRAC > 0 && !S.reforzado && !compras.length && S.ancla && totG >= MAX && ref.held === 0 && !pausaCompras && !temprano) {
-    const pxRef = alTick(S.ancla * (1 - REFUERZO_MULT * PASO * (NIVELES - 1)), "abajo");
+    const pxRef = alTick(S.ancla * (1 - REFUERZO_MULT * pasoC() * (NIVELES - 1)), "abajo");
     const qtyRef = Math.round(totG * REFUERZO_FRAC);
     if (qtyRef > 0) await colocar("BUY", NIVEL_REF, qtyRef, Math.min(pxRef, b.ask));
   }
   if (!S.reforzado && !compras.length && deseado < NIVELES && totG + LOTE <= MAX && !pausaCompras && !temprano && (deseado === 0 ? !tarde : S.ancla)) {
     let px;
     if (deseado === 0) px = enReentrada && b.bid > S.reentrada.px ? S.reentrada.px : b.bid;
-    else px = Math.min(alTick(S.ancla * (1 - PASO * deseado), "abajo"), b.ask);
+    else px = Math.min(alTick(S.ancla * (1 - pasoC() * deseado), "abajo"), b.ask);
     await colocar("BUY", deseado, LOTE, px);
   }
   // Regla del lateral: una hora sin ejecuciones y pocos escalones cargados → un
@@ -532,6 +543,7 @@ async function main() {
     guardar(); process.exit(0);
   }
   if (S.dia !== diaAr() && esHabil() && hhmmAr() >= HORA_INICIO) await nuevoDia();
+  if (heldTot() > 0 && (pasoC() !== PASO || ganC() !== GANANCIA)) log(`ciclo abierto con paso ${(pasoC() * 100).toFixed(2)}% y ganancia ${(ganC() * 100).toFixed(2)}%: termina así; el paso ${(PASO * 100).toFixed(2)}% rige desde el próximo ciclo`);
   if (S.fin) log(`el día ya se cerró (${S.fin}). Mañana retoma solo.`);
   if (REAL && disp != null && b.ask > 0 && disp < EXPO_MAX * b.ask * 1.01) { log(`ERROR disponible ${pesos(disp)} menor a la exposición máxima ${pesos(MAX * b.ask)}: no arranco`); process.exit(1); }
   if (REAL && S.base == null && ten != null) { S.base = ten - heldTot(); guardar(); }
