@@ -305,3 +305,20 @@ ya medida (no operar la primera hora) daba +17% a +20%.
 medias; tick de BYMA por banda de precio (META ≥ $50.000: 664 rechazos,
 corregido 12:47 y freno a los 5 rechazos del mercado). Lateral: 40 lotes extra.
 Refuerzos: ninguno.
+
+## Vender al cierre lo que está en ganancia (06/10/2026)
+
+LP: "cerrar a las 16:45 todo lo que está positivo en el día y quedarnos solo
+con lo rojo; al otro día arrancar de nuevo con los limpios". `grilla5y.py`
+con `cierre_ganadores='papel'|'lote'`. 9 papeles, sin corte, refuerzo 50%.
+
+| Muestra | Como hoy | Vende el papel en ganancia | Vende los lotes en ganancia | Vende todo |
+|---|---:|---:|---:|---:|
+| 5 min, 43 ruedas | 2.646 | 2.682 (+1%) | 2.625 (−1%) | −135 |
+| Horario, 3 años | 22.813 | 22.056 (−3%) | 21.790 (−4%) | −28.158 |
+| Diario, 10 años | 39.178 | 37.309 (−5%) | 41.607 (+6%) | −100.138 |
+
+Peor momento igual en todas. Veredicto: neutro (ruido de ±5% con signo
+cambiante), no protege nada; lo que se vende al cierre deja de cobrar la suba
+de la noche siguiente tantas veces como evita la baja. Vender todo al cierre
+sigue siendo la peor variante. No se adopta.

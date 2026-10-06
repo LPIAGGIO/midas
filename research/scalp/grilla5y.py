@@ -42,7 +42,7 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None):
     """corte=None → holdea sin limite. Devuelve metricas en USD."""
     # doble: con la grilla llena, si el precio cae a ancla*(1 - doble*profundidad) compra
     # OTRA VEZ la misma cantidad que tiene y pasa a salir todo junto en promedio + gan.
@@ -192,6 +192,23 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
             else:
                 E['reent'] = None
                 comprar(0, c)           # no volvio al ancla: sigue al precio
+        # cierre_ganadores (LP 06/10/2026): en la ultima vela del dia vende lo que
+        # esta en ganancia ('papel': todo el papel si su latente es positivo;
+        # 'lote': cada lote con precio arriba de su costo) y deja lo que esta en
+        # rojo. Lo vendido arranca ciclo nuevo al dia siguiente.
+        if cierre_ganadores and lots and (i + 1 == len(bars) or bars[i + 1][0] != fecha):
+            if cierre_ganadores == 'papel':
+                if sum(u * c / E['fx'] - cusd for (_, u, cusd) in lots.values()) > 0:
+                    for kk in list(lots):
+                        vender(kk, c, fecha)
+            else:
+                for kk in list(lots):
+                    if c > lots[kk][0]:
+                        vender(kk, c, fecha)
+            if not lots:
+                E['ancla'] = None
+                E['reent'] = None
+                E['parado'] = fecha
         if cierre_vende and (i + 1 == len(bars) or bars[i + 1][0] != fecha):
             # ultima vela del dia: vende todo al cierre y mañana arranca de cero
             for kk in list(lots):
