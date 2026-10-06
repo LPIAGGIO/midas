@@ -303,6 +303,10 @@ if (REAL && !CHEQUEO) {
 normalizar();
 const guardar = () => { if (!CHEQUEO) fs.writeFileSync(ARCH, JSON.stringify(S)); };
 let rechMercado = 0;                              // rechazos del mercado seguidos; solo los borra una ejecución
+// "Stock insuficiente": bug de Matriz (LP lo reclama a Cocos). No frena: avisa,
+// pausa la venta de ese escalón 10 minutos y reintenta.
+const pausaVenta = {};                            // nivel -> hasta cuándo no se vuelve a mandar la venta
+let ultAvisoStock = 0;
 let rechazos = 0, pausaCompras = 0, ultimoResumen = 0, ultimaTenencia = 0, excesos = 0;
 
 async function colocar(lado, nivel, qty, px) {
@@ -356,7 +360,13 @@ async function sincronizar(b) {
     const st = String(e.status || "").toUpperCase();
     if (FINAL.has(st)) {
       o.final = true;
-      if (st === "REJECTED") { rechazos++; rechMercado++; log(`ERROR orden rechazada por el mercado (${o.lado} ${o.qty} × ${o.px}): ${e.text || ""}`); }
+      if (st === "REJECTED") {
+        if (/stock insuficiente/i.test(e.text || "")) {
+          pausaVenta[o.nivel] = Date.now() + 10 * 60_000;
+          log(`ERROR stock insuficiente al vender (${o.lado} ${o.qty} × ${o.px}): ${e.text || ""} — bug de Matriz; reintento en 10 min`);
+          if (Date.now() - ultAvisoStock > 30 * 60_000) { ultAvisoStock = Date.now(); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\nCocos rechazó la venta de ${o.qty} a ${pesos(o.px)} por "stock insuficiente" (${(e.text || "").slice(0, 120)}). Tengo ${heldTot()} en cartera. Es el bug de Matriz: reclamar a Cocos. Reintento cada 10 minutos.`); }
+        } else { rechazos++; rechMercado++; log(`ERROR orden rechazada por el mercado (${o.lado} ${o.qty} × ${o.px}): ${e.text || ""}`); }
+      }
     }
   }
   guardar();
@@ -500,6 +510,7 @@ async function ciclo() {
     const L = S.niveles[k]; if (!(L.held > 0)) continue;
     if (vs.some((o) => o.lado === "BUY" && o.nivel === k)) continue;
     const v = vs.find((o) => o.lado === "SELL" && o.nivel === k);
+    if (!v && pausaVenta[k] > Date.now()) continue;  // esperando a que Cocos ajuste el stock
     if (!v) await colocar("SELL", k, L.held, alTick((L.costo / L.held) * (1 + ganC()), "arriba"));
     else if (!v.duda && v.qty - v.cum !== L.held) await cancelar(v, "cantidad distinta a la tenencia");
   }
