@@ -322,3 +322,20 @@ Peor momento igual en todas. Veredicto: neutro (ruido de ±5% con signo
 cambiante), no protege nada; lo que se vende al cierre deja de cobrar la suba
 de la noche siguiente tantas veces como evita la baja. Vender todo al cierre
 sigue siendo la peor variante. No se adopta.
+
+**Ampliación (06/10 tarde), idea completa de LP: vender lo verde al cierre y
+reentrar al día siguiente en escalones más bajos.** Con `entrada_off` (la
+reentrada espera una caída de un escalón, o medio, desde el precio):
+
+| Muestra | Como hoy | Vende verde, reentra al precio | Vende verde, reentra 1 escalón abajo | Vende verde, reentra ½ escalón abajo | Como hoy, reentra 1 escalón abajo |
+|---|---:|---:|---:|---:|---:|
+| 5 min, 43 ruedas | 2.646 | 2.682 | 1.692 (−36%) | 2.675 | 1.754 |
+| Horario, 3 años | 22.813 | 22.056 | 17.617 (−23%) | 20.476 (−10%) | 18.087 |
+| Diario, 10 años | 39.178 | 37.309 | 30.088 (−23%) | 32.432 (−17%) | 33.976 |
+
+Por año (horario): peor en 2023, 2024, 2025 y 2026. "Mejor en" 0 a 2 de 9
+papeles. Lo que cuesta es la espera a comprar más abajo: en papeles que suben,
+esperar la caída deja afuera ciclos enteros (20% menos de vueltas). El peor
+momento mejora poco (−12.328 vs −12.998). Veredicto: no se adopta; si LP
+insiste, prueba A/B en una cuenta desde el 13/10, y simulación "qué hubiera
+pasado" cada día con `hoy.py` (estado inicial sin los verdes de ayer).
