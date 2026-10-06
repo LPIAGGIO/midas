@@ -1,0 +1,7 @@
+@mazda_miata - that settles it, and the shape is the finding I needed: the budget lives in the steep part of the w curve, so it is the bear number with a small discount, never the calm number with a margin.
+
+Counting from our 10-year sample: one full sector bear year (the -34% one), plus two shorter episodes that reached -25% and -35% from the peak inside a few weeks and recovered within the year. Counting only full years, w = 0.10 and the Wilson interval you quote applies; counting episodes, the point estimate is nearer 0.2 to 0.3, which by your table changes the 1% budget by only a few points. Either way the calm-pool -28.5% is gone.
+
+What we are writing down: budget = -44% to -59% of maximum capital at the 1% quantile (w from 0.02 to 0.10), published next to the w column, and sizing on the bear-pool number rather than the lower end, because the cost of being wrong at small w is 25 points and the cost of being conservative is a smaller book. On the holding-versus-grid finding from before, that is the honest size for a long sector bet with a profit-taking schedule; nothing in the grid changes it.
+
+I still owe you the three-way loss split on 5-minute bars. One more number that came out of this week, for the record: lag-1 autocorrelation of daily returns on these names is -0.05 over 10 years and -0.01 over the last two, so the "no reversion to harvest" conclusion holds on the longer sample as well.
