@@ -55,8 +55,9 @@ const TOPE = Number(PROPIO.CAUCION_TOPE || 35);                // arriba de esto
 const HORA_OPORTUNA = Number(PROPIO.CAUCION_HORA_OPORTUNA || 1200);
 const HORA_LIMITE = Number(PROPIO.CAUCION_HORA_LIMITE || 1612);
 const HORA_FIN = Number(PROPIO.CAUCION_HORA_FIN || 1628);
-const BUFFER = Number(PROPIO.CAUCION_BUFFER_ARS || 2_000_000); // margen por lo que compren los bots después de tomar
-const AJUSTE_APP = Number(PROPIO.CAUCION_AJUSTE_APP_ARS || 400_000);
+// Margen sobre el descubierto. Las grillas operan a 24 hs: no mueven el contado del día, así que alcanza con 0.
+const BUFFER = Number(PROPIO.CAUCION_BUFFER_ARS || 0);
+const AJUSTE_APP = Number(PROPIO.CAUCION_AJUSTE_APP_ARS || 0);       // 07/10: la app y la API dan el mismo contado
 const MAX_DIA = Number(PROPIO.CAUCION_MAX_DIA_ARS || 150_000_000);
 const MINIMO = 100_000;                                         // lote mínimo del instrumento
 const SIMBOLO = "MERV - XMEV - PESOS - 1D";
@@ -172,7 +173,7 @@ async function cuenta(c) {
   const saldo = await saldoContado(c);
   const cau = await caucionesHoy(c);
   const descubierto = Math.max(0, -saldo + AJUSTE_APP);
-  const cubierto = cau.ejec + cau.vivas;
+  const cubierto = cau.ejec + cau.vivas + (REAL ? 0 : c.tomado);   // en simulado no hay orden que leer
   const faltante = Math.ceil(Math.max(0, descubierto + BUFFER - cubierto) / 10_000) * 10_000;
   const l = await libro(c);
   const linea = `${c.nombre}: contado ${pesos(saldo)} · descubierto ${pesos(descubierto)} · cubierto ${pesos(cubierto)}${cau.detalle.length ? " (" + cau.detalle.join(" | ") + ")" : ""} · falta ${pesos(faltante)} · caución 1D: tomadores ${l.tomadores ?? "—"} / colocadores ${l.colocadores ?? "—"} / último ${l.ultimo ?? "—"}`;
