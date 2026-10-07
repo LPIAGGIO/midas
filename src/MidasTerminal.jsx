@@ -46299,6 +46299,17 @@ function BotScalpingModule() {
             const porC = {}; let acum = 0, vv = 0;
             for (const d of histDias) { for (const [c, v] of Object.entries(d.porCuenta)) porC[c] = (porC[c] || 0) + v; acum += d.total; vv += d.ventas; }
             const n = histDias.length, lat = total.lat, neto = acum + lat, inv = total.inv, expo = total.expo;
+            // Resultado del día = realizado de ese día + lo que cambió el latente contra el
+            // cierre anterior (lo que muestra el P&L diario de Matriz, pero neto de comisiones).
+            // Hoy, si todavía no hay latente de cierre, se usa el latente de ahora.
+            const hoyAr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+            const latDe = (d) => (d.latente != null ? d.latente : d.fecha === hoyAr ? lat : null);
+            const resDia = histDias.map((d, i) => {
+              const l = latDe(d); if (l == null) return null;
+              const prev = histDias[i + 1];
+              const lp = prev ? latDe(prev) : 0;               // la primera rueda arrancó sin latente
+              return lp == null ? null : d.total + l - lp;
+            });
             const porRueda = acum / n, pct = (x, base) => (base > 0 ? (x / base) * 100 : null);
             const f2 = (x) => (x == null ? "—" : `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(x).toFixed(2).replace(".", ",")}%`);
             const tnaInv = pct(porRueda, inv) != null ? pct(porRueda, inv) * 250 : null;
@@ -46320,15 +46331,17 @@ function BotScalpingModule() {
                     <th style={{ ...th, textAlign: "left" }}>Fecha</th>
                     {cuentas.map(([c]) => <th key={c} style={th}>Cuenta {c}</th>)}
                     <th style={th}>Realizado</th><th style={th}>Ventas</th><th style={th}>Latente al cierre</th>
+                    <th style={{ ...th, color: C.text }} title="Realizado del día más lo que cambió el latente contra el cierre anterior. Es el P&L diario de Matriz, neto de comisiones.">Resultado del día</th>
                   </tr></thead>
                   <tbody>
-                    {histDias.map((d) => (
+                    {histDias.map((d, i) => (
                       <tr key={d.fecha} style={{ borderBottom: `1px solid ${C.border}` }}>
                         <td style={{ ...td, textAlign: "left" }}>{d.fecha.split("-").reverse().join("/")}</td>
                         {cuentas.map(([c]) => <td key={c} style={{ ...td, color: color(d.porCuenta[c] || 0) }}>{d.porCuenta[c] != null ? conSigno(d.porCuenta[c]) : "—"}</td>)}
                         <td style={{ ...td, color: color(d.total), fontWeight: 700 }}>{conSigno(d.total)}</td>
                         <td style={td}>{d.ventas}</td>
                         <td style={{ ...td, color: color(d.latente || 0) }}>{d.latente != null ? conSigno(d.latente) : "—"}</td>
+                        <td style={{ ...td, color: color(resDia[i] || 0), fontWeight: 700 }}>{resDia[i] != null ? conSigno(resDia[i]) : "—"}{d.latente == null && d.fecha === hoyAr ? " *" : ""}</td>
                       </tr>
                     ))}
                     <tr style={{ borderTop: `1px solid ${C.borderStrong}`, background: C.deep }}>
@@ -46336,19 +46349,19 @@ function BotScalpingModule() {
                       {cuentas.map(([c]) => <td key={c} style={{ ...td, color: color(porC[c] || 0), fontWeight: 700 }}>{porC[c] != null ? conSigno(porC[c]) : "—"}</td>)}
                       <td style={{ ...td, color: color(acum), fontWeight: 700 }}>{conSigno(acum)}</td>
                       <td style={{ ...td, fontWeight: 700 }}>{vv}</td>
-                      <td style={td} />
+                      <td style={td} /><td style={td} />
                     </tr>
                     <tr style={{ background: C.deep }}>
                       <td style={{ ...td, textAlign: "left", color: C.muted, fontFamily: "'Roboto', sans-serif" }}>Latente ahora (lo que sigue abierto)</td>
                       {cuentas.map(([c, fs]) => <td key={c} style={{ ...td, color: color(resumen(fs).lat) }}>{conSigno(resumen(fs).lat)}</td>)}
                       <td style={{ ...td, color: color(lat) }}>{conSigno(lat)}</td>
-                      <td style={td} /><td style={td} />
+                      <td style={td} /><td style={td} /><td style={td} />
                     </tr>
                     <tr style={{ background: C.deep, borderTop: `1px solid ${C.borderStrong}` }}>
                       <td style={{ ...td, textAlign: "left", fontWeight: 700, color: C.text, fontFamily: "'Roboto', sans-serif" }}>Resultado total</td>
                       {cuentas.map(([c, fs]) => { const x = (porC[c] || 0) + resumen(fs).lat; return <td key={c} style={{ ...td, color: color(x), fontWeight: 700 }}>{conSigno(x)}</td>; })}
                       <td style={{ ...td, color: color(neto), fontWeight: 700, fontSize: 13 }}>{conSigno(neto)}</td>
-                      <td style={td} /><td style={td} />
+                      <td style={td} /><td style={td} /><td style={td} />
                     </tr>
                   </tbody>
                 </table>
