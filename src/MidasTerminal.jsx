@@ -46304,11 +46304,10 @@ function BotScalpingModule() {
             // Hoy, si todavía no hay latente de cierre, se usa el latente de ahora.
             const hoyAr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
             const latDe = (d) => (d.latente != null ? d.latente : d.fecha === hoyAr ? lat : null);
+            // Sin latente guardado (la primera rueda, 01/10) se toma 0: arrancó casi sin papeles.
             const resDia = histDias.map((d, i) => {
-              const l = latDe(d); if (l == null) return null;
               const prev = histDias[i + 1];
-              const lp = prev ? latDe(prev) : 0;               // la primera rueda arrancó sin latente
-              return lp == null ? null : d.total + l - lp;
+              return d.total + (latDe(d) ?? 0) - (prev ? latDe(prev) ?? 0 : 0);
             });
             const porRueda = acum / n, pct = (x, base) => (base > 0 ? (x / base) * 100 : null);
             const f2 = (x) => (x == null ? "—" : `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(x).toFixed(2).replace(".", ",")}%`);
