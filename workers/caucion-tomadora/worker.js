@@ -146,7 +146,8 @@ async function tomar(c, monto, tasa, motivo) {
       id = j?.order; if (!id?.clientId) throw new Error(`sin clientId: ${JSON.stringify(j).slice(0, 150)}`);
     } catch (e) { log(`${c.nombre}: ERROR al mandar la caución ${pesos(monto)} al ${px}%: ${e.message}`); await tg(`<b>CAUCIÓN ${c.nombre}</b>\nERROR al mandar ${pesos(monto)} al ${px}%: ${e.message}`); return false; }
     log(`${c.nombre}: caución mandada ${pesos(monto)} al ${px}% (${motivo}), intento ${intento}`);
-    for (let i = 0; i < 18; i++) {                                   // hasta 3 minutos
+    const vueltas = hhmmAr() >= HORA_LIMITE ? 9 : 18;              // 90 s en la hora límite, 3 min si no
+    for (let i = 0; i < vueltas; i++) {
       await dormir(10_000);
       const o = (await api(c, `/rest/order/id?${q({ clOrdId: id.clientId, proprietary: id.proprietary || "" })}`).catch(() => null))?.order;
       const st = String(o?.status || "").toUpperCase();
@@ -198,7 +199,7 @@ async function main() {
   for (;;) {
     const hm = hhmmAr();
     for (const c of CUENTAS) { if (c.hoy !== diaAr()) { c.hoy = diaAr(); c.tomado = 0; } }
-    if (esHabil() && hm >= 1045 && hm < HORA_FIN) {
+    if (esHabil() && hm >= 1030 && hm < HORA_FIN) {
       for (const c of CUENTAS) await cuenta(c).catch((e) => log(`${c.nombre}: ${e.message}`));
       await dormir(60_000);
     } else await dormir(5 * 60_000);
