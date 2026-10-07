@@ -339,3 +339,24 @@ esperar la caída deja afuera ciclos enteros (20% menos de vueltas). El peor
 momento mejora poco (−12.328 vs −12.998). Veredicto: no se adopta; si LP
 insiste, prueba A/B en una cuenta desde el 13/10, y simulación "qué hubiera
 pasado" cada día con `hoy.py` (estado inicial sin los verdes de ayer).
+
+## "Qué hubiera pasado" con la regla de vender lo verde (rueda del 07/10/2026)
+
+`cierre_verdes.py` (salida en `cierre-verdes-2026-10-07.txt`). Velas de 1 minuto
+en pesos (Yahoo .BA; de 10:30 a 11:00 se completan con la vela en dólares
+llevada a pesos), estado real de apertura de cada bot (`estado_apertura.js`),
+configuración real de cada cuenta. En verde al cierre del 06/10 había solo dos
+papeles por cuenta: AMZN (+3.500 en cada una) y GOOGL (+720 y +2.385); el
+resto estaba en rojo o sin papeles.
+
+| | Como corrió | (a) vende lo verde, arranca limpio al precio | (b) vende lo verde, arranca un escalón abajo |
+|---|---:|---:|---:|
+| 72404 | 315.393 | 319.528 (+4.135) | 273.515 (−41.878) |
+| 3893 | 102.189 | 107.983 (+5.794) | 73.753 (−28.436) |
+| Total | 417.582 | 427.512 (+9.930) | 347.268 (−70.313) |
+
+Lectura: (a) casi igual (+2%); (b) pierde todo lo que AMZN y GOOGL ganaron en
+el día, porque subieron de corrido y nunca bajaron un escalón para reentrar.
+Es el mismo mecanismo que en las muestras largas (−23%). Reserva: el error del
+simulador contra lo real en este día (3893: simulado 102k contra ~226k real)
+es mayor que el efecto de la regla; un día no decide.

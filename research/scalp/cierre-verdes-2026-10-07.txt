@@ -1,0 +1,15 @@
+RUEDA DEL 2026-10-07 · vender lo verde al cierre del día anterior y arrancar limpio
+
+CUENTA 72404 · en verde al cierre anterior: AMZN (+3500), GOOGL (+720)
+   papel   como corrió (a) limpio, precio (b) limpio, 1 esc. abajo
+   AMZN          19250            22131             -799   (venta de 525 a 2872.5, comisión 799)
+   GOOGL         20982            22236             -846   (venta de 165 a 9675, comisión 846)
+   TOTAL        315393           319528           273515
+
+CUENTA 3893 · en verde al cierre anterior: AMZN (+3500), GOOGL (+2385)
+   papel   como corrió (a) limpio, precio (b) limpio, 1 esc. abajo
+   AMZN          18607            17468             -799   (venta de 525 a 2872.5, comisión 799)
+   GOOGL          8486            15420             -544   (venta de 106 a 9675, comisión 544)
+   TOTAL        102189           107983            73753
+
+LAS DOS CUENTAS · como corrió 417582 · (a) 427512 (+9930) · (b) 347268 (-70313)
