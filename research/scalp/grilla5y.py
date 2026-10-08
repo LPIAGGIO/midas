@@ -54,6 +54,9 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         E['ancla'] = inicial.get('ancla')
         lots.update(inicial.get('lots') or {})
         E['paso'], E['gan'] = inicial.get('paso', paso), inicial.get('gan', gan)
+        # reentrada fija (08/10): arranca limpio con la compra apoyada en 'reent'
+        # y no la mueve mientras dure 'espera' (en velas)
+        E['reent'], E['espera'] = inicial.get('reent'), inicial.get('espera', 0)
     por_anio = {}
 
     def comprar(k, px):

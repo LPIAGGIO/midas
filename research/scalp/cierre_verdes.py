@@ -11,13 +11,20 @@ import grilla5y as g
 AQUI = os.path.dirname(os.path.abspath(__file__))
 DIA = sys.argv[1] if len(sys.argv) > 1 else '2026-10-07'
 # Cierre en pesos del día anterior (Yahoo .BA; META del Cie/Aju Ant de Matriz)
-PREV = {'MU': 337750, 'SNDK': 15730, 'NVDA': 16100, 'GOOGL': 9675, 'AMD': 104400, 'INTC': 36420,
-        'META': 49700, 'AAPL': 26820, 'MSFT': 28460, 'AMZN': 2872.5}
-# Latente al cierre del día anterior por cuenta y papel (scalp_resultados)
-LAT_PREV = {
-    '72404': {'AAPL': -14160, 'AMD': 0, 'AMZN': 3500, 'GOOGL': 720, 'INTC': -347420, 'META': -9600, 'MSFT': 0, 'MU': -166425, 'NVDA': -16960, 'SNDK': -179680},
-    '3893': {'AAPL': -2260, 'AMD': 0, 'AMZN': 3500, 'GOOGL': 2385, 'INTC': -293060, 'META': -10400, 'MSFT': 0, 'MU': -89325, 'NVDA': -13120, 'SNDK': -125280},
+# Por rueda simulada: cierre en pesos del día anterior y latente al cierre anterior (scalp_resultados)
+DIAS = {
+    '2026-10-07': ({'MU': 337750, 'SNDK': 15730, 'NVDA': 16100, 'GOOGL': 9675, 'AMD': 104400, 'INTC': 36420,
+                    'META': 49700, 'AAPL': 26820, 'MSFT': 28460, 'AMZN': 2872.5},
+                   {'72404': {'AAPL': -14160, 'AMD': 0, 'AMZN': 3500, 'GOOGL': 720, 'INTC': -347420, 'META': -9600, 'MSFT': 0, 'MU': -166425, 'NVDA': -16960, 'SNDK': -179680},
+                    '3893': {'AAPL': -2260, 'AMD': 0, 'AMZN': 3500, 'GOOGL': 2385, 'INTC': -293060, 'META': -10400, 'MSFT': 0, 'MU': -89325, 'NVDA': -13120, 'SNDK': -125280}}),
+    '2026-10-08': ({'MU': 350300, 'SNDK': 16060, 'NVDA': 15940, 'GOOGL': 9765, 'AMD': 104200, 'INTC': 36340,
+                    'META': 48280, 'AAPL': 27180, 'MSFT': 28300, 'AMZN': 2915},
+                   {'72404': {'AAPL': 1340, 'AMD': 5150, 'AMZN': 7703, 'GOOGL': 0, 'INTC': -343900, 'META': -109200, 'MSFT': 360, 'MU': 13450, 'NVDA': -45760, 'SNDK': -90140},
+                    '3893': {'AAPL': 4280, 'AMD': 13625, 'AMZN': 3937, 'GOOGL': 0, 'INTC': -289300, 'META': -90800, 'MSFT': 2520, 'MU': -2775, 'NVDA': -41280, 'SNDK': -62930}}),
 }
+PREV, LAT_PREV = DIAS[DIA]
+# Escalón del bot → clave del simulador: 1-5 grilla (0-4), 6 refuerzo (99), 7+ lotes del lateral (100+)
+CLAVE = lambda k: k - 1 if k <= 5 else (99 if k == 6 else 100 + k)
 CONF = {'72404': dict(desde=1031), '3893': dict(desde=1200)}     # hora desde la que compra
 COMISION = 0.00053                                                 # por punta (Cocos)
 EST = json.load(open(os.path.join(AQUI, 'hoy-estado-inicial-%s.json' % DIA)))
@@ -38,13 +45,17 @@ def corre(cta, tk, limpio=False, entrada_off=0.0):
     if not limpio:
         for k, q, objetivo in s['ventas']:
             px = objetivo / (1 + s['gan'])
-            lots[k - 1] = (px, q, q * px)
+            lots[CLAVE(k)] = (px, q, q * px)
     ini = dict(ancla=None if limpio else s['ancla'], lots=lots, paso=s['paso'], gan=s['gan'], prev_c=PREV[tk])
     p_nuevo, g_nuevo = s['pasoNuevo'], s['ganNueva']
+    if entrada_off:
+        # (b) la primera compra queda apoyada un escalón abajo del cierre anterior,
+        # fija toda la rueda (antes seguía al precio vela a vela y en velas de
+        # 1 minuto casi nunca entraba: daba "no operó")
+        ini.update(reent=PREV[tk] * (1 - p_nuevo), espera=10 ** 9)
     r = g.grilla(bars, p_nuevo, g_nuevo, None, doble=2.0, frac=0.5, espera_barras=20,
                  lateral_barras=60, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=2,
-                 dinamico={DIA: (p_nuevo, g_nuevo)}, inicial=ini, nobuy=nobuy,
-                 entrada_off=(p_nuevo if entrada_off else 0.0))
+                 dinamico={DIA: (p_nuevo, g_nuevo)}, inicial=ini, nobuy=nobuy)
     lat0 = sum(q * PREV[tk] - c for (_, q, c) in lots.values())
     return r['eq'][-1] - lat0, r['rondas']
 

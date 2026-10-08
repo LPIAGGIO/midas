@@ -1,0 +1,20 @@
+RUEDA DEL 2026-10-08 · vender lo verde al cierre del día anterior y arrancar limpio
+
+CUENTA 72404 · en verde al cierre anterior: AAPL (+1340), AMD (+5150), AMZN (+7703), MSFT (+360), MU (+13450)
+   papel   como corrió (a) limpio, precio (b) limpio, 1 esc. abajo
+   AAPL          12663            11961            -1369   (venta de 95 a 27180, comisión 1369)
+   AMD         -148428           -79267           -79267   (venta de 16 a 104200, comisión 884)
+   AMZN         -37991           -38464           -17940   (venta de 237 a 2915, comisión 366)
+   MSFT         -26845           -38476             4075   (venta de 54 a 28300, comisión 810)
+   MU          -119399          -105959           -64483   (venta de 6 a 350300, comisión 1114)
+   TOTAL      -1230746         -1160951         -1069730
+
+CUENTA 3893 · en verde al cierre anterior: AAPL (+4280), AMD (+13625), AMZN (+3937), MSFT (+2520)
+   papel   como corrió (a) limpio, precio (b) limpio, 1 esc. abajo
+   AAPL          17235            14737            -1066   (venta de 74 a 27180, comisión 1066)
+   AMD         -198327           -64410           -58648   (venta de 30 a 104200, comisión 1657)
+   AMZN         -28956           -25012            -3496   (venta de 350 a 2915, comisión 541)
+   MSFT           6764           -20190             4380   (venta de 72 a 28300, comisión 1080)
+   TOTAL      -1346728         -1238320         -1202274
+
+LAS DOS CUENTAS · como corrió -2577473 · (a) -2399271 (+178202) · (b) -2272003 (+305470)

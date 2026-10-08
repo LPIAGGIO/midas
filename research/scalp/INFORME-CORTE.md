@@ -367,3 +367,10 @@ Propuesta de LP: si el papel abre en baja fuerte, que la 3893 compre desde la ap
 - Horario 2 años (730 ruedas): A desde la apertura +36.794 · B desde las 12 +36.510 · G abre 1% abajo +37.171 (+1,8% vs B) · I toca 1% antes de las 12 +36.873. Diferencias de 1-2%: ruido.
 - 5 min, 60 ruedas (16/07-08/10): A +4.732 (+13% vs B) · B +4.195 · G 1% +4.348 (+3,6%) · I 1% +4.392 (+4,7%). Por unidad de capital A también gana (167,8 vs 157,0 por 1000).
 - Lectura: el retraso a las 12 no agrega nada medible; la regla condicional recupera una parte de lo que cuesta; comprar desde la apertura es igual o mejor en las dos muestras. Decisión de LP junto con el escalón después del viernes 09/10.
+
+## Vender lo verde al cierre: 07/10 y 08/10 (cierre_verdes.py, corregido 08/10)
+
+Corrección: la variante (b) "reentrar un escalón abajo" seguía al precio vela a vela y en velas de 1 minuto casi nunca entraba. Ahora la compra queda fija un escalón abajo del cierre anterior toda la rueda. El −23% informado el 07/10 era ese error.
+- 07/10 (rueda alcista): como corrió +414.050 · (a) limpio al precio +13.777 (+3%) · (b) un escalón abajo −32.567 (−8%).
+- 08/10 (rueda bajista, semis −3% a −6%): como corrió −2.577.473 · (a) +178.202 · (b) +305.470. Casi todo es AMD: 46 papeles comprados arriba que vendidos al cierre del 07 no habrían cargado la caída.
+- Dos ruedas: (a) +192k, (b) +273k. La regla solo toca los papeles en verde; lo que más pesa (INTC, SNDK, NVDA en rojo) no cambia. Muestra chica; seguir midiendo hasta el viernes.
