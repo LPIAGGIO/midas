@@ -176,16 +176,18 @@ async function tenenciaCuenta() {
 
 /* ───────── libro: websocket de Primary, respaldo REST ───────── */
 let book = { bid: null, ask: null, last: null, t: 0 }, wsConn = null, wsUltimo = 0, wsReint = 0;
+let wsMd = 0, wsAbierto = 0, wsRefrescado = null;   // último mensaje Md · apertura del ws · día del refresco previo a la rueda
 async function wsConectar() {
   const reintentar = (m) => { const esp = Math.min(60_000, 5_000 * (1 + wsReint++)); log(`ws desconectado (${m}); reconecto en ${esp / 1000} s`); setTimeout(wsConectar, esp); };
   try {
     const ws = new WebSocket(BASE.replace("https://", "wss://") + "/", { headers: { "X-Auth-Token": await token() } });
     wsConn = ws;
-    ws.on("open", () => { wsReint = 0; ws.send(JSON.stringify({ type: "smd", level: 1, entries: ["BI", "OF", "LA"], products: [{ symbol: simbolo(), marketId: "ROFX" }], depth: 1 })); log("ws Primary conectado"); });
+    ws.on("open", () => { wsReint = 0; wsAbierto = Date.now(); ws.send(JSON.stringify({ type: "smd", level: 1, entries: ["BI", "OF", "LA"], products: [{ symbol: simbolo(), marketId: "ROFX" }], depth: 1 })); log("ws Primary conectado"); });
     ws.on("message", (d) => {
       wsUltimo = Date.now();
       let j; try { j = JSON.parse(d.toString()); } catch { return; }
       if (j.type !== "Md") return;
+      wsMd = Date.now();
       const md = j.marketData || {};
       // BI/OF vacíos = punta sin órdenes: se anula (no se arrastra la anterior).
       book = { bid: "BI" in md ? Number(md.BI?.[0]?.price) || null : book.bid, ask: "OF" in md ? Number(md.OF?.[0]?.price) || null : book.ask, last: Number(md.LA?.price) || book.last, t: Date.now() };
@@ -198,6 +200,22 @@ async function wsConectar() {
     ws.on("error", (e) => { if (wsConn === ws) { wsConn = null; reintentar(e.message); } });
   } catch (e) { reintentar(e.message); }
 }
+// Vigía del ws (cada 30 s): refresco antes de la apertura y reconexión si en
+// rueda pasan 5 minutos sin precios. Cerrar dispara la reconexión del "close".
+function wsVigilar() {
+  if (!wsConn || wsConn.readyState !== 1 || !esHabil()) return;
+  const hm = hhmmAr();
+  if (hm >= 1020 && hm < HORA_INICIO && wsRefrescado !== diaAr()) {
+    wsRefrescado = diaAr();
+    if (Date.now() - wsAbierto > 10 * 60_000) { log("ws: reconecto antes de la apertura para suscribirme fresco"); try { wsConn.close(); } catch { /* se cae sola */ } }
+    return;
+  }
+  if (hm >= HORA_INICIO && hm < HORA_CIERRE && Date.now() - Math.max(wsMd, wsAbierto) > 5 * 60_000) {
+    log(`ws: ${Math.round((Date.now() - Math.max(wsMd, wsAbierto)) / 60_000)} min sin precios en rueda; reconecto`);
+    wsAbierto = Date.now();                        // no repetir hasta que pasen otros 5 minutos
+    try { wsConn.close(); } catch { /* se cae sola */ }
+  }
+}
 let _restT = 0, _fk = 344000, _fn = 0;
 function libroFake() {
   _fn++;
@@ -208,7 +226,8 @@ function libroFake() {
 }
 async function libro() {
   if (FAKE) return libroFake();
-  if (wsConn && wsConn.readyState === 1 && Date.now() - wsUltimo < 90_000 && book.t) return book;
+  const enRueda = esHabil() && hhmmAr() >= HORA_INICIO && hhmmAr() < HORA_CIERRE;
+  if (wsConn && wsConn.readyState === 1 && Date.now() - wsUltimo < 90_000 && book.t && !(enRueda && Date.now() - book.t > 10 * 60_000)) return book;
   if (Date.now() - _restT > 10_000) {
     _restT = Date.now();
     try {
@@ -564,6 +583,8 @@ async function main() {
   else {
     TICK = Number((await api("GET", `/rest/instruments/detail?${q({ marketId: "ROFX", symbol: simbolo() })}`))?.instrument?.minPriceIncrement) || 1;
     await wsConectar();
+    if (hhmmAr() >= 1020) wsRefrescado = diaAr();   // recién conectado: no hace falta el refresco previo
+    setInterval(wsVigilar, 30_000);
     for (let i = 0; i < 10 && !book.t; i++) await dormir(1000);
   }
   const b = await libro();
