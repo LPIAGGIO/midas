@@ -360,3 +360,10 @@ el día, porque subieron de corrido y nunca bajaron un escalón para reentrar.
 Es el mismo mecanismo que en las muestras largas (−23%). Reserva: el error del
 simulador contra lo real en este día (3893: simulado 102k contra ~226k real)
 es mayor que el efecto de la regla; un día no decide.
+
+## 3893: compras desde las 12 salvo apertura en baja (08/10/2026, apertura_bajista.py)
+
+Propuesta de LP: si el papel abre en baja fuerte, que la 3893 compre desde la apertura; si no, desde las 12. Escalón 3893 (x1,5), 10 papeles, USD.
+- Horario 2 años (730 ruedas): A desde la apertura +36.794 · B desde las 12 +36.510 · G abre 1% abajo +37.171 (+1,8% vs B) · I toca 1% antes de las 12 +36.873. Diferencias de 1-2%: ruido.
+- 5 min, 60 ruedas (16/07-08/10): A +4.732 (+13% vs B) · B +4.195 · G 1% +4.348 (+3,6%) · I 1% +4.392 (+4,7%). Por unidad de capital A también gana (167,8 vs 157,0 por 1000).
+- Lectura: el retraso a las 12 no agrega nada medible; la regla condicional recupera una parte de lo que cuesta; comprar desde la apertura es igual o mejor en las dos muestras. Decisión de LP junto con el escalón después del viernes 09/10.

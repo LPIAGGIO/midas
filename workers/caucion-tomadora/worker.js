@@ -15,6 +15,9 @@
  * y decide:
  *   - OPORTUNA: desde HORA_OPORTUNA, si la mejor punta colocadora (la tasa a
  *     la que se puede tomar ya) está en o debajo de UMBRAL → toma el faltante.
+ *     Si no, deja APOYADA una tomadora al UMBRAL por el faltante (08/10): se
+ *     ejecuta sola si alguien coloca a esa tasa, aunque dure segundos.
+ *   - En la hora límite cancela la apoyada que siga viva y toma el resto.
  *   - LÍMITE: desde HORA_LIMITE toma el faltante a la mejor punta, sí o sí
  *     (si la tasa supera TOPE avisa, pero toma igual: el descubierto sin
  *     cubrir sale más caro).
@@ -117,15 +120,15 @@ async function saldoContado(c) {
 async function caucionesHoy(c) {
   const j = await api(c, `/rest/order/all?accountId=${c.nombre}`);
   const hoy = diaAr().replace(/-/g, "");
-  let ejec = 0, vivas = 0; const detalle = [];
+  let ejec = 0, vivas = 0; const detalle = [], vivasLista = [];
   for (const o of j?.orders || []) {
     if (o.instrumentId?.symbol !== SIMBOLO || o.side !== "BUY" || !String(o.transactTime || "").startsWith(hoy)) continue;
     const cum = Number(o.cumQty) || 0, st = String(o.status || "").toUpperCase();
     ejec += cum;
-    if (["NEW", "PENDING_NEW", "PARTIALLY_FILLED"].includes(st)) vivas += Number(o.leavesQty) || 0;
+    if (["NEW", "PENDING_NEW", "PARTIALLY_FILLED"].includes(st)) { vivas += Number(o.leavesQty) || 0; vivasLista.push({ clOrdId: o.clOrdId, proprietary: o.proprietary, price: Number(o.price), leaves: Number(o.leavesQty) || 0 }); }
     detalle.push(`${Math.round(Number(o.orderQty)).toLocaleString("es-AR")} @${o.price} ${st}${cum ? " ejec " + Math.round(cum).toLocaleString("es-AR") : ""}`);
   }
-  return { ejec, vivas, detalle };
+  return { ejec, vivas, detalle, vivasLista };
 }
 async function libro(c) {
   const j = await api(c, `/rest/marketdata/get?${q({ marketId: "ROFX", symbol: SIMBOLO, entries: "BI,OF,LA", depth: 1 })}`);
@@ -168,11 +171,40 @@ async function tomar(c, monto, tasa, motivo) {
   return false;
 }
 
+// Orden APOYADA (LP 08/10/2026: "tendría que poner automático que toma 17% por
+// si cae una orden de casualidad; si no, 16 hs cancela esa y toma directo"):
+// desde HORA_OPORTUNA queda una tomadora LIMIT al UMBRAL por el faltante; si
+// alguien coloca a esa tasa o menos, se ejecuta sola aunque sea por segundos.
+// Cuenta como "cubierto" mientras está viva, así no se duplica (tampoco al reiniciar).
+async function apoyar(c, monto) {
+  monto = Math.max(MINIMO, Math.ceil(monto / 10_000) * 10_000);
+  if (c.tomado + monto > MAX_DIA) { log(`${c.nombre}: apoyar ${pesos(monto)} superaría el máximo diario ${pesos(MAX_DIA)}; no apoyo`); return; }
+  if (!REAL) { if (!c.apoyadaSim) { log(`${c.nombre}: SIMULADO apoyaría ${pesos(monto)} al ${UMBRAL}%`); c.apoyadaSim = true; } return; }
+  try {
+    const j = await api(c, `/rest/order/newSingleOrder?${q({ marketId: "ROFX", symbol: SIMBOLO, price: UMBRAL, orderQty: monto, ordType: "LIMIT", side: "BUY", timeInForce: "DAY", account: c.nombre, cancelPrevious: false, iceberg: false })}`);
+    if (!j?.order?.clientId) throw new Error(`sin clientId: ${JSON.stringify(j).slice(0, 150)}`);
+  } catch (e) { log(`${c.nombre}: ERROR al apoyar ${pesos(monto)} al ${UMBRAL}%: ${e.message}`); await tg(`<b>CAUCIÓN ${c.nombre}</b>\nERROR al apoyar ${pesos(monto)} al ${UMBRAL}%: ${e.message}`); return; }
+  log(`${c.nombre}: apoyada ${pesos(monto)} al ${UMBRAL}% (se ejecuta sola si alguien coloca a esa tasa o menos)`);
+  await tg(`<b>CAUCIÓN ${c.nombre}</b>\nApoyé ${pesos(monto)} tomadora al ${UMBRAL}%. Si alguien coloca a ${UMBRAL}% o menos, se ejecuta sola. Si a las ${String(HORA_LIMITE).replace(/(\d\d)$/, ":$1")} no se ejecutó, la cancelo y tomo a la punta.`);
+}
+// En la hora límite: se cancelan las apoyadas al UMBRAL que sigan vivas (lo
+// ejecutado queda) para tomar el resto a la punta. Solo las del UMBRAL: una
+// tomadora que cargue LP a mano a otra tasa se respeta.
+async function cancelarApoyadas(c, cau) {
+  const mias = cau.vivasLista.filter((o) => Math.abs(o.price - UMBRAL) < 0.05);
+  for (const o of mias) await api(c, `/rest/order/cancelById?${q({ clOrdId: o.clOrdId, proprietary: o.proprietary || "" })}`).catch((e) => log(`${c.nombre}: cancelar apoyada: ${e.message}`));
+  if (mias.length) { log(`${c.nombre}: hora límite: cancelo ${mias.length} apoyada(s) al ${UMBRAL}% (${pesos(mias.reduce((a, o) => a + o.leaves, 0))} sin ejecutar)`); await dormir(3000); }
+  return mias.length;
+}
+
 /* ───────── ciclo ───────── */
 async function cuenta(c) {
   const hm = hhmmAr();
   const saldo = await saldoContado(c);
-  const cau = await caucionesHoy(c);
+  let cau = await caucionesHoy(c);
+  if (REAL && hm >= HORA_LIMITE && (await cancelarApoyadas(c, cau))) cau = await caucionesHoy(c);
+  if (REAL && c.ejecVisto != null && cau.ejec > c.ejecVisto && hm < HORA_LIMITE) { log(`${c.nombre}: se ejecutó la apoyada: ${pesos(cau.ejec - c.ejecVisto)}`); await tg(`<b>CAUCIÓN ${c.nombre}</b>\nSe ejecutó la apoyada: ${pesos(cau.ejec - c.ejecVisto)} al ${UMBRAL}% o menos.`); }
+  c.ejecVisto = cau.ejec;
   const descubierto = Math.max(0, -saldo + AJUSTE_APP);
   const cubierto = cau.ejec + cau.vivas + (REAL ? 0 : c.tomado);   // en simulado no hay orden que leer
   const faltante = Math.ceil(Math.max(0, descubierto + BUFFER - cubierto) / 10_000) * 10_000;
@@ -189,6 +221,8 @@ async function cuenta(c) {
     await tomar(c, faltante, tasa, `hora límite, tasa ${tasa}%`);
   } else if (hm >= HORA_OPORTUNA && tasa <= UMBRAL) {
     await tomar(c, faltante, tasa, `tasa baja ${tasa}% ≤ ${UMBRAL}%`);
+  } else if (hm >= HORA_OPORTUNA) {
+    await apoyar(c, faltante);
   }
 }
 
