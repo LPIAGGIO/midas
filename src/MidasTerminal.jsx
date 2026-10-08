@@ -46309,6 +46309,9 @@ function BotScalpingModule() {
               const prev = histDias[i + 1];
               return d.total + (latDe(d) ?? 0) - (prev ? latDe(prev) ?? 0 : 0);
             });
+            // Totalizador (LP 08/10): la suma de los resultados del día es lo que se ganó
+            // o perdió de verdad en estas ruedas; da igual al resultado total.
+            const sumRes = resDia.reduce((a, x) => a + (x || 0), 0);
             const porRueda = acum / n, pct = (x, base) => (base > 0 ? (x / base) * 100 : null);
             const f2 = (x) => (x == null ? "—" : `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(x).toFixed(2).replace(".", ",")}%`);
             const tnaInv = pct(porRueda, inv) != null ? pct(porRueda, inv) * 250 : null;
@@ -46348,7 +46351,8 @@ function BotScalpingModule() {
                       {cuentas.map(([c]) => <td key={c} style={{ ...td, color: color(porC[c] || 0), fontWeight: 700 }}>{porC[c] != null ? conSigno(porC[c]) : "—"}</td>)}
                       <td style={{ ...td, color: color(acum), fontWeight: 700 }}>{conSigno(acum)}</td>
                       <td style={{ ...td, fontWeight: 700 }}>{vv}</td>
-                      <td style={td} /><td style={td} />
+                      <td style={{ ...td, color: C.muted, fontFamily: "'Roboto', sans-serif" }}>suma de los días</td>
+                      <td style={{ ...td, color: color(sumRes), fontWeight: 700, fontSize: 13 }} title="Suma del resultado de cada día: lo que se ganó o perdió de verdad en estas ruedas.">{conSigno(sumRes)}</td>
                     </tr>
                     <tr style={{ background: C.deep }}>
                       <td style={{ ...td, textAlign: "left", color: C.muted, fontFamily: "'Roboto', sans-serif" }}>Latente ahora (lo que sigue abierto)</td>
