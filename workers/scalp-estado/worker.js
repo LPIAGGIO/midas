@@ -27,15 +27,26 @@ const diaAr = (d = new Date()) => d.toLocaleDateString("en-CA", { timeZone: "Ame
 const hhmmAr = () => { const s = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }); return Number(s.slice(0, 2)) * 100 + Number(s.slice(3, 5)); };
 const num = (s) => Number(String(s).replace(/\./g, "").replace(",", "."));
 
+// Último precio bueno por papel, en disco: sobrevive a los reinicios.
+const ARCH_PX = path.join(__dirname, "precios-ult.json");
 let _feed = { t: 0, m: {} };
+try { _feed.m = JSON.parse(fs.readFileSync(ARCH_PX, "utf8")); } catch { /* primera vez */ }
 async function precios() {
   if (Date.now() - _feed.t < 25_000) return _feed.m;
   try {
     const r = await fetch("https://data912.com/live/arg_cedears", { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(12_000) });
     if (r.status === 200) {
-      const m = {};
-      for (const x of await r.json()) if (x?.symbol) m[String(x.symbol).toUpperCase()] = { bid: Number(x.px_bid) || null, ask: Number(x.px_ask) || null, last: Number(x.c) || null };
-      if (Object.keys(m).length > 50) _feed = { t: Date.now(), m };
+      const lista = await r.json();
+      if (Array.isArray(lista) && lista.length > 50) {
+        const m = { ..._feed.m };
+        for (const x of lista) {
+          if (!x?.symbol) continue;
+          const p = { bid: Number(x.px_bid) || null, ask: Number(x.px_ask) || null, last: Number(x.c) || null };
+          if (p.last || p.bid) m[String(x.symbol).toUpperCase()] = p;     // sin precio: queda el anterior
+        }
+        _feed = { t: Date.now(), m };
+        try { fs.writeFileSync(ARCH_PX, JSON.stringify(m)); } catch { /* no es grave */ }
+      }
     }
   } catch { /* se usa el último dato */ }
   return _feed.m;
@@ -119,12 +130,13 @@ async function pasada() {
       tenencia, costo, ancla: S.ancla ?? null, niveles,
       ordenes: (S.ordenes || []).filter((o) => !o.final).map((o) => ({ lado: o.lado, esc: o.nivel + 1, tipo: tipoDe(o.nivel), q: o.qty, px: o.px, ejecutado: o.cum })),
       bid: p.bid ?? null, ask: p.ask ?? null, ultimo: p.last ?? null,
-      latente: tenencia > 0 && ref ? Math.round(tenencia * ref - costo) : 0,
+      latente: tenencia > 0 ? (ref ? Math.round(tenencia * ref - costo) : null) : 0,
       pnl_dia: delDia ? Math.round(S.pnl || 0) : Math.round(b.pnlLog), ventas_dia: delDia ? (S.rondas || 0) : b.ventas,
       reforzado: !!S.reforzado, fin: delDia ? (S.fin || null) : null,
       eventos: b.ev.slice(-60),
     });
-    const latente = tenencia > 0 && ref ? Math.round(tenencia * ref - costo) : 0;
+    if (tenencia > 0 && !ref) continue;                       // sin precio no se pisa el resultado guardado
+    const latente = tenencia > 0 ? Math.round(tenencia * ref - costo) : 0;
     const extraMax = Number(cfg.SCALP_LATERAL_MIN || 0) > 0 ? Number(cfg.SCALP_LATERAL_MAX || 4) * Math.max(1, Math.round(lote * Number(cfg.SCALP_LATERAL_FRAC || 0.5))) : 0;
     const expo = Math.round((max * (1 + Number(cfg.SCALP_REFUERZO_FRAC || 0)) + extraMax) * (p.ask || p.last || p.bid || 0));
     resultados.push({ user_id: USER_ID, fecha: hoy, cuenta: b.cuenta, ticker: b.ticker, pnl: Math.round(b.pnlLog), ventas: b.ventas, comprado: Math.round(b.comprado), vendido: Math.round(b.vendido), tenencia_cierre: tenencia, costo_cierre: costo, latente_cierre: latente, exposicion_max: expo });
@@ -134,7 +146,8 @@ async function pasada() {
   if (error) log(`scalp_estado: ${error.message}`);
   // El resultado del día solo se escribe en días hábiles (no pisar con ceros un feriado).
   const dow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" })).getDay();
-  if (dow >= 1 && dow <= 5 && hhmmAr() >= 1035) {
+  // Hasta las 17:30: después el cierre queda quieto (no lo pisa una pasada sin precio).
+  if (dow >= 1 && dow <= 5 && hhmmAr() >= 1035 && hhmmAr() <= 1730 && resultados.length) {
     const { error: e2 } = await sb.from("scalp_resultados").upsert(resultados, { onConflict: "user_id,fecha,cuenta,ticker" });
     if (e2) log(`scalp_resultados: ${e2.message}`);
   }
