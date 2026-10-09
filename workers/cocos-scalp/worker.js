@@ -122,7 +122,8 @@ const log = (...a) => console.log(`[${new Date().toISOString()}] [scalp ${TK}]`,
 const pesos = (n) => (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("es-AR");
 const diaAr = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 const hhmmAr = () => { const s = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }); return Number(s.slice(0, 2)) * 100 + Number(s.slice(3, 5)); };
-const esHabil = () => { const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" })).getDay(); return d >= 1 && d <= 5; };
+const FERIADOS = new Set(["2026-10-12", ...String(ENV.SCALP_FERIADOS || "").split(/[ ,]+/).filter(Boolean)]);
+const esHabil = () => { const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" })).getDay(); return d >= 1 && d <= 5 && !FERIADOS.has(diaAr()); };
 const dormir = (ms) => new Promise((ok) => setTimeout(ok, FAKE ? ms / 200 : ms));
 if (!ENV.user || !ENV.pass) { console.error("faltan credenciales de Cocos (workers/cocos-bot/.env)"); process.exit(1); }
 

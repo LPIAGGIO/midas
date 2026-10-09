@@ -21,6 +21,10 @@ DIAS = {
                     'META': 48280, 'AAPL': 27180, 'MSFT': 28300, 'AMZN': 2915},
                    {'72404': {'AAPL': 1340, 'AMD': 5150, 'AMZN': 7703, 'GOOGL': 0, 'INTC': -343900, 'META': -109200, 'MSFT': 360, 'MU': 13450, 'NVDA': -45760, 'SNDK': -90140},
                     '3893': {'AAPL': 4280, 'AMD': 13625, 'AMZN': 3937, 'GOOGL': 0, 'INTC': -289300, 'META': -90800, 'MSFT': 2520, 'MU': -2775, 'NVDA': -41280, 'SNDK': -62930}}),
+    '2026-10-09': ({'MU': 334600, 'SNDK': 15200, 'NVDA': 15530, 'GOOGL': 9700, 'AMD': 100150, 'INTC': 34560,
+                    'META': 48400, 'AAPL': 27500, 'MSFT': 28100, 'AMZN': 2860},           # cierre 08/10 (data912)
+                   {'72404': {'AAPL': 7920, 'AMD': -111100, 'AMZN': -38501, 'GOOGL': -3680, 'INTC': -674780, 'META': -114180, 'MSFT': -20160, 'MU': -112175, 'NVDA': -194240, 'SNDK': -289790},
+                    '3893': {'AAPL': 4860, 'AMD': -127875, 'AMZN': -45939, 'GOOGL': -2085, 'INTC': -642740, 'META': -94800, 'MSFT': -21360, 'MU': -198350, 'NVDA': -160960, 'SNDK': -318130}}),
 }
 PREV, LAT_PREV = DIAS[DIA]
 # Escalón del bot → clave del simulador: 1-5 grilla (0-4), 6 refuerzo (99), 7+ lotes del lateral (100+)

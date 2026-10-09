@@ -1,0 +1,13 @@
+RUEDA DEL 2026-10-09 · vender lo verde al cierre del día anterior y arrancar limpio
+
+CUENTA 72404 · en verde al cierre anterior: AAPL (+7920)
+   papel   como corrió (a) limpio, precio (b) limpio, 1 esc. abajo
+   AAPL           -182             8844             8844   (venta de 18 a 27500, comisión 262)
+   TOTAL       -549468          -540443          -540443
+
+CUENTA 3893 · en verde al cierre anterior: AAPL (+4860)
+   papel   como corrió (a) limpio, precio (b) limpio, 1 esc. abajo
+   AAPL         -12152            10273            10273   (venta de 56 a 27500, comisión 816)
+   TOTAL       -429792          -407367          -407367
+
+LAS DOS CUENTAS · como corrió -979261 · (a) -947810 (+31451) · (b) -947810 (+31451)

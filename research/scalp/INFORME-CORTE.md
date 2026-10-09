@@ -374,3 +374,13 @@ Corrección: la variante (b) "reentrar un escalón abajo" seguía al precio vela
 - 07/10 (rueda alcista): como corrió +414.050 · (a) limpio al precio +13.777 (+3%) · (b) un escalón abajo −32.567 (−8%).
 - 08/10 (rueda bajista, semis −3% a −6%): como corrió −2.577.473 · (a) +178.202 · (b) +305.470. Casi todo es AMD: 46 papeles comprados arriba que vendidos al cierre del 07 no habrían cargado la caída.
 - Dos ruedas: (a) +192k, (b) +273k. La regla solo toca los papeles en verde; lo que más pesa (INTC, SNDK, NVDA en rojo) no cambia. Muestra chica; seguir midiendo hasta el viernes.
+
+## Candidato BRKB (08/10/2026, candidato.py BRK-B)
+
+Misma grilla que la 72404, USD, lote 460. Por 1000 de capital por día: 2 años horario BRK-B 0,57 (0,7%/0,5%) contra mediana de los 10 actuales ~0,97 (MU 3,23, SNDK 4,90, INTC 0,59, AAPL 0,59, MSFT 0,38); 60 días de 5 min BRK-B 0,00. Peor abierto −446 (el más bajo de todos). Correlación diaria con SOXX +0,05 (semis 0,64-0,81), volatilidad diaria 1,1%, rango del día 1,4%: ~1 vuelta por día. Liquidez en BYMA alcanza (~$2.500M por día, más que AMD, INTC y AAPL). Veredicto: diversifica de verdad pero casi no oscila; resta rendimiento por capital y no cubre la caída de los semis (correlación cero, no negativa).
+
+## Semana 05-09/10: 72404 contra 3893 y vender lo verde (cierre del 09/10)
+
+Resultado del día (realizado + cambio de latente): 05/10 72404 −272.983 / 3893 −198.092 · 06/10 −138.726 / −140.953 · 07/10 +306.607 / +225.981 · 08/10 −904.273 / −1.078.082 · 09/10 −213.330 / −221.610. Acumulado desde el 01/10: −2.768.075.
+Cinco ruedas: 72404 realizado 511.025 en 279 ventas (1.832 por venta), resultado −1.222.705; 3893 realizado 457.582 (−10%) en 163 ventas (2.807 por venta, +53%), resultado −1.412.756 (−190k). Invertido medio igual (~36M): el escalón ancho rige solo en ciclos nuevos y casi todo es arrastre.
+Vender lo verde, tres ruedas: (a) al precio +13.777, +178.202, +31.451 = +223.430; (b) un escalón abajo −32.567, +305.470, +31.451 = +304.354. El 09/10 solo AAPL estaba en verde.
