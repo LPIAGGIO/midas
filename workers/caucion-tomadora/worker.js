@@ -63,7 +63,10 @@ const BUFFER = Number(PROPIO.CAUCION_BUFFER_ARS || 0);
 const AJUSTE_APP = Number(PROPIO.CAUCION_AJUSTE_APP_ARS || 0);       // 07/10: la app y la API dan el mismo contado
 const MAX_DIA = Number(PROPIO.CAUCION_MAX_DIA_ARS || 150_000_000);
 const MINIMO = 100_000;                                         // lote mínimo del instrumento
-const SIMBOLO = "MERV - XMEV - PESOS - 1D";
+// Plazo más corto del día: 1D casi siempre; antes de un fin de semana largo es
+// 3D o 4D (el 1D no existe). Se resuelve una vez por día con la lista de Primary.
+const RE_CAUCION = /^MERV - XMEV - PESOS - (\d+)D$/;
+let _simbolo = { dia: null, s: "MERV - XMEV - PESOS - 1D" };
 const USER_ID = "cafc5a8c-1cee-4d57-a765-6aacf1acc661";
 const BASE = "https://api.cocos.xoms.com.ar";
 
@@ -71,7 +74,8 @@ const log = (...a) => console.log(`[${new Date().toISOString()}] [caucion]`, ...
 const pesos = (n) => "$" + Math.round(n).toLocaleString("es-AR");
 const hhmmAr = () => { const s = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }); return Number(s.slice(0, 2)) * 100 + Number(s.slice(3, 5)); };
 const diaAr = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-const esHabil = () => { const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" })).getDay(); return d >= 1 && d <= 5; };
+const FERIADOS = new Set(["2026-10-12", ...String(PROPIO.CAUCION_FERIADOS || "").split(/[ ,]+/).filter(Boolean)]);
+const esHabil = () => { const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" })).getDay(); return d >= 1 && d <= 5 && !FERIADOS.has(diaAr()); };
 const dormir = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const q = (o) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
 
@@ -122,7 +126,7 @@ async function caucionesHoy(c) {
   const hoy = diaAr().replace(/-/g, "");
   let ejec = 0, vivas = 0; const detalle = [], vivasLista = [];
   for (const o of j?.orders || []) {
-    if (o.instrumentId?.symbol !== SIMBOLO || o.side !== "BUY" || !String(o.transactTime || "").startsWith(hoy)) continue;
+    if (!RE_CAUCION.test(o.instrumentId?.symbol || "") || o.side !== "BUY" || !String(o.transactTime || "").startsWith(hoy)) continue;
     const cum = Number(o.cumQty) || 0, st = String(o.status || "").toUpperCase();
     ejec += cum;
     if (["NEW", "PENDING_NEW", "PARTIALLY_FILLED"].includes(st)) { vivas += Number(o.leavesQty) || 0; vivasLista.push({ clOrdId: o.clOrdId, proprietary: o.proprietary, price: Number(o.price), leaves: Number(o.leavesQty) || 0 }); }
@@ -130,8 +134,21 @@ async function caucionesHoy(c) {
   }
   return { ejec, vivas, detalle, vivasLista };
 }
+async function simbolo(c) {
+  if (_simbolo.dia === diaAr()) return _simbolo.s;
+  try {
+    const j = await api(c, "/rest/instruments/all");
+    const plazos = (j?.instruments || []).map((x) => RE_CAUCION.exec(x?.instrumentId?.symbol || "")).filter(Boolean).map((m) => Number(m[1]));
+    if (plazos.length) {
+      const n = Math.min(...plazos);
+      _simbolo = { dia: diaAr(), s: `MERV - XMEV - PESOS - ${n}D` };
+      log(`plazo de hoy: ${_simbolo.s}${n > 1 ? " (no hay 1D: fin de semana largo)" : ""}`);
+    }
+  } catch (e) { log(`plazo: ${e.message}; uso ${_simbolo.s}`); }
+  return _simbolo.s;
+}
 async function libro(c) {
-  const j = await api(c, `/rest/marketdata/get?${q({ marketId: "ROFX", symbol: SIMBOLO, entries: "BI,OF,LA", depth: 1 })}`);
+  const j = await api(c, `/rest/marketdata/get?${q({ marketId: "ROFX", symbol: await simbolo(c), entries: "BI,OF,LA", depth: 1 })}`);
   const md = j?.marketData || {};
   return { tomadores: md.BI?.[0]?.price ?? null, colocadores: md.OF?.[0]?.price ?? null, ultimo: md.LA?.price ?? null };
 }
@@ -145,7 +162,7 @@ async function tomar(c, monto, tasa, motivo) {
     const px = Math.round(tasa * 10) / 10;
     let id;
     try {
-      const j = await api(c, `/rest/order/newSingleOrder?${q({ marketId: "ROFX", symbol: SIMBOLO, price: px, orderQty: monto, ordType: "LIMIT", side: "BUY", timeInForce: "DAY", account: c.nombre, cancelPrevious: false, iceberg: false })}`);
+      const j = await api(c, `/rest/order/newSingleOrder?${q({ marketId: "ROFX", symbol: await simbolo(c), price: px, orderQty: monto, ordType: "LIMIT", side: "BUY", timeInForce: "DAY", account: c.nombre, cancelPrevious: false, iceberg: false })}`);
       id = j?.order; if (!id?.clientId) throw new Error(`sin clientId: ${JSON.stringify(j).slice(0, 150)}`);
     } catch (e) { log(`${c.nombre}: ERROR al mandar la caución ${pesos(monto)} al ${px}%: ${e.message}`); await tg(`<b>CAUCIÓN ${c.nombre}</b>\nERROR al mandar ${pesos(monto)} al ${px}%: ${e.message}`); return false; }
     log(`${c.nombre}: caución mandada ${pesos(monto)} al ${px}% (${motivo}), intento ${intento}`);
@@ -181,7 +198,7 @@ async function apoyar(c, monto) {
   if (c.tomado + monto > MAX_DIA) { log(`${c.nombre}: apoyar ${pesos(monto)} superaría el máximo diario ${pesos(MAX_DIA)}; no apoyo`); return; }
   if (!REAL) { if (!c.apoyadaSim) { log(`${c.nombre}: SIMULADO apoyaría ${pesos(monto)} al ${UMBRAL}%`); c.apoyadaSim = true; } return; }
   try {
-    const j = await api(c, `/rest/order/newSingleOrder?${q({ marketId: "ROFX", symbol: SIMBOLO, price: UMBRAL, orderQty: monto, ordType: "LIMIT", side: "BUY", timeInForce: "DAY", account: c.nombre, cancelPrevious: false, iceberg: false })}`);
+    const j = await api(c, `/rest/order/newSingleOrder?${q({ marketId: "ROFX", symbol: await simbolo(c), price: UMBRAL, orderQty: monto, ordType: "LIMIT", side: "BUY", timeInForce: "DAY", account: c.nombre, cancelPrevious: false, iceberg: false })}`);
     if (!j?.order?.clientId) throw new Error(`sin clientId: ${JSON.stringify(j).slice(0, 150)}`);
   } catch (e) { log(`${c.nombre}: ERROR al apoyar ${pesos(monto)} al ${UMBRAL}%: ${e.message}`); await tg(`<b>CAUCIÓN ${c.nombre}</b>\nERROR al apoyar ${pesos(monto)} al ${UMBRAL}%: ${e.message}`); return; }
   log(`${c.nombre}: apoyada ${pesos(monto)} al ${UMBRAL}% (se ejecuta sola si alguien coloca a esa tasa o menos)`);
