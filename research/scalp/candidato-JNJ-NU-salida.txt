@@ -1,0 +1,38 @@
+== JNJ contra los 10 papeles del scalp · misma grilla · USD, lote 460
+   velas 1h
+   JNJ      0.7%/0.50%     +1452     +1535     1060         1.45       -634           0.61
+   JNJ      0.5%/0.35%     +1298     +1424     1504         2.06       -601           0.52
+   velas 5m
+   JNJ      0.7%/0.50%      +140      +228      125         2.08       -268           0.83
+   JNJ      0.5%/0.35%       +81      +186      165         2.75       -259           0.45
+   correlación de retornos diarios contra SOXX (2 años) y rango medio del día
+   JNJ     correlación -0.20 · volatilidad diaria 1.2% · rango medio del día 1.6%
+   MU      correlación +0.81 · volatilidad diaria 4.5% · rango medio del día 4.4%
+   SNDK    correlación +0.64 · volatilidad diaria 6.6% · rango medio del día 7.7%
+   NVDA    correlación +0.67 · volatilidad diaria 2.8% · rango medio del día 3.5%
+   GOOGL   correlación +0.38 · volatilidad diaria 2.0% · rango medio del día 2.3%
+   AMD     correlación +0.78 · volatilidad diaria 4.0% · rango medio del día 4.1%
+   INTC    correlación +0.66 · volatilidad diaria 4.4% · rango medio del día 4.4%
+   META    correlación +0.38 · volatilidad diaria 2.5% · rango medio del día 2.7%
+   AAPL    correlación +0.34 · volatilidad diaria 1.8% · rango medio del día 2.0%
+   MSFT    correlación +0.27 · volatilidad diaria 1.8% · rango medio del día 1.9%
+   AMZN    correlación +0.43 · volatilidad diaria 2.1% · rango medio del día 2.3%
+== NU contra los 10 papeles del scalp · misma grilla · USD, lote 460
+   velas 1h
+   NU       0.7%/0.50%     +1910     +2376     1411         1.93      -1561           0.78
+   NU       0.5%/0.35%     +1459     +1956     1679         2.30      -1588           0.58
+   velas 5m
+   NU       0.7%/0.50%      +720      +720      220         3.67       -639           4.99
+   NU       0.5%/0.35%      +734      +734      288         4.80       -670           4.66
+   correlación de retornos diarios contra SOXX (2 años) y rango medio del día
+   NU      correlación +0.34 · volatilidad diaria 2.8% · rango medio del día 3.4%
+   MU      correlación +0.81 · volatilidad diaria 4.5% · rango medio del día 4.4%
+   SNDK    correlación +0.64 · volatilidad diaria 6.6% · rango medio del día 7.7%
+   NVDA    correlación +0.67 · volatilidad diaria 2.8% · rango medio del día 3.5%
+   GOOGL   correlación +0.38 · volatilidad diaria 2.0% · rango medio del día 2.3%
+   AMD     correlación +0.78 · volatilidad diaria 4.0% · rango medio del día 4.1%
+   INTC    correlación +0.66 · volatilidad diaria 4.4% · rango medio del día 4.4%
+   META    correlación +0.38 · volatilidad diaria 2.5% · rango medio del día 2.7%
+   AAPL    correlación +0.34 · volatilidad diaria 1.8% · rango medio del día 2.0%
+   MSFT    correlación +0.27 · volatilidad diaria 1.8% · rango medio del día 1.9%
+   AMZN    correlación +0.43 · volatilidad diaria 2.1% · rango medio del día 2.3%

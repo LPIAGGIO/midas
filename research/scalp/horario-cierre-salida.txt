@@ -1,0 +1,20 @@
+== últimos 45 minutos · 60 días · 10 papeles (600 papel-días) · hora BYMA
+   vela   % volumen día  precio vs 16:15   vela con el máximo
+   16:15          0.9%          +0.013%                 16%
+   16:20          0.8%          +0.002%                  6%
+   16:25          0.9%          +0.026%                  8%
+   16:30          1.1%          +0.026%                 10%
+   16:35          1.1%          -0.025%                  5%
+   16:40          1.1%          -0.041%                  4%
+   16:45          1.5%          -0.006%                  6%
+   16:50          2.2%          -0.030%                 18%
+   16:55          5.2%          -0.070%                 27%
+
+== grilla de la 3893 (2x, regla G, vende lo verde y reentra un escalón abajo) según la hora de la venta
+   hora      resultado  realizado  por 1000/día peor abierto
+   16:30         +3945      +4917          3.51        -4839
+   16:40         +4362      +5384          4.11        -4808
+   16:45         +4630      +5705          4.44        -4801
+   16:50         +4198      +5221          3.74        -5106
+   16:55         +4996      +6084          4.33        -5131
+   17:00         +4996      +6084          4.33        -5131

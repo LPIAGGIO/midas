@@ -384,3 +384,17 @@ Misma grilla que la 72404, USD, lote 460. Por 1000 de capital por día: 2 años 
 Resultado del día (realizado + cambio de latente): 05/10 72404 −272.983 / 3893 −198.092 · 06/10 −138.726 / −140.953 · 07/10 +306.607 / +225.981 · 08/10 −904.273 / −1.078.082 · 09/10 −213.330 / −221.610. Acumulado desde el 01/10: −2.768.075.
 Cinco ruedas: 72404 realizado 511.025 en 279 ventas (1.832 por venta), resultado −1.222.705; 3893 realizado 457.582 (−10%) en 163 ventas (2.807 por venta, +53%), resultado −1.412.756 (−190k). Invertido medio igual (~36M): el escalón ancho rige solo en ciclos nuevos y casi todo es arrastre.
 Vender lo verde, tres ruedas: (a) al precio +13.777, +178.202, +31.451 = +223.430; (b) un escalón abajo −32.567, +305.470, +31.451 = +304.354. El 09/10 solo AAPL estaba en verde.
+
+## Todas las perillas juntas (09/10/2026, mejor_idea.py)
+
+Escalón 1x/1,5x/2x × horario A/B/G × cierre (nada / vende lo verde y reentra al precio / un escalón abajo, ahora con la reentrada fija corregida en grilla5y: cierre_reent). Por 1000 de capital medio por día:
+- 2 años horario: 1x·A·nada 1,31 · 1,5x·A·nada 1,51 · 2x·A·nada 1,58 · mejor 1,5x·G·verde al precio 1,70.
+- 60 días 5 min: 1x·A·nada 2,19 · 1,5x·A 2,81 · 2x·A 3,17 · mejor 2x·G·verde un escalón abajo 4,29.
+- Lo robusto (las dos muestras): el escalón ancho gana (1,5x a 2x, +15% a +45% por capital). Horario: B/G ayudan con escalón 1x (+16% en 2 años), casi nada con escalón ancho. Vender lo verde: depende del régimen (en 2 años resta en pesos absolutos, en 60 días bajistas suma): no es robusto. El peor abierto casi no cambia con ninguna perilla (−16k a −18k en 2 años): el riesgo es estar comprado en semis, no la configuración.
+- La "reentrada un escalón abajo" de las simulaciones viejas seguía al precio vela a vela: el −23% de esa variante era el error, no la idea.
+
+## Hora de vender lo verde, JNJ y NU (09/10/2026, horario_cierre.py y candidato.py)
+
+Últimos 45 min (60 días, 10 papeles): la vela 16:55 lleva 5,2% del volumen del día (3-5 veces una vela normal) y el 27% de los máximos de ese tramo; 16:50 el 18%. El precio medio no sube hacia el cierre (−0,07% vs 16:15): son picos para los dos lados. Grilla 3893 (2x, G, vende lo verde y reentra un escalón abajo) por 1000 de capital/día según la hora: 16:30 3,51 · 16:40 4,11 · 16:45 4,44 (mejor) · 16:50 3,74 · cierre 4,33. Decisión de LP: 16:45.
+Candidatos (por 1000 de capital/día; mediana de los actuales 0,97 en 2 años): JNJ 0,61 / 0,83 (60 d), correlación con SOXX −0,20, peor abierto −634, pero ~$264M/día en BYMA (poco). NU 0,78 / 4,99 (60 d, con el salto de Brasil), correlación +0,34, $7.454M/día. LP suma los dos (lote 36 y 81, ~$1M por escalón).
+Configuración desde el martes 13/10 (configurar-martes.sh): 72404 escalón 1,5x, regla G, no vende lo verde; 3893 escalón 2x, regla G, vende lo verde 16:45 y reentra un escalón abajo. Volumen igual una semana más.

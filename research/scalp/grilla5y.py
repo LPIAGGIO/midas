@@ -42,7 +42,7 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None):
     """corte=None → holdea sin limite. Devuelve metricas en USD."""
     # doble: con la grilla llena, si el precio cae a ancla*(1 - doble*profundidad) compra
     # OTRA VEZ la misma cantidad que tiene y pasa a salir todo junto en promedio + gan.
@@ -199,7 +199,8 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         # esta en ganancia ('papel': todo el papel si su latente es positivo;
         # 'lote': cada lote con precio arriba de su costo) y deja lo que esta en
         # rojo. Lo vendido arranca ciclo nuevo al dia siguiente.
-        if cierre_ganadores and lots and (i + 1 == len(bars) or bars[i + 1][0] != fecha):
+        # cierre_en (09/10): índices de las velas donde se vende lo verde (por hora); si no, la última del día
+        if cierre_ganadores and lots and ((i in cierre_en) if cierre_en else (i + 1 == len(bars) or bars[i + 1][0] != fecha)):
             if cierre_ganadores == 'papel':
                 if sum(u * c / E['fx'] - cusd for (_, u, cusd) in lots.values()) > 0:
                     for kk in list(lots):
@@ -212,6 +213,11 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                 E['ancla'] = None
                 E['reent'] = None
                 E['parado'] = fecha
+                if cierre_reent:
+                    # (09/10) al día siguiente la primera compra queda apoyada un escalón
+                    # abajo de este cierre; si en cierre_reent velas no se ejecutó, sigue al precio
+                    E['reent'] = c * (1 - E['pg'][0])
+                    E['espera'] = cierre_reent
         if cierre_vende and (i + 1 == len(bars) or bars[i + 1][0] != fecha):
             # ultima vela del dia: vende todo al cierre y mañana arranca de cero
             for kk in list(lots):

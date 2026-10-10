@@ -109,6 +109,14 @@ const HORA_ULTIMO_CICLO = Number(ENV.SCALP_HORA_ULTIMO_CICLO || 1645);
 const REANCLA_MS = Number(ENV.SCALP_REANCLA_MIN || 10) * 60_000;
 const REAL = ENV.SCALP_REAL === "1";
 const CIERRE_VENDE = ENV.SCALP_CIERRE_VENDE === "1";    // por defecto NO vende al cierre: arrastra
+// VENDER LO VERDE (LP 09/10/2026): a esta hora (hhmm) vende todo el papel si está en
+// ganancia neta a la punta compradora; 0 = apagado. Al día siguiente reentra un
+// escalón abajo del precio de venta (hasta CIERRE_VERDE_REENTRADA) o, si no bajó, al precio.
+const CIERRE_VERDE = Number(ENV.SCALP_CIERRE_VERDE || 0);
+const CIERRE_VERDE_REENTRADA = Number(ENV.SCALP_CIERRE_VERDE_REENTRADA || 1640);
+// REGLA G (LP 09/10/2026): con HORA_COMPRAS > HORA_INICIO, si el papel abre este
+// porcentaje (o más) abajo del cierre anterior, compra desde la apertura. 0 = apagada.
+const APERTURA_BAJA = Number(ENV.SCALP_APERTURA_BAJA || 0);
 const CHEQUEO = process.argv.includes("--chequeo");
 const SOLO_SYNC = process.argv.includes("--sincronizar"); // actualiza el estado contra Primary y sale
 const FEE = 0.00044 * 1.21;                              // 0,053% por punta (intradía)
@@ -116,14 +124,21 @@ const FEE = 0.00044 * 1.21;                              // 0,053% por punta (in
 // azar y reloj acelerado. node worker.js con SCALP_FAKE=1 en el entorno.
 const FAKE = !REAL && process.env.SCALP_FAKE === "1";
 const CICLO_MS = FAKE ? 10 : 4000;
+// Reloj de la simulación: un minuto por ciclo desde SCALP_FAKE_HORA; después de
+// las 17:05 pasa al día hábil siguiente a la misma hora de arranque.
+let fakeMin = 0, fakeDias = 0;
+const fakeHm = () => { const b = Number(process.env.SCALP_FAKE_HORA || 1031); const m = Math.floor(b / 100) * 60 + (b % 100) + fakeMin; return Math.floor(m / 60) * 100 + (m % 60); };
+// SCALP_FAKE_GAP: salto de la apertura contra el cierre anterior (p. ej. -0.02), para probar la regla G.
+const fakeTick = () => { fakeMin++; if (fakeHm() >= 1705) { fakeMin = 0; fakeDias++; _fk = Math.round(_fk * (1 + Number(process.env.SCALP_FAKE_GAP || 0))); } };
+const fakeDia = () => { const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" })); let n = fakeDias; while (n > 0) { d.setDate(d.getDate() + 1); if (d.getDay() >= 1 && d.getDay() <= 5) n--; } return d.toLocaleDateString("en-CA"); };
 const FINAL = new Set(["FILLED", "CANCELLED", "REJECTED", "EXPIRED"]);
 
 const log = (...a) => console.log(`[${new Date().toISOString()}] [scalp ${TK}]`, ...a);
 const pesos = (n) => (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("es-AR");
-const diaAr = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-const hhmmAr = () => { const s = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }); return Number(s.slice(0, 2)) * 100 + Number(s.slice(3, 5)); };
+const diaAr = () => (FAKE ? fakeDia() : new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+const hhmmAr = () => { if (FAKE) return fakeHm(); const s = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour12: false }); return Number(s.slice(0, 2)) * 100 + Number(s.slice(3, 5)); };
 const FERIADOS = new Set(["2026-10-12", ...String(ENV.SCALP_FERIADOS || "").split(/[ ,]+/).filter(Boolean)]);
-const esHabil = () => { const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" })).getDay(); return d >= 1 && d <= 5 && !FERIADOS.has(diaAr()); };
+const esHabil = () => { if (FAKE) return true; const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" })).getDay(); return d >= 1 && d <= 5 && !FERIADOS.has(diaAr()); };
 const dormir = (ms) => new Promise((ok) => setTimeout(ok, FAKE ? ms / 200 : ms));
 if (!ENV.user || !ENV.pass) { console.error("faltan credenciales de Cocos (workers/cocos-bot/.env)"); process.exit(1); }
 
@@ -164,6 +179,12 @@ const alTick = (px, modo) => {
   if (tickDe(r) !== tickDe(px)) r = redondear(r, tickDe(r), modo);     // el redondeo cruzó de banda
   return Math.round(r * 1000) / 1000;
 };
+// Cierre de la rueda anterior según Primary (entrada CL). Respaldo de S.cierrePrev.
+async function cierreAnterior() {
+  if (FAKE) return null;
+  const j = await api("GET", `/rest/marketdata/get?${q({ marketId: "ROFX", symbol: simbolo(), entries: "CL", depth: 1 })}`);
+  return Number(j?.marketData?.CL?.price) || null;
+}
 async function disponible24() {
   const j = await api("GET", `/rest/risk/accountReport/${CUENTA}`);
   return Number(j?.accountData?.detailedAccountReports?.["1"]?.availableToOperate?.total) || 0;
@@ -333,6 +354,8 @@ async function colocar(lado, nivel, qty, px) {
   // Si la respuesta se pierde, la orden queda como "dudosa" y se busca en las
   // activas antes de volver a mandar (no duplicar).
   const o = { id: null, lado, nivel, qty, px, cum: 0, avg: 0, final: false, t: Date.now(), duda: false };
+  // Seguro (09/10/2026, lo atrapó el banco de prueba): nunca mandar un precio o cantidad inválidos.
+  if (!(px > 0) || !(qty > 0) || !Number.isFinite(px)) { rechazos++; log(`ERROR orden ${lado} escalón ${nivel + 1} con precio/cantidad inválidos (${qty} × ${px}): no la mando`); return; }
   try {
     o.id = await ordenNueva(lado, qty, px);
     S.ordenes.push(o); guardar(); rechazos = 0;
@@ -392,7 +415,7 @@ async function sincronizar(b) {
   guardar();
 }
 async function cancelar(o, motivo) {
-  if (o.final || o.duda || (o.cancelT && Date.now() - o.cancelT < 20_000)) return;
+  if (o.final || o.duda || (o.cancelT && Date.now() - o.cancelT < (FAKE ? 100 : 20_000))) return;
   o.cancelT = Date.now();
   try { await ordenCancelar(o.id); log(`cancelo ${o.lado === "BUY" ? "compra" : "venta"} escalón ${o.nivel + 1} (${motivo})`); }
   catch (e) { log(`cancelar ${o.id}: ${e.message}`); }
@@ -434,6 +457,8 @@ async function cerrarDia() {
   }
   const n = heldTot(), costo = S.niveles.reduce((a, x) => a + x.costo, 0);
   S.fin = n ? `cierre de la rueda: quedan ${n} papeles abiertos para mañana (costo ${pesos(costo)})` : "cierre de la rueda: sin papeles";
+  const bc = await libro().catch(() => null);                       // cierre de hoy, para la regla G de mañana
+  if (bc && (bc.last > 0 || bc.bid > 0)) S.cierrePrev = bc.last || bc.bid;
   guardar();
   log(`CIERRE del día (${S.fin}) · ${S.rondas} ventas · P&L realizado ${pesos(S.pnl)}`);
   // Sin Telegram por bot: el detalle de todos sale junto en el resumen de las 17:03.
@@ -454,8 +479,60 @@ async function nuevoDia() {
     if (t != null && t < n) { S.fin = `la cuenta tiene ${t} ${TK} y el bot lleva ${n}: no opero hasta revisar`; log(`ERROR ${S.fin}`); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\n${S.fin}`); }
     S.base = t != null ? t - n : null;
   }
+  // Regla G: ¿abrió APERTURA_BAJA abajo del cierre anterior? Entonces compra desde ya.
+  S.horaCompras = HORA_COMPRAS;
+  if (APERTURA_BAJA > 0 && HORA_COMPRAS > HORA_INICIO) {
+    let prev = S.cierrePrev > 0 ? S.cierrePrev : null;
+    if (!prev) prev = await cierreAnterior().catch((e) => { log(`cierre anterior: ${e.message}`); return null; });
+    const b0 = await libro();
+    const ref = b0.bid > 0 ? b0.bid : b0.last;
+    if (prev > 0 && ref > 0) {
+      const var_ = ref / prev - 1;
+      if (var_ <= -APERTURA_BAJA) { S.horaCompras = HORA_INICIO; log(`abre ${(var_ * 100).toFixed(2)}% contra el cierre anterior ${pesos(prev)}: compro desde la apertura (regla G)`); }
+      else log(`abre ${(var_ * 100).toFixed(2)}% contra el cierre anterior ${pesos(prev)}: compro desde las ${HORA_COMPRAS}`);
+    } else log(`sin cierre anterior o sin libro: compro desde las ${HORA_COMPRAS}`);
+  }
+  // Vendió lo verde ayer: la primera compra queda un escalón abajo de ese precio
+  // hasta CIERRE_VERDE_REENTRADA; si no bajó, entra al precio (ver la compra del escalón 1).
+  if (S.cierreVerde && S.cierreVerde.dia !== diaAr() && n === 0) {
+    S.reentrada = { px: alTick(S.cierreVerde.px * (1 - PASO), "abajo"), hastaHm: CIERRE_VERDE_REENTRADA, dia: diaAr(), verde: true };
+    log(`ayer vendí lo verde a ${pesos(S.cierreVerde.px)}: reentro un escalón abajo, a ${pesos(S.reentrada.px)}, hasta las ${CIERRE_VERDE_REENTRADA}; si no baja, al precio`);
+    S.cierreVerde = null;
+  }
   guardar();
-  log(`arranco la rueda con ${n} papeles de ayer · ancla ${S.ancla ? pesos(S.ancla) : "—"}${HORA_COMPRAS > HORA_INICIO ? ` · hasta las ${HORA_COMPRAS} solo vendo, no compro` : ""}`);
+  log(`arranco la rueda con ${n} papeles de ayer · ancla ${S.ancla ? pesos(S.ancla) : "—"}${S.horaCompras > HORA_INICIO ? ` · hasta las ${S.horaCompras} solo vendo, no compro` : ""}`);
+}
+
+/* Vender lo verde (LP 09/10/2026): si el papel está en ganancia neta a la punta
+ * compradora, cancela todo y lo vende entero a la punta. Si mientras tanto deja
+ * de estar en verde, se queda con los papeles (siguen con sus ventas). */
+async function venderVerde(b) {
+  const costoDe = () => S.niveles.reduce((a, n) => a + n.costo, 0);
+  const verde = (bid) => { const t = heldTot(), c = costoDe(); return t * bid - c - FEE * (t * bid + c); };
+  const g0 = verde(b.bid);
+  if (g0 <= 0) { log(`${CIERRE_VERDE}: no está en verde (${pesos(g0)} neto a ${pesos(b.bid)}): sigo con los ${heldTot()} papeles`); return; }
+  log(`${CIERRE_VERDE}: VENDO LO VERDE · ${heldTot()} papeles · ${pesos(g0)} neto a la punta ${pesos(b.bid)}`);
+  for (let i = 0; i < 12 && vivas().length; i++) { for (const o of vivas()) { o.cancelT = 0; await cancelar(o, "vender lo verde"); } await dormir(2500); await sincronizar(await libro()).catch((e) => log(`sync: ${e.message}`)); }
+  const desde = Date.now();
+  for (let intento = 0; intento < 4 && heldTot() > 0; intento++) {
+    const bb = await libro();
+    if (!(bb.bid > 0)) { await dormir(5000); continue; }
+    if (verde(bb.bid) <= 0) { log(`dejó de estar en verde a ${pesos(bb.bid)}: me quedo con los ${heldTot()} papeles`); break; }
+    const tot = heldTot(), costo = costoDe();
+    S.niveles.forEach((n, k) => { n.held = k === 0 ? tot : 0; n.costo = k === 0 ? costo : 0; });
+    await colocar("SELL", 0, tot, alTick(bb.bid, "abajo"));
+    for (let i = 0; i < 8 && vivas().length; i++) { await dormir(2500); await sincronizar(await libro()).catch((e) => log(`sync: ${e.message}`)); }
+    for (const o of vivas()) { o.cancelT = 0; await cancelar(o, "reintento de vender lo verde"); }
+    await dormir(2500); await sincronizar(await libro()).catch(() => {});
+  }
+  const ventas = S.ordenes.filter((o) => o.lado === "SELL" && o.t >= desde && o.cum > 0);
+  const qv = ventas.reduce((a, o) => a + o.cum, 0), pv = qv ? ventas.reduce((a, o) => a + o.cum * o.avg, 0) / qv : null;
+  if (heldTot() === 0 && pv) {
+    S.cierreVerde = { px: pv, dia: diaAr() };
+    S.ancla = null; S.reforzado = false; S.reentrada = null;
+    log(`vendí lo verde: ${qv} papeles a ${pesos(pv)} · P&L del día ${pesos(S.pnl)} · mañana reentro un escalón abajo`);
+  } else log(`vender lo verde: quedan ${heldTot()} papeles (vendí ${qv}); siguen con su venta normal`);
+  guardar();
 }
 
 // Antes de abrir la rueda: ¿la cuenta ya informa los papeles que el bot lleva?
@@ -477,6 +554,7 @@ async function tenenciaLista() {
 }
 
 async function ciclo() {
+  if (FAKE) fakeTick();
   if (S.dia !== diaAr()) { if (!esHabil() || hhmmAr() < HORA_INICIO) return; if (!(await tenenciaLista())) return; await nuevoDia(); }
   const b = await libro();
   await sincronizar(b);
@@ -487,6 +565,10 @@ async function ciclo() {
   if (!esHabil() || hm < HORA_INICIO) return;
   if (rechazos >= 3 || rechMercado >= 5) { for (const o of vivas()) await cancelar(o, "rechazos"); S.fin = rechMercado >= 5 ? "cinco órdenes rechazadas por el mercado" : "tres órdenes rechazadas seguidas"; guardar(); log(`ERROR ${S.fin}: me detengo, revisar a mano (tengo ${heldTot()} papeles)`); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\nTres órdenes rechazadas seguidas: me detuve con ${heldTot()} papeles. Revisar a mano.`); return; }
   if (!(b.bid > 0) || !(b.ask > 0)) return;                       // sin libro no se decide nada
+  if (CIERRE_VERDE > 0 && hm >= CIERRE_VERDE && S.verdeDia !== diaAr()) {
+    S.verdeDia = diaAr(); guardar();
+    if (heldTot() > 0) return venderVerde(b);
+  }
   const tot = heldTot();
   const abierto = tot > 0 ? tot * b.bid - S.niveles.reduce((a, n) => a + n.costo, 0) : 0;
   if (S.ancla && b.bid <= S.ancla * (1 - CORTE)) return liquidar(`cayó ${(CORTE * 100).toFixed(1)}% desde el ancla ${pesos(S.ancla)}`);
@@ -541,12 +623,14 @@ async function ciclo() {
   const compras = vs.filter((o) => o.lado === "BUY" && !esExtra(o.nivel));
   for (const c of compras) if (c.nivel !== deseado && c.cum === 0 && !(c.nivel === NIVEL_REF && llena)) await cancelar(c, "la grilla se movió");
   const c0 = compras.find((c) => c.nivel === 0 && c.cum === 0);
-  const enReentrada = S.reentrada && Date.now() < S.reentrada.hasta;
+  // La reentrada por hora (después de vender lo verde) vale hasta hastaHm de ese día; la de REANCLA, por tiempo.
+  const enReentrada = !!S.reentrada && (S.reentrada.hastaHm ? (S.reentrada.dia === diaAr() && hm < S.reentrada.hastaHm) : Date.now() < S.reentrada.hasta);
+  const alPrecioCierre = !!S.reentrada && S.reentrada.verde && S.reentrada.dia === diaAr() && !enReentrada;   // no bajó: entra al precio
   const tarde = hm >= HORA_ULTIMO_CICLO;
-  const temprano = hm < HORA_COMPRAS;            // todavía solo se vende lo arrastrado
+  const temprano = hm < (S.horaCompras || HORA_COMPRAS);   // todavía solo se vende lo arrastrado
   if (temprano) S.ultOp = Date.now();            // el reloj del lateral arranca con las compras
   if (c0 && h === -1 && tarde) await cancelar(c0, "ya no se abren ciclos nuevos hoy");
-  else if (c0 && h === -1 && !enReentrada && b.bid > c0.px * 1.001 && Date.now() - c0.t > 60_000) await cancelar(c0, "el precio se alejó");
+  else if (c0 && h === -1 && !enReentrada && b.bid > c0.px * 1.001 && Date.now() - c0.t > (FAKE ? 300 : 60_000)) await cancelar(c0, "el precio se alejó");
   // Refuerzo: grilla llena, sin refuerzo previo en este ciclo.
   if (REFUERZO_FRAC > 0 && !S.reforzado && !compras.length && S.ancla && llena && ref.held === 0 && !pausaCompras && !temprano) {
     const pxRef = alTick(S.ancla * (1 - REFUERZO_MULT * pasoC() * (NIVELES - 1)), "abajo");
@@ -555,8 +639,10 @@ async function ciclo() {
   }
   if (!S.reforzado && !compras.length && deseado < NIVELES && totG + LOTE <= MAX && !pausaCompras && !temprano && (deseado === 0 ? !tarde : S.ancla)) {
     let px;
-    if (deseado === 0) px = enReentrada && b.bid > S.reentrada.px ? S.reentrada.px : b.bid;
-    else px = Math.min(alTick(S.ancla * (1 - pasoC() * deseado), "abajo"), b.ask);
+    if (deseado === 0) {
+      px = enReentrada && b.bid > S.reentrada.px ? S.reentrada.px : alPrecioCierre ? alTick(b.ask, "arriba") : b.bid;
+      if (alPrecioCierre) log(`no bajó al escalón de reentrada ${pesos(S.reentrada.px)}: entro al precio de cierre`);
+    } else px = Math.min(alTick(S.ancla * (1 - pasoC() * deseado), "abajo"), b.ask);
     await colocar("BUY", deseado, LOTE, px);
   }
   // Regla del lateral: una hora sin ejecuciones y pocos escalones cargados → un

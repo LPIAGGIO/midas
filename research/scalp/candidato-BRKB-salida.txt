@@ -1,0 +1,44 @@
+== BRK-B contra los 10 papeles del scalp · misma grilla · USD, lote 460
+
+   velas 1h
+   papel   paso/gan     resultado realizado  vueltas  vueltas/día peor abierto por 1000 capital/día
+   BRK-B    0.7%/0.50%     +1328     +1366      909         1.25       -446           0.57
+   BRK-B    0.5%/0.35%      +610      +735      779         1.07       -535           0.23
+   MU       1.0%/0.70%     +6935     +7199     1724         2.36      -1932           3.23
+   SNDK     1.5%/1.00%     +6339     +7218     1461         3.57      -2221           4.90
+   NVDA     1.0%/0.70%     +4622     +4725     1626         2.23      -1465           1.98
+   GOOGL    0.7%/0.50%     +2439     +2964     1403         1.92      -1233           0.97
+   AMD      1.0%/0.70%     +4080     +4205     1206         1.65      -2381           1.67
+   INTC     1.0%/0.70%     +1833     +2831      745         1.02      -2887           0.59
+   META     1.0%/0.70%     +2456     +2594      937         1.28      -1516           0.97
+   AAPL     0.7%/0.50%     +1569     +1578     1079         1.48      -1493           0.59
+   MSFT     0.7%/0.50%     +1026     +1069      644         0.88      -1484           0.38
+   AMZN     0.7%/0.50%     +2118     +2534     1188         1.63      -1402           0.82
+
+   velas 5m
+   papel   paso/gan     resultado realizado  vueltas  vueltas/día peor abierto por 1000 capital/día
+   BRK-B    0.7%/0.50%        +1       +95       59         0.98       -224           0.00
+   BRK-B    0.5%/0.35%       -33       +76       66         1.10       -229          -0.17
+   MU       1.0%/0.70%      +655      +752      240         4.00       -855           3.98
+   SNDK     1.5%/1.00%      +357      +798      143         2.38      -1336           1.76
+   NVDA     1.0%/0.70%      +461      +566      194         3.23       -364           3.49
+   GOOGL    0.7%/0.50%      -120       +85       34         0.57       -557          -0.58
+   AMD      1.0%/0.70%      +386      +510      162         2.70       -687           2.42
+   INTC     1.0%/0.70%      +546      +909      237         3.95       -856           3.36
+   META     1.0%/0.70%      +151      +275      109         1.82       -695           0.85
+   AAPL     0.7%/0.50%      +221      +227      140         2.33       -329           1.34
+   MSFT     0.7%/0.50%      +512      +547      241         4.02       -176           3.56
+   AMZN     0.7%/0.50%       +77      +370       42         0.70       -409           0.40
+
+   correlación de retornos diarios contra SOXX (2 años) y rango medio del día
+   BRK-B   correlación +0.05 · volatilidad diaria 1.1% · rango medio del día 1.4%
+   MU      correlación +0.81 · volatilidad diaria 4.5% · rango medio del día 4.4%
+   SNDK    correlación +0.64 · volatilidad diaria 6.6% · rango medio del día 7.7%
+   NVDA    correlación +0.67 · volatilidad diaria 2.8% · rango medio del día 3.5%
+   GOOGL   correlación +0.38 · volatilidad diaria 2.0% · rango medio del día 2.3%
+   AMD     correlación +0.78 · volatilidad diaria 4.0% · rango medio del día 4.1%
+   INTC    correlación +0.66 · volatilidad diaria 4.4% · rango medio del día 4.4%
+   META    correlación +0.38 · volatilidad diaria 2.5% · rango medio del día 2.7%
+   AAPL    correlación +0.34 · volatilidad diaria 1.8% · rango medio del día 2.0%
+   MSFT    correlación +0.27 · volatilidad diaria 1.8% · rango medio del día 1.9%
+   AMZN    correlación +0.43 · volatilidad diaria 2.1% · rango medio del día 2.3%

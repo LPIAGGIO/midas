@@ -5,7 +5,7 @@
 const fs = require("fs");
 function env(p) { const o = {}; for (const l of fs.readFileSync(p, "utf8").split("\n")) { const m = /^([A-Z0-9_]+)=(.*)$/.exec(l.trim()); if (m) o[m[1]] = m[2].replace(/^['"]|['"]$/g, ""); } return o; }
 const b64 = (o, k) => Buffer.from(o[k], "base64").toString("utf8");
-const TKS = process.argv.slice(2).length ? process.argv.slice(2).map((x) => x.toUpperCase()) : ["MU", "SNDK", "NVDA", "GOOGL", "AMD", "INTC", "META", "AAPL", "MSFT", "AMZN"];
+const TKS = process.argv.slice(2).length ? process.argv.slice(2).map((x) => x.toUpperCase()) : ["MU", "SNDK", "NVDA", "GOOGL", "AMD", "INTC", "META", "AAPL", "MSFT", "AMZN", "JNJ", "NU"];
 (async () => {
   const B = "https://api.cocos.xoms.com.ar";
   const o = env("/home/midas/workers/cocos-bot/.env");

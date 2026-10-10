@@ -1,0 +1,62 @@
+
+== velas 1h · 2023-11-10 a 2026-10-09 · 10 papeles · USD
+   esc   hora cierre                    resultado  realizado  por 1000/día peor abierto
+   1.0x  A    nada                         +33312     +36859          1.31       -18013
+   1.0x  A    verde, al precio             +31546     +35055          1.29       -17526
+   1.0x  A    verde, 1 escalón abajo       +29966     +33390          1.23       -17930
+   1.0x  B    nada                         +35899     +39340          1.53       -16284
+   1.0x  B    verde, al precio             +33963     +37352          1.52       -15838
+   1.0x  B    verde, 1 escalón abajo       +30614     +33896          1.44       -15834
+   1.0x  G    nada                         +36146     +39291          1.52       -16878
+   1.0x  G    verde, al precio             +33656     +36699          1.48       -16462
+   1.0x  G    verde, 1 escalón abajo       +31187     +34145          1.44       -16355
+   1.5x  A    nada                         +36681     +40011          1.51       -18005
+   1.5x  A    verde, al precio             +35984     +38620          1.54       -17486
+   1.5x  A    verde, 1 escalón abajo       +34680     +36470          1.58       -17535
+   1.5x  B    nada                         +36144     +39583          1.53       -18153
+   1.5x  B    verde, al precio             +36232     +38913          1.70       -16931
+   1.5x  B    verde, 1 escalón abajo       +32719     +34515          1.60       -17959
+   1.5x  G    nada                         +37141     +40343          1.57       -18213
+   1.5x  G    verde, al precio             +37284     +39668          1.70       -17190
+   1.5x  G    verde, 1 escalón abajo       +33946     +35479          1.64       -17553
+   2.0x  A    nada                         +36153     +39349          1.58       -17257
+   2.0x  A    verde, al precio             +35763     +38353          1.61       -16594
+   2.0x  A    verde, 1 escalón abajo       +32894     +35095          1.60       -16560
+   2.0x  B    nada                         +37858     +40133          1.67       -17907
+   2.0x  B    verde, al precio             +34421     +36378          1.61       -16993
+   2.0x  B    verde, 1 escalón abajo       +31658     +32980          1.64       -16881
+   2.0x  G    nada                         +37410     +40169          1.64       -18101
+   2.0x  G    verde, al precio             +35378     +37465          1.63       -17178
+   2.0x  G    verde, 1 escalón abajo       +33276     +34649          1.65       -17714
+   mejor por capital: 1.5x · G · verde, al precio (1.70 contra 1.31 de 1x · A · nada)
+
+== velas 5m · 2026-07-16 a 2026-10-08 · 10 papeles · USD
+   esc   hora cierre                    resultado  realizado  por 1000/día peor abierto
+   1.0x  A    nada                          +3733      +5026          2.19        -6264
+   1.0x  A    verde, al precio              +3761      +5019          2.24        -6262
+   1.0x  A    verde, 1 escalón abajo        +4143      +5378          2.66        -6081
+   1.0x  B    nada                          +3833      +4956          2.43        -6024
+   1.0x  B    verde, al precio              +3906      +5010          2.54        -6029
+   1.0x  B    verde, 1 escalón abajo        +4251      +5329          3.12        -5687
+   1.0x  G    nada                          +3827      +5022          2.39        -6115
+   1.0x  G    verde, al precio              +3787      +4944          2.41        -6120
+   1.0x  G    verde, 1 escalón abajo        +4315      +5447          3.16        -5793
+   1.5x  A    nada                          +4750      +5916          2.81        -6446
+   1.5x  A    verde, al precio              +4538      +5758          2.69        -6511
+   1.5x  A    verde, 1 escalón abajo        +4746      +5827          2.95        -6443
+   1.5x  B    nada                          +4209      +5307          2.63        -6166
+   1.5x  B    verde, al precio              +4273      +5237          2.74        -6082
+   1.5x  B    verde, 1 escalón abajo        +4420      +5255          3.20        -5618
+   1.5x  G    nada                          +4364      +5472          2.69        -6203
+   1.5x  G    verde, al precio              +4329      +5336          2.71        -6268
+   1.5x  G    verde, 1 escalón abajo        +4631      +5516          3.16        -6216
+   2.0x  A    nada                          +4955      +6010          3.17        -5849
+   2.0x  A    verde, al precio              +4695      +5732          2.99        -5879
+   2.0x  A    verde, 1 escalón abajo        +5016      +5782          3.65        -5639
+   2.0x  B    nada                          +4917      +5859          3.39        -5672
+   2.0x  B    verde, al precio              +4740      +5608          3.38        -5408
+   2.0x  B    verde, 1 escalón abajo        +4559      +5215          4.03        -4938
+   2.0x  G    nada                          +4846      +5824          3.24        -5740
+   2.0x  G    verde, al precio              +4968      +5888          3.45        -5590
+   2.0x  G    verde, 1 escalón abajo        +5241      +5955          4.29        -5410
+   mejor por capital: 2.0x · G · verde, 1 escalón abajo (4.29 contra 2.19 de 1x · A · nada)
