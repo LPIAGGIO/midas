@@ -398,3 +398,7 @@ Escalón 1x/1,5x/2x × horario A/B/G × cierre (nada / vende lo verde y reentra 
 Últimos 45 min (60 días, 10 papeles): la vela 16:55 lleva 5,2% del volumen del día (3-5 veces una vela normal) y el 27% de los máximos de ese tramo; 16:50 el 18%. El precio medio no sube hacia el cierre (−0,07% vs 16:15): son picos para los dos lados. Grilla 3893 (2x, G, vende lo verde y reentra un escalón abajo) por 1000 de capital/día según la hora: 16:30 3,51 · 16:40 4,11 · 16:45 4,44 (mejor) · 16:50 3,74 · cierre 4,33. Decisión de LP: 16:45.
 Candidatos (por 1000 de capital/día; mediana de los actuales 0,97 en 2 años): JNJ 0,61 / 0,83 (60 d), correlación con SOXX −0,20, peor abierto −634, pero ~$264M/día en BYMA (poco). NU 0,78 / 4,99 (60 d, con el salto de Brasil), correlación +0,34, $7.454M/día. LP suma los dos (lote 36 y 81, ~$1M por escalón).
 Configuración desde el martes 13/10 (configurar-martes.sh): 72404 escalón 1,5x, regla G, no vende lo verde; 3893 escalón 2x, regla G, vende lo verde 16:45 y reentra un escalón abajo. Volumen igual una semana más.
+
+## Reentrada: "si sube 1% desde la apertura, entra" (10/10/2026, reentrada_sube.py)
+
+Grilla 3893 (2x, G, vende lo verde 16:45), por 1000 de capital/día. 60 días 5 min: al precio de apertura 3,02 · un escalón abajo y si no al cierre (ACTUAL) 4,44 · entra si sube 0,5% 3,46 · 1% 3,50 · 1,5% 3,72 · 2% 3,79. 2 años horario: 1,63 · 1,65 · 1,62 · 1,61 · 1,66 · 1,65. La variante es peor en 60 días y neutra en 2 años: queda la regla actual (esperar al cierre). Dejar de operar un día de suba no cuesta; entrar arriba sí.

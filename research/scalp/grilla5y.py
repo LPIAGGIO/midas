@@ -42,13 +42,13 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0):
     """corte=None → holdea sin limite. Devuelve metricas en USD."""
     # doble: con la grilla llena, si el precio cae a ancla*(1 - doble*profundidad) compra
     # OTRA VEZ la misma cantidad que tiene y pasa a salir todo junto en promedio + gan.
     X = 99
     # permitido: fechas en las que se puede ABRIR un ciclo nuevo (None = siempre)
-    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV, espera=0, idle=0, nx=0, extras=0, paso=paso, gan=gan, pg=(paso, gan), nb=False, bs=0, tope=None, topes=0)
+    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV, espera=0, idle=0, nx=0, extras=0, paso=paso, gan=gan, pg=(paso, gan), nb=False, bs=0, tope=None, topes=0, od=None, sube=0)
     lots = {}          # k -> (precio, unidades, costo_usd)
     if inicial:
         E['ancla'] = inicial.get('ancla')
@@ -163,6 +163,8 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         if E['nb']:
             E['idle'] = 0               # el reloj del lateral arranca con las compras
         E['bs'] = 0 if fecha != prev_f else E['bs'] + 1
+        if fecha != prev_f:
+            E['od'] = o * (ccl(fecha) if en_pesos else 1.0)   # apertura del día (para reent_sube)
         if E['tope'] is not None and E['bs'] >= tope_barras:
             E['tope'] = None            # paso la ventana: vuelve a seguir al precio
         if en_pesos:
@@ -188,6 +190,13 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                 E['reent'] = max(E['reent'] or 0, E['tope']) if c > E['tope'] else None
                 if c <= E['tope']:
                     comprar(0, c)       # ya esta por debajo del objetivo de la venta: reabre
+            elif E['espera'] > 0 and reent_sube and E['reent'] is not None and c >= E['od'] * (1 + reent_sube):
+                # (10/10, LP) esperando la reentrada un escalón abajo, el papel subió
+                # reent_sube desde la apertura del día: entra al precio ya, no espera al cierre
+                E['reent'] = None
+                E['espera'] = 0
+                E['sube'] += 1
+                comprar(0, c)
             elif E['espera'] > 0:
                 E['espera'] -= 1        # sigue esperando que vuelva al ancla
             elif entrada_off > 0:

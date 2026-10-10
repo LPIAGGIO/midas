@@ -1,0 +1,18 @@
+
+== velas 5m · 3893: escalón 2x, regla G, vende lo verde 16:45
+   reentrada después de vender lo verde          resultado  realizado  por 1000/día peor abierto
+   al precio de apertura (sin esperar)               +4124      +5251          3.02        -5439
+   un escalón abajo; si no, al cierre (ACTUAL)       +4630      +5705          4.44        -4801
+   un escalón abajo; si sube 0,5% desde la apertura, entra      +4281      +5358          3.46        -5265
+   un escalón abajo; si sube 1% desde la apertura, entra      +4207      +5261          3.50        -5249
+   un escalón abajo; si sube 1,5% desde la apertura, entra      +4386      +5491          3.72        -5218
+   un escalón abajo; si sube 2% desde la apertura, entra      +4451      +5525          3.79        -5214
+
+== velas 1h · 3893: escalón 2x, regla G, vende lo verde al cierre
+   reentrada después de vender lo verde          resultado  realizado  por 1000/día peor abierto
+   al precio de apertura (sin esperar)              +35378     +37465          1.63       -17178
+   un escalón abajo; si no, al cierre (ACTUAL)      +33276     +34649          1.65       -17714
+   un escalón abajo; si sube 0,5% desde la apertura, entra     +33743     +35751          1.62       -16956
+   un escalón abajo; si sube 1% desde la apertura, entra     +33195     +35172          1.61       -16939
+   un escalón abajo; si sube 1,5% desde la apertura, entra     +33527     +35495          1.66       -17161
+   un escalón abajo; si sube 2% desde la apertura, entra     +33311     +35279          1.65       -17146
