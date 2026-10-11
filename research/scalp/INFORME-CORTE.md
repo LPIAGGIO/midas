@@ -411,3 +411,10 @@ B motor sin régimen +4.355 · 1,22 · peor −6.181 · 12% del tiempo · 112 ci
 C motor con régimen +3.309 · 0,96 · 12% · 71 ciclos.
 D motor sin régimen, a mercado al cierre de la barra +8.184 · 1,05 · 27% · 243 ciclos.
 Lectura: el motor no mejora la grilla por unidad de capital (1,22 vs 1,45, −16%) y la deja afuera del mercado el 88% del tiempo (9 veces menos resultado absoluto). El régimen la empeora (0,96), igual que en backtest-5y. Entrar a mercado en la señal duplica los ciclos pero rinde menos por capital (1,05). Coincide con el placebo y la autocorrelación cero: el nivel no agrega edge; la grilla gana por estar comprada y oscilar.
+
+## La pérdida en tres partes (11/10/2026, descomponer_perdida.py; lo pedido por mazda_miata)
+
+Descomposición exacta de la curva de equity vela a vela: ΔE = unidades_prev × (apertura − cierre_prev) [salto nocturno] + resto [intradía]; el resto se etiqueta "vela grande" si el rango o el cuerpo cruzan un escalón entero. Grilla 1,5x, 10 papeles.
+- 5 min, 60 ruedas: reparto de la peor caída pico a valle (suma −5.867 sobre +4.382 de resultado): salto nocturno 31% · intradía en velas chicas 30% · velas de ≥ 1 escalón 39%. Masa negativa bruta: 9% / 82% / 9% (dominada por el ruido de las velas chicas; no dice mucho). Lotes comprados en velas de ≥ 1 escalón: 86 de 1.171 (7%) y cargan el 39% de la peor caída: 5 veces sobrerrepresentados. El sim los llena al límite: cota inferior del costo real.
+- 1 hora, 2 años: 36% / 7% / 57%, pero "vela que cruza un escalón" a 60 min es otra cosa (33% de los lotes): no comparable.
+- Lectura: el gap no es la ruta de ruina dominante (un tercio); la palanca no es el stop sino la regla de llenado en velas rápidas (no llenar más de un escalón por vela, o reanclar los escalones restantes al cierre de la vela). Sin medir todavía.

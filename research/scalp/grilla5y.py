@@ -160,6 +160,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
     s_ab = []
     s_lot = []
     s_cap = []
+    s_u = []
     cargado = racha = racha_max = 0
     peor_abierto = 0.0
     prev_c = inicial.get('prev_c') if inicial else None
@@ -272,6 +273,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         s_ab.append(ab)
         s_lot.append(len(lots))
         s_cap.append(sum(v[2] for v in lots.values()))
+        s_u.append(sum(v[1] for v in lots.values()))   # unidades en cartera al cierre de la vela
         if fecha != prev_f:
             if len(lots) >= NIV:
                 cargado += 1
@@ -287,7 +289,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         dd = min(dd, e - pico)
     dias = len({b[0] for b in bars})
     return dict(total=eq[-1], real=E['real'], abierto=eq[-1] - E['real'], rondas=E['rondas'], cortes=E['cortes'], perd=E['perd'], dd=dd,
-                capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio, eq=eq, s_ab=s_ab, s_lot=s_lot, s_cap=s_cap, extras=E['extras'], topes=E['topes'], nsen=E['nsen'], ciclos=E['ciclos'])
+                capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio, eq=eq, s_ab=s_ab, s_lot=s_lot, s_cap=s_cap, extras=E['extras'], topes=E['topes'], nsen=E['nsen'], ciclos=E['ciclos'], s_u=s_u)
 
 
 CORTES = [0.05, 0.075, 0.10, 0.15, 0.20, 0.30, None]

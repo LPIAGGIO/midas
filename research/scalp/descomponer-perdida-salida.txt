@@ -1,0 +1,14 @@
+
+== velas 5m · grilla 1,5x · 10 papeles · USD · resultado +4382 · suma de peores caídas -5867
+   parte                                      masa negativa       %      velas | en peor caída       %
+   salto nocturno                                    -9824      9%        260 |        -1823     31%
+   caída intradía (velas chicas)                    -91779     82%      22833 |        -1768     30%
+   salto dentro de la vela (≥ 1 escalón)            -10315      9%        293 |        -2277     39%
+   lotes comprados en velas de ≥ 1 escalón: 86 de 1171 (7%)
+
+== velas 1h · grilla 1,5x · 10 papeles · USD · resultado +36681 · suma de peores caídas -17897
+   parte                                      masa negativa       %      velas | en peor caída       %
+   salto nocturno                                  -108865     23%       3107 |        -6376     36%
+   caída intradía (velas chicas)                   -153555     33%      17079 |        -1278      7%
+   salto dentro de la vela (≥ 1 escalón)           -201097     43%       5540 |       -10243     57%
+   lotes comprados en velas de ≥ 1 escalón: 1446 de 4380 (33%)
