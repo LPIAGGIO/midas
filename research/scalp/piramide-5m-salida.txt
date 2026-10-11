@@ -1,0 +1,7 @@
+== últimos 60 días · velas de 5 min · 10 papeles · regla G · pesos · caución 24,6%
+   grilla · salida                         bruto $       neto $ peor abierto  cap.medio  ciclos vueltas neto/rueda
+   pirámide · separado                     9398526      5947759    -13427427   61023184     156     359      99129
+   pirámide · promedio                     9395981      6073983    -13145917   58746047     289     424     101233
+   uniforme 5 × $1,8M · separado           9110352      5663572    -13444311   60952692     121     430      94393
+   uniforme 5 × $1,8M · promedio           8245796      4835685    -13319986   60304231     222     372      80595
+   uniforme 4 × $2,25M · separado          8715509      4968820    -14223374   66256250     121     347      82814

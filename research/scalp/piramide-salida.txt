@@ -1,0 +1,46 @@
+
+================================================================================================
+ÚLTIMOS 6 MESES · velas de 1 hora · 10 papeles · regla G · pesos (CCL 1610 constante) · caución 24.6%
+   grilla · salida                         bruto $   caución $       neto $ peor abierto  cap.medio  ciclos vueltas neto/rueda
+   pirámide · separado                    20107719     7619433     12488286    -22141098   63160156     342     726      97565
+   pirámide · promedio                    21597955     6981311     14616645    -20075871   57870536     650     951     114193
+   uniforme 5 × $1,8M · separado          19285771     7641312     11644459    -22157610   63341518     283     829      90972
+   uniforme 5 × $1,8M · promedio          24719194     7000052     17719142    -20127490   58025893     544     930     138431
+   uniforme 4 × $2,25M · separado         21438484     8124498     13313986    -22881894   67346819     283     726     104016
+
+   pirámide · separado · por escalón
+   escalón    lote $    paso  compras   ventas  resultado $  por venta $  días/lote
+   1             1.5M    1.5%      342      332      6620013        19940        2.4
+   2             2.0M    2.0%      183      175      6585369        37631        3.5
+   3             2.5M    2.5%      135      127      7305905        57527        3.8
+   4             3.0M    3.0%       99       92      6961587        75669        5.1
+
+   pirámide · promedio · por escalón
+   escalón    lote $    paso  compras   ventas  resultado $  por venta $  días/lote
+   1             1.5M    1.5%      650      640      6547002        10230        1.3
+   2             2.0M    2.0%      191      182      7322734        40235        2.7
+   3             2.5M    2.5%       89       81      6395276        78954        4.8
+   4             3.0M    3.0%       55       48      7790088       162294        6.4
+
+================================================================================================
+ÚLTIMOS 12 MESES · velas de 1 hora · 10 papeles · regla G · pesos (CCL 1610 constante) · caución 24.6%
+   grilla · salida                         bruto $   caución $       neto $ peor abierto  cap.medio  ciclos vueltas neto/rueda
+   pirámide · separado                    42032847    16432479     25600368    -25087182   69188362     544    1286     101589
+   pirámide · promedio                    44040887    15333153     28707735    -23184930   64559688    1102    1693     113920
+   uniforme 5 × $1,8M · separado          41617663    16465789     25151874    -25040189   69328614     458    1540      99809
+   uniforme 5 × $1,8M · promedio          47367566    15530507     31837059    -23938894   65390642     902    1632     126338
+   uniforme 4 × $2,25M · separado         45185870    17315993     27869877    -25700426   72908368     458    1314     110595
+
+   pirámide · separado · por escalón
+   escalón    lote $    paso  compras   ventas  resultado $  por venta $  días/lote
+   1             1.5M    1.5%      544      534     11150380        20881        3.1
+   2             2.0M    2.0%      342      333     12623812        37909        4.2
+   3             2.5M    2.5%      248      240     12849190        53538        5.9
+   4             3.0M    3.0%      186      179     12785733        71429        7.2
+
+   pirámide · promedio · por escalón
+   escalón    lote $    paso  compras   ventas  resultado $  por venta $  días/lote
+   1             1.5M    1.5%     1102     1092     10085062         9235        1.7
+   2             2.0M    2.0%      351      342     12875737        37648        4.1
+   3             2.5M    2.5%      170      162     12454638        76880        7.7
+   4             3.0M    3.0%      104       97     15082596       155491       11.3

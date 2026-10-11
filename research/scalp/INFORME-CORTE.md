@@ -431,3 +431,12 @@ Velas de 1 hora, regla G, pesos con lote de $1M (CCL constante), caución 24,6% 
 ## Lotes de $2M, sin caución (11/10/2026, seis_meses.py 2 --sin-caucion)
 
 Todo escala lineal con el lote. 6 meses: cada cuenta bruto $41,2M = $322k/rueda; las dos $644k/rueda, con $123M + $96M de capital medio comprado y peor abierto (suma por papel) −$44M y −$38M. 12 meses: $345k y $308k/rueda ($653k las dos). Sin caución, el escalón pierde su ventaja de capital: 2x sigue siendo el mejor sin vender (12m), y con vender lo verde 1,5x-2x dan el máximo bruto. El límite no es el bruto sino el aforo: $220M de capital medio comprado contra ~$80-100M de caución disponible hoy.
+
+## Grilla pirámide (11/10/2026, piramide.py): 1,5%/$1,5M · 2%/$2M · 2,5%/$2,5M · 3%/$3M, salida separada o al promedio
+
+Neto/rueda en pesos (10 papeles, regla G, caución 24,6%; comparación: uniforme 5 × $1,8M, mismo máximo de $9M):
+- 6 meses (1 h): pirámide separado 97,6k · pirámide promedio 114,2k · uniforme separado 91,0k · uniforme promedio 138,4k · uniforme 4 × $2,25M 104,0k.
+- 12 meses (1 h): 101,6k · 113,9k · 99,8k · 126,3k · 110,6k.
+- 60 días (5 min, bajista): 99,1k · 101,2k · 94,4k · 80,6k · 82,8k.
+- Por escalón (pirámide separado, 6 m): cada escalón aporta casi lo mismo ($6,6M a $7,3M); el 2 llena en el 53% de los ciclos, el 3 en el 39%, el 4 en el 29%; por venta $20k / $38k / $58k / $76k; días por lote 2,4 / 3,5 / 3,8 / 5,1. Con salida al promedio el escalón 1 gira el doble (650 ciclos vs 342) y el 4 llena 55 veces a $162k por venta y 6,4 días.
+- Lectura: la pirámide rinde igual que la uniforme con el mismo capital (±5%); los lotes crecientes no agregan. La salida al promedio gana en 2 años de 1 h (+17% pirámide, +27-52% uniforme: cierra ciclos antes y para menos capital) pero pierde en los 60 días bajistas de 5 min (−15% uniforme, 0 pirámide): depende del régimen, como vender lo verde. No se adopta.
