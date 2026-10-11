@@ -34253,6 +34253,54 @@ function futMultiplier(ticker) {
   return /^ORO/i.test(ticker || "") ? 1 : /^WTI/i.test(ticker || "") ? 10 : FUTURE_MULTIPLIER_DEFAULT;
 }
 
+// La curva del patrimonio como control: clic o arrastre eligen el día (LP 11/10/2026:
+// el slider y los botones de paso no se entendían). Hover muestra fecha, total y flujo.
+function CajaTiempoCurva({ equity, iSel, onPick, fmt$, fmtFecha }) {
+  const [hover, setHover] = useState(null);
+  const ref = useRef(null);
+  if (!equity || equity.length < 2) return null;
+  const W = 1000, H = 220, L = 8, R = 8, T = 12, B = 22;
+  const vs = equity.map((e) => e.v);
+  const vMin = Math.min(...vs, 0), vMax = Math.max(...vs, 0), span = vMax - vMin || 1;
+  const X = (i) => L + (i / (equity.length - 1)) * (W - L - R);
+  const Y = (v) => T + (1 - (v - vMin) / span) * (H - T - B);
+  const linea = equity.map((e, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(e.v).toFixed(1)}`).join(" ");
+  const area = `${linea} L${X(equity.length - 1).toFixed(1)},${Y(0).toFixed(1)} L${X(0).toFixed(1)},${Y(0).toFixed(1)} Z`;
+  const idxDe = (ev) => {
+    const r = ref.current.getBoundingClientRect();
+    const x = ((ev.clientX - r.left) / r.width) * W;
+    return Math.max(0, Math.min(equity.length - 1, Math.round(((x - L) / (W - L - R)) * (equity.length - 1))));
+  };
+  const meses = [];
+  let ultimo = null;
+  equity.forEach((e, i) => { const m = e.date.slice(0, 7); if (m !== ultimo) { meses.push({ i, label: new Date(e.date + "T12:00:00").toLocaleDateString("es-AR", { month: "short" }) }); ultimo = m; } });
+  const i = hover ?? iSel, e = equity[i], prev = equity[i - 1];
+  const dia = prev && prev.v > 0 ? (e.v - e.flow) / prev.v - 1 : null;
+  const izq = X(i) / W;
+  return (
+    <div style={{ position: "relative", border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "8px 8px 2px", marginBottom: 12 }}>
+      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", cursor: "crosshair", touchAction: "none" }}
+        onMouseMove={(ev) => setHover(idxDe(ev))} onMouseLeave={() => setHover(null)}
+        onPointerDown={(ev) => { ev.currentTarget.setPointerCapture?.(ev.pointerId); onPick(idxDe(ev)); }}
+        onPointerMove={(ev) => { if (ev.buttons & 1) onPick(idxDe(ev)); }}>
+        <defs><linearGradient id="cajaArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity="0.28" /><stop offset="100%" stopColor={C.accent} stopOpacity="0.02" /></linearGradient></defs>
+        {meses.map((m) => <g key={m.i}><line x1={X(m.i)} x2={X(m.i)} y1={T} y2={H - B} stroke={C.faint} strokeWidth="1" /><text x={X(m.i) + 3} y={H - 7} fontSize="10" fill={C.dim}>{m.label}</text></g>)}
+        {vMin < 0 && vMax > 0 ? <line x1={L} x2={W - R} y1={Y(0)} y2={Y(0)} stroke={C.dim} strokeWidth="1" strokeDasharray="3 3" /> : null}
+        <path d={area} fill="url(#cajaArea)" />
+        <path d={linea} fill="none" stroke={C.accent} strokeWidth="1.8" />
+        <line x1={X(iSel)} x2={X(iSel)} y1={T} y2={H - B} stroke={C.text} strokeWidth="1" opacity="0.6" />
+        <circle cx={X(iSel)} cy={Y(equity[iSel].v)} r="4" fill={C.text} />
+        {hover != null && hover !== iSel ? <circle cx={X(hover)} cy={Y(equity[hover].v)} r="3.5" fill="none" stroke={C.accent} strokeWidth="1.5" /> : null}
+      </svg>
+      <div style={{ position: "absolute", top: 8, left: `${izq * 100}%`, transform: `translateX(${izq > 0.75 ? "-100%" : "0"})`, padding: "6px 9px", borderRadius: 6, background: "rgba(10,14,22,0.92)", border: `1px solid ${C.border}`, fontSize: 11, color: C.muted, pointerEvents: "none", whiteSpace: "nowrap" }}>
+        <div style={{ color: C.text, fontWeight: 600 }}>{fmtFecha(e.date)}</div>
+        <div style={{ fontVariantNumeric: "tabular-nums" }}>total {fmt$(e.v)}{dia != null ? <span style={{ color: dia > 0 ? C.green : dia < 0 ? C.red : C.dim }}> · {dia >= 0 ? "+" : "−"}{(Math.abs(dia) * 100).toFixed(2)}%</span> : null}</div>
+        {Math.abs(e.flow) > 1 ? <div style={{ fontVariantNumeric: "tabular-nums", color: C.dim }}>{e.flow > 0 ? "aporte" : "retiro"} {fmt$(Math.abs(e.flow))}</div> : null}
+      </div>
+    </div>
+  );
+}
+
 function CajaTiempoModule() {
   const { rows, loading } = useLibroMovimientos();
   const { user } = useAuth();
@@ -34289,7 +34337,6 @@ function CajaTiempoModule() {
   }, [rows, todayStr]);
 
   const [idx, setIdx] = useState(-1); // -1 = último día
-  const [step, setStep] = useState(1); // paso de las flechas: 1/7/30
   const iSel = idx < 0 ? days.length - 1 : Math.min(idx, days.length - 1);
   const T = days[iSel] || todayStr;
 
@@ -34439,11 +34486,15 @@ function CajaTiempoModule() {
         }));
       if (universo.fc.length) jobs.push(pagina(() => supabase.from("fci_quotes").select("fondo,vcp,fecha")
         .gte("fecha", desde).order("fecha")).then((d) => {
+          // Nombre EXACTO de la clase (11/10/2026): con startsWith("cocos rendim") entraban
+          // las clases A, B, C y D juntas en la misma serie; según el día caía en la C
+          // (VCP 1.000) o la D (71), el valor daba absurdo, el guard de 5× lo tiraba a
+          // "(costo)" y el FCI más grande de la cuenta quedaba sin rendimiento.
           for (const t of universo.fc) {
-            const fondo = (FCI_LEDGER_MAP[t] || t).split("|")[0].toLowerCase().slice(0, 12);
-            for (const r of d) {
-              if ((r.fondo || "").toLowerCase().startsWith(fondo)) push("f|" + t, r.fecha, Number(r.vcp) * 1000);
-            }
+            const nombre = (FCI_LEDGER_MAP[t] || t).split("|")[0].toLowerCase().trim();
+            const exacto = d.filter((r) => (r.fondo || "").toLowerCase().trim() === nombre);
+            const filas = exacto.length ? exacto : d.filter((r) => (r.fondo || "").toLowerCase().startsWith(nombre.slice(0, 12)));
+            for (const r of filas) push("f|" + t, r.fecha, Number(r.vcp) * 1000);
           }
         }));
       await Promise.all(jobs).catch(() => {});
@@ -34580,7 +34631,7 @@ function CajaTiempoModule() {
     <div style={{ padding: "24px 32px", maxWidth: 1100, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", margin: 0 }}>Caja en el tiempo</h1>
       <p style={{ fontSize: 12, color: C.muted, margin: "6px 0 16px 0", maxWidth: 860 }}>
-        Tu cuenta de Cocos reconstruida a cualquier fecha desde el libro de movimientos: efectivo acumulado, tenencias valuadas al cierre de ese día y el rendimiento del período. Mové el cursor o usá las flechas.
+        Tu cuenta de Cocos reconstruida a cualquier fecha desde el libro de movimientos: efectivo acumulado, tenencias valuadas al cierre de ese día y el rendimiento del período. Hacé clic o arrastrá sobre la curva para elegir el día, o escribí la fecha.
       </p>
       {loading ? (
         <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Cargando libro…</div>
@@ -34588,23 +34639,30 @@ function CajaTiempoModule() {
         <div style={{ padding: 40, textAlign: "center", color: C.muted, fontSize: 13 }}>Sin movimientos. Importá la cuenta corriente de Cocos en Reportes → Libro de operaciones.</div>
       ) : (
         <>
-          <div className="flex items-center" style={{ gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
-            <button onClick={() => move(-step)} style={{ padding: "4px 10px", fontSize: 13, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>◀</button>
-            <span style={{ fontSize: 15, fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", minWidth: 100, textAlign: "center" }}>{fmtFecha(T)}</span>
-            <button onClick={() => move(step)} style={{ padding: "4px 10px", fontSize: 13, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>▶</button>
-            {[["Día", 1], ["Semana", 7], ["Mes", 30]].map(([l, s]) => (
-              <button key={l} onClick={() => setStep(s)} style={{ padding: "3px 9px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${step === s ? C.accent : C.border}`, background: step === s ? "rgba(124,156,255,0.12)" : "transparent", color: step === s ? C.accent : C.muted, borderRadius: 4 }}>{l}</button>
+          <div className="flex items-center" style={{ gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+            <button onClick={() => move(-1)} title="Un día atrás" style={{ padding: "4px 10px", fontSize: 13, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>◀</button>
+            <input type="date" value={T} min={days[0]} max={days[days.length - 1]}
+              onChange={(e) => { const i = days.indexOf(e.target.value); if (i >= 0) setIdx(i); }}
+              style={{ padding: "4px 8px", fontSize: 14, fontWeight: 700, fontVariantNumeric: "tabular-nums", border: `1px solid ${C.border}`, background: C.panel, color: C.text, borderRadius: 4, colorScheme: "dark" }} />
+            <button onClick={() => move(1)} title="Un día adelante" style={{ padding: "4px 10px", fontSize: 13, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>▶</button>
+            <span style={{ width: 6 }} />
+            {[["−1 mes", -30], ["−1 sem", -7], ["+1 sem", 7], ["+1 mes", 30]].map(([l, n]) => (
+              <button key={l} onClick={() => move(n)} style={{ padding: "3px 9px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>{l}</button>
             ))}
-            <button onClick={() => setIdx(-1)} style={{ padding: "3px 9px", fontSize: 10.5, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 4 }}>Hoy</button>
+            <button onClick={() => setIdx(-1)} style={{ padding: "3px 9px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${iSel === days.length - 1 ? C.accent : C.border}`, background: iSel === days.length - 1 ? "rgba(124,156,255,0.12)" : "transparent", color: iSel === days.length - 1 ? C.accent : C.muted, borderRadius: 4 }}>Hoy</button>
           </div>
-          <input type="range" min={0} max={days.length - 1} value={iSel} onChange={(e) => setIdx(Number(e.target.value))}
-            style={{ width: "100%", marginBottom: 16, accentColor: C.accent }} />
+          {cargandoPx || !equity ? (
+            <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: 14, fontSize: 12, color: C.muted, marginBottom: 12 }}>Armando la curva del patrimonio…</div>
+          ) : (
+            <CajaTiempoCurva equity={equity} iSel={iSel} onPick={setIdx} fmt$={fmt$} fmtFecha={fmtFecha} />
+          )}
 
           <div className="flex" style={{ gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
             {[["Efectivo ARS", fmt$(snapT.cashARS)], ["Efectivo USD", fmt$(snapT.cashUSD, "USD")],
               ...(Math.abs(snapT.pendARS) > 1 ? [["A liquidar", fmt$(snapT.pendARS)]] : []),
               ["Cartera (contado)", fmt$(carteraVal)],
-              ...(futPend != null && Math.abs(futPend) > 1 ? [["Futuros a acreditar", fmt$(futPend)]] : []),
+              // Menos de $1.000 es redondeo de los precios de los contratos cerrados, no un ajuste pendiente.
+              ...(futPend != null && Math.abs(futPend) >= 1000 ? [["Futuros a acreditar", fmt$(futPend)]] : []),
               ["Total", fmt$(totalARS)]].map(([l, v]) => (
               <div key={l} style={{ flex: "1 1 180px", border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, padding: "12px 14px" }}>
                 <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>{l}</div>
