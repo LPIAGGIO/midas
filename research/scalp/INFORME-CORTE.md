@@ -427,3 +427,7 @@ Velas de 1 hora, regla G, pesos con lote de $1M (CCL constante), caución 24,6% 
 - Por papel: ganan los volátiles (MU 5,7%/día, SNDK 7,1%, AMD 4,7%, INTC 5,3%: 40-60 vueltas/mes, $2-4M netos en 6 meses cada uno). Los tranquilos no pagan la caución: AMZN neto negativo en las dos cuentas, GOOGL negativo en la 2, MSFT −$1,8M en 12 meses (6 ciclos: quedó cargado casi todo el año), META casi cero. Vueltas/mes sigue a la volatilidad.
 - Barrido 6m (neto/rueda, sin vender / vende lo verde): 1,5x 96k/124k · 2x 103k/123k · 2,5x 91k/116k · 3x 117k/128k · 3,5x 117k/117k. 12m: 101/108 · 110/108 · 109/103 · 113/110 · 112/104. Entre 2x y 3x las diferencias son ruido (~10%); 1,5x es lo peor en sin vender. Vende lo verde +20% en 6m, igual en 12m.
 - Para los $500k/día: con lotes de $1M las dos cuentas dan $219k/rueda neto en el último semestre; haría falta lote ×2,3 (capital medio ~$250M) o concentrar en los volátiles.
+
+## Lotes de $2M, sin caución (11/10/2026, seis_meses.py 2 --sin-caucion)
+
+Todo escala lineal con el lote. 6 meses: cada cuenta bruto $41,2M = $322k/rueda; las dos $644k/rueda, con $123M + $96M de capital medio comprado y peor abierto (suma por papel) −$44M y −$38M. 12 meses: $345k y $308k/rueda ($653k las dos). Sin caución, el escalón pierde su ventaja de capital: 2x sigue siendo el mejor sin vender (12m), y con vender lo verde 1,5x-2x dan el máximo bruto. El límite no es el bruto sino el aforo: $220M de capital medio comprado contra ~$80-100M de caución disponible hoy.

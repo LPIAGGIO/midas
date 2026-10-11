@@ -11,8 +11,11 @@ import grilla5y as g
 import apertura_bajista as ab
 import candidato as cd
 PAPELES = ab.PAPELES
-CAUCION_TNA = 0.205 + (0.03 + 0.00365) * 1.21
-A_PESOS = 1_000_000 / g.LOTE
+import sys
+# python seis_meses.py [lote en millones] [--sin-caucion]   (LP 11/10: "lotes de 2 millones, sin caución")
+LOTE_M = float(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith('-') else 1.0
+CAUCION_TNA = 0.0 if '--sin-caucion' in sys.argv else 0.205 + (0.03 + 0.00365) * 1.21
+A_PESOS = LOTE_M * 1_000_000 / g.LOTE
 HOY = '2026-10-09'
 
 
@@ -52,7 +55,7 @@ def main():
     for meses in (6, 12):
         d0 = desde(meses)
         print('\n' + '=' * 100)
-        print('ÚLTIMOS %d MESES · desde %s · velas de 1 hora · regla G · pesos con lote de $1M (CCL constante)' % (meses, d0))
+        print('ÚLTIMOS %d MESES · desde %s · velas de 1 hora · regla G · pesos con lote de $%.0fM (CCL constante) · caución %.1f%%' % (meses, d0, LOTE_M, CAUCION_TNA * 100))
         # 1) papel por papel con la decisión
         for nombre, esc, verde in (('CUENTA 1 · escalón 2x · sin vender lo verde', 2.0, False), ('CUENTA 2 · escalón 2,5x · vende lo verde', 2.5, True)):
             print('\n-- %s' % nombre)
