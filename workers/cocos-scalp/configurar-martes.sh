@@ -3,8 +3,8 @@
 # VPS. Solo toca .env y crea carpetas: los bots que corren no cambian hasta que
 # se reinicien (leen el .env al arrancar). Corre: bash configurar-martes.sh
 #
-#  72404: escalón 1,5x · compra desde las 12 salvo apertura 1% abajo (regla G) · no vende lo verde
-#  3893:  escalón 2x   · regla G                                               · vende lo verde 16:45
+#  72404: escalón 2x   · compra desde las 12 salvo apertura 1% abajo (regla G) · no vende lo verde
+#  3893:  escalón 2,5x · regla G                                               · vende lo verde 16:45
 #  Papeles nuevos en las dos: JNJ (lote 36) y NU (lote 81), ~$1M por escalón.
 set -eu
 W="$HOME/workers"
@@ -17,7 +17,7 @@ setvar() { # archivo clave valor
 }
 configurar() { # dir cuenta papel
   local d="$1" cta="$2" p="$3" m paso gan
-  [ "$cta" = 72404 ] && m=1.5 || m=2
+  [ "$cta" = 72404 ] && m=2 || m=2.5
   read -r paso gan <<< "$(base "$p")"
   cp -n "$d/.env" "$d/$BK" 2>/dev/null || true
   setvar "$d/.env" SCALP_PASO "$(mul "$paso" "$m")"
