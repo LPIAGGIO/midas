@@ -1,0 +1,22 @@
+
+== velas 1h · 2023-11-10 a 2026-10-09 · 10 papeles · regla G · USD, lote 460 · caución 24.6% all-in
+   esc.   cierre                 resultado   caución      neto cap.medio por 1000/día  neto/1000/d peor abierto  vueltas
+   1.5x   sin vender                +37141     21391    +15750     32453         1.57         0.66       -18213     9129
+   2.0x   sin vender                +37410     20650    +16760     31333         1.64         0.73       -18101     7179
+   2.5x   sin vender                +37091     19261    +17830     29244         1.74         0.84       -17456     5802
+   3.0x   sin vender                +36917     17805    +19112     26971         1.88         0.97       -16403     4745
+   1.5x   vende lo verde            +33946     18708    +15238     28294         1.64         0.74       -17553    10165
+   2.0x   vende lo verde            +33276     18230    +15045     27626         1.65         0.75       -17714     8471
+   2.5x   vende lo verde            +31500     16989    +14512     25738         1.68         0.77       -17028     7240
+   3.0x   vende lo verde            +31679     15725    +15953     23753         1.83         0.92       -16315     6652
+
+== velas 5m · 2026-07-17 a 2026-10-09 · 10 papeles · regla G · USD, lote 460 · caución 24.6% all-in
+   esc.   cierre                 resultado   caución      neto cap.medio por 1000/día  neto/1000/d peor abierto  vueltas
+   1.5x   sin vender                 +3901      1473     +2428     26044         2.50         1.55        -5800     1148
+   2.0x   sin vender                 +4406      1351     +3055     23885         3.07         2.13        -5487      968
+   2.5x   sin vender                 +4359      1241     +3118     21944         3.31         2.37        -4858      759
+   3.0x   sin vender                 +4218      1184     +3034     20931         3.36         2.42        -4535      624
+   1.5x   vende lo verde             +4192      1252     +2939     22149         3.15         2.21        -5695     1262
+   2.0x   vende lo verde             +4630       983     +3648     17377         4.44         3.50        -4801     1242
+   2.5x   vende lo verde             +4777       916     +3861     16190         4.92         3.97        -4101     1126
+   3.0x   vende lo verde             +3954       948     +3006     16763         3.93         2.99        -3936      875

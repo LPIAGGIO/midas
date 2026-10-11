@@ -418,3 +418,12 @@ Descomposición exacta de la curva de equity vela a vela: ΔE = unidades_prev ×
 - 5 min, 60 ruedas: reparto de la peor caída pico a valle (suma −5.867 sobre +4.382 de resultado): salto nocturno 31% · intradía en velas chicas 30% · velas de ≥ 1 escalón 39%. Masa negativa bruta: 9% / 82% / 9% (dominada por el ruido de las velas chicas; no dice mucho). Lotes comprados en velas de ≥ 1 escalón: 86 de 1.171 (7%) y cargan el 39% de la peor caída: 5 veces sobrerrepresentados. El sim los llena al límite: cota inferior del costo real.
 - 1 hora, 2 años: 36% / 7% / 57%, pero "vela que cruza un escalón" a 60 min es otra cosa (33% de los lotes): no comparable.
 - Lectura: el gap no es la ruta de ruina dominante (un tercio); la palanca no es el stop sino la regla de llenado en velas rápidas (no llenar más de un escalón por vela, o reanclar los escalones restantes al cierre de la vela). Sin medir todavía.
+
+## Últimos 6 y 12 meses, papel por papel, con la decisión (11/10/2026, seis_meses.py)
+
+Velas de 1 hora, regla G, pesos con lote de $1M (CCL constante), caución 24,6% all-in sobre el capital comprado.
+- 6 meses (128 ruedas): cuenta 1 (2x, sin vender) bruto $20,6M · caución $7,4M · neto $13,2M = $103k/rueda; 253 ciclos, 2.044 vueltas, capital medio $61,5M, peor abierto −$22M. Cuenta 2 (2,5x, vende lo verde) bruto $20,6M · caución $5,8M · neto $14,8M = $116k/rueda; 309 ciclos, 1.922 vueltas, capital medio $48M, peor −$19M. Las dos juntas: bruto $322k/rueda, neto $219k/rueda.
+- 12 meses (252 ruedas): cuenta 1 neto $27,6M ($110k/rueda); cuenta 2 $26,0M ($103k/rueda).
+- Por papel: ganan los volátiles (MU 5,7%/día, SNDK 7,1%, AMD 4,7%, INTC 5,3%: 40-60 vueltas/mes, $2-4M netos en 6 meses cada uno). Los tranquilos no pagan la caución: AMZN neto negativo en las dos cuentas, GOOGL negativo en la 2, MSFT −$1,8M en 12 meses (6 ciclos: quedó cargado casi todo el año), META casi cero. Vueltas/mes sigue a la volatilidad.
+- Barrido 6m (neto/rueda, sin vender / vende lo verde): 1,5x 96k/124k · 2x 103k/123k · 2,5x 91k/116k · 3x 117k/128k · 3,5x 117k/117k. 12m: 101/108 · 110/108 · 109/103 · 113/110 · 112/104. Entre 2x y 3x las diferencias son ruido (~10%); 1,5x es lo peor en sin vender. Vende lo verde +20% en 6m, igual en 12m.
+- Para los $500k/día: con lotes de $1M las dos cuentas dan $219k/rueda neto en el último semestre; haría falta lote ×2,3 (capital medio ~$250M) o concentrar en los volátiles.
