@@ -42636,8 +42636,13 @@ function BondDetailModal({ row, spotMayorista, spotMep, futuresLive, curveData, 
 const DLR_RE_CONTRATO = /^DLR\/([A-Z]{3})(\d{2})$/;
 
 /** Último día hábil del mes (sin feriados): el vencimiento de un DLR. */
+// Vencimiento del DLR: último día hábil del mes del contrato. `mes` viene de
+// MESES_ES_A_NUM (0 = enero): el día 0 del mes siguiente es el último día de
+// este mes. (11/10/2026: con Date.UTC(anio, mes, 0) daba el fin del mes
+// ANTERIOR y toda la curva salía con un mes menos: nov 26 con 18 días y 58,8%
+// de TNA en vez de 50 días y 21%.)
 function vtoDlr(mes, anio) {
-  const d = new Date(Date.UTC(anio, mes, 0));
+  const d = new Date(Date.UTC(anio, mes + 1, 0));
   const dow = d.getUTCDay();
   if (dow === 6) d.setUTCDate(d.getUTCDate() - 1);
   else if (dow === 0) d.setUTCDate(d.getUTCDate() - 2);
@@ -42763,7 +42768,9 @@ function CurvaTnaSvg({ filas, spot }) {
   const X = (d) => L + ((d - xMin) / (xMax - xMin)) * (W - L - R);
   const Y = (v) => T + (1 - (v - yMin) / (yMax - yMin)) * (H - T - B);
   const linea = (k) => pts.filter((p) => Number.isFinite(p[k])).map((p, i) => `${i ? "L" : "M"}${X(p.dias).toFixed(1)},${Y(p[k]).toFixed(1)}`).join(" ");
-  const ticksY = []; for (let v = Math.ceil(yMin * 50) / 50; v <= yMax; v += 0.02) ticksY.push(v);
+  // Paso del eje según el rango, para que entren 3 a 6 marcas y no se pisen.
+  const span = yMax - yMin, paso = span > 0.3 ? 0.1 : span > 0.12 ? 0.05 : span > 0.05 ? 0.02 : 0.01;
+  const ticksY = []; for (let v = Math.ceil(yMin / paso) * paso; v <= yMax + 1e-9; v += paso) ticksY.push(Math.round(v * 1000) / 1000);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
       {ticksY.map((v) => (
