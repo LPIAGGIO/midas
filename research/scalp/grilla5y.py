@@ -42,13 +42,18 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False):
+    # senales (11/10, LP): {indice de barra: nivel de entrada} del motor de niveles del
+    # bot de IOL. Con solo_senales=True la grilla NO abre ciclos por su cuenta: al cerrar
+    # la barra de la señal deja una compra límite en el nivel que vive `ventana` barras
+    # (48 h del worker = 14 barras horarias); si no se llena, se cancela y espera otra
+    # señal. senal_mercado=True compra al cierre de la barra de la señal, sin esperar el nivel.
     """corte=None → holdea sin limite. Devuelve metricas en USD."""
     # doble: con la grilla llena, si el precio cae a ancla*(1 - doble*profundidad) compra
     # OTRA VEZ la misma cantidad que tiene y pasa a salir todo junto en promedio + gan.
     X = 99
     # permitido: fechas en las que se puede ABRIR un ciclo nuevo (None = siempre)
-    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV, espera=0, idle=0, nx=0, extras=0, paso=paso, gan=gan, pg=(paso, gan), nb=False, bs=0, tope=None, topes=0, od=None, sube=0)
+    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV, espera=0, idle=0, nx=0, extras=0, paso=paso, gan=gan, pg=(paso, gan), nb=False, bs=0, tope=None, topes=0, od=None, sube=0, nsen=0, ciclos=0)
     lots = {}          # k -> (precio, unidades, costo_usd)
     if inicial:
         E['ancla'] = inicial.get('ancla')
@@ -64,6 +69,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         lots[k] = (px, LOTE * E['fx'] / px, LOTE)
         if E['ancla'] is None:
             E['ancla'] = px
+            E['ciclos'] += 1
             E['paso'], E['gan'] = E['pg']          # el ciclo nace con el paso vigente ese dia
 
     def vender(k, px, fecha):
@@ -177,7 +183,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         if prev_c is not None:
             mover(prev_c, o, fecha, True)
         E['ok'] = permitido is None or fecha in permitido
-        if E['ok'] and E['ancla'] is None and E['parado'] is None and E['reent'] is None and not E['nb'] and not lots:
+        if not solo_senales and E['ok'] and E['ancla'] is None and E['parado'] is None and E['reent'] is None and not E['nb'] and not lots:
             if entrada_off > 0:
                 E['reent'] = o * (1 - entrada_off)   # espera una caida antes de abrir el ciclo
             else:
@@ -185,7 +191,20 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         camino = [o, l, h, c] if c >= o else [o, h, l, c]
         for a, b in zip(camino, camino[1:]):
             mover(a, b, fecha, False)
-        if E['ok'] and E['ancla'] is None and E['parado'] is None and not E['nb'] and not lots:
+        if solo_senales:
+            if E['ancla'] is None and E['parado'] is None and not lots:
+                if E['espera'] > 0:
+                    E['espera'] -= 1
+                elif E['reent'] is not None:
+                    E['reent'] = None   # venció la ventana sin llenarse: se cancela
+                if senales is not None and i in senales and E['ok'] and not E['nb']:
+                    E['nsen'] += 1
+                    if senal_mercado:
+                        E['reent'] = None; E['espera'] = 0
+                        comprar(0, c)
+                    else:
+                        E['reent'] = senales[i]; E['espera'] = ventana
+        elif E['ok'] and E['ancla'] is None and E['parado'] is None and not E['nb'] and not lots:
             if E['tope'] is not None:
                 E['reent'] = max(E['reent'] or 0, E['tope']) if c > E['tope'] else None
                 if c <= E['tope']:
@@ -268,7 +287,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         dd = min(dd, e - pico)
     dias = len({b[0] for b in bars})
     return dict(total=eq[-1], real=E['real'], abierto=eq[-1] - E['real'], rondas=E['rondas'], cortes=E['cortes'], perd=E['perd'], dd=dd,
-                capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio, eq=eq, s_ab=s_ab, s_lot=s_lot, s_cap=s_cap, extras=E['extras'], topes=E['topes'])
+                capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio, eq=eq, s_ab=s_ab, s_lot=s_lot, s_cap=s_cap, extras=E['extras'], topes=E['topes'], nsen=E['nsen'], ciclos=E['ciclos'])
 
 
 CORTES = [0.05, 0.075, 0.10, 0.15, 0.20, 0.30, None]

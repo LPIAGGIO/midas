@@ -402,3 +402,12 @@ Configuración desde el martes 13/10 (configurar-martes.sh): 72404 escalón 1,5x
 ## Reentrada: "si sube 1% desde la apertura, entra" (10/10/2026, reentrada_sube.py)
 
 Grilla 3893 (2x, G, vende lo verde 16:45), por 1000 de capital/día. 60 días 5 min: al precio de apertura 3,02 · un escalón abajo y si no al cierre (ACTUAL) 4,44 · entra si sube 0,5% 3,46 · 1% 3,50 · 1,5% 3,72 · 2% 3,79. 2 años horario: 1,63 · 1,65 · 1,62 · 1,61 · 1,66 · 1,65. La variante es peor en 60 días y neutra en 2 años: queda la regla actual (esperar al cierre). Dejar de operar un día de suba no cuesta; entrar arriba sí.
+
+## La grilla con las entradas del motor de niveles de IOL, sin régimen (11/10/2026, motor_iol.py)
+
+Grilla cuenta 1 (1,5x), 11 papeles, 2 años horario, USD. Señales del cache de backtest-5y (engine.js), gate score ≥ 7, R:R ≥ 2, sin contra-tendencia; límite en el nivel viva 48 h.
+A como corre +38.482 · 1,45 por 1000/día · peor −19.790 · 100% del tiempo comprado · 1.141 ciclos.
+B motor sin régimen +4.355 · 1,22 · peor −6.181 · 12% del tiempo · 112 ciclos de 276 señales (41% llena).
+C motor con régimen +3.309 · 0,96 · 12% · 71 ciclos.
+D motor sin régimen, a mercado al cierre de la barra +8.184 · 1,05 · 27% · 243 ciclos.
+Lectura: el motor no mejora la grilla por unidad de capital (1,22 vs 1,45, −16%) y la deja afuera del mercado el 88% del tiempo (9 veces menos resultado absoluto). El régimen la empeora (0,96), igual que en backtest-5y. Entrar a mercado en la señal duplica los ciclos pero rinde menos por capital (1,05). Coincide con el placebo y la autocorrelación cero: el nivel no agrega edge; la grilla gana por estar comprada y oscilar.

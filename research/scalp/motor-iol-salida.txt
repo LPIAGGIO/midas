@@ -1,0 +1,6 @@
+== grilla cuenta 1 (1,5x) · 11 papeles · velas de 1 hora · USD, lote 460
+   cómo abre el ciclo                                   resultado realizado por 1000/día peor abierto cap. medio vueltas  ciclos % tiempo
+   A  como corre: al precio, siempre                       +38482    +43206         1.45     -19790    36289   10413    1141     100%
+   B  señal del motor SIN régimen, límite en el nivel (48 h)     +4355     +4355         1.22      -6181     4883    1023     112      12%   (276 señales)
+   C  señal del motor CON régimen, límite en el nivel (48 h)     +3309     +3309         0.96      -5994     4744     734      71      12%   (214 señales)
+   D  señal del motor SIN régimen, a mercado al cierre de la barra     +8184     +8661         1.05     -12180    10726    2036     243      27%   (203 señales)
