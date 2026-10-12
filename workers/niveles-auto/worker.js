@@ -830,9 +830,18 @@ async function confirmTouches() {
  * de LP sigue: los papeles entran a mano; esto solo refresca los que él cargó.
  * Las disparadas no se tocan (conservan su veredicto de cierre hasta que él
  * las borre); se recalculan las vigentes con el precio del momento. */
+// Feriados de BYMA (12/10/2026: el bot operó un feriado con EE.UU. abierto).
+// Los que faltan del calendario se agregan por .env sin tocar el código.
+const FERIADOS_BYMA = new Set([
+  "2026-10-12", "2026-11-20", "2026-12-08", "2026-12-25",
+  "2027-01-01", "2027-02-15", "2027-02-16", "2027-03-24", "2027-03-25", "2027-03-26", "2027-04-02", "2027-05-01", "2027-05-25",
+  ...String(process.env.IOL_BOT_FERIADOS || "").split(/[ ,]+/).filter(Boolean),
+]);
 function inUsMarketWindow() {
   const ar = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
   const dow = ar.getDay(), mins = ar.getHours() * 60 + ar.getMinutes();
+  const iso = ar.toLocaleDateString("en-CA");
+  if (FERIADOS_BYMA.has(iso)) return false;
   return dow >= 1 && dow <= 5 && mins >= 10 * 60 + 30 && mins <= 17 * 60;
 }
 async function autoRearm() {
