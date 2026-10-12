@@ -913,6 +913,47 @@ function ContanosButton({ onClick }) {
 // `inline`: sin ventana flotante, para la pantalla de primeros pasos; el botón
 // secundario pasa a ser "Ir al inicio". IOL se conecta acá mismo con su usuario y
 // clave (VincularIOLModal), sin mandar al usuario a otra pantalla (LP 12/10).
+/* Usuario y clave de IOL dentro del recuadro del broker (LP 12/10): misma
+ * llamada que VincularIOLModal (iol-auth login), sin ventana aparte. */
+function VincularIOLInline({ onSuccess }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const inp = { width: "100%", padding: "6px 8px", fontSize: 12, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, colorScheme: "dark" };
+  const enviar = async () => {
+    if (!username.trim() || !password || submitting) return;
+    setSubmitting(true); setError(null);
+    try {
+      const { data, error: invokeErr } = await supabase.functions.invoke("iol-auth", { body: { action: "login", username: username.trim(), password } });
+      if (invokeErr || !data || !data.ok) {
+        let msg = "No se pudo vincular. Verificá tu usuario y contraseña de IOL.";
+        try {
+          if (invokeErr && invokeErr.context && typeof invokeErr.context.json === "function") {
+            const body = await invokeErr.context.json();
+            if (body?.iol_response?.error_description) msg = body.iol_response.error_description;
+            else if (body?.error && body.error !== "iol_auth_failed") msg = `Error: ${body.error}`;
+          } else if (data?.error && data.error !== "iol_auth_failed") msg = `Error: ${data.error}`;
+        } catch { /* mensaje genérico */ }
+        setError(msg); setSubmitting(false); return;
+      }
+      setPassword(""); setSubmitting(false);
+      onSuccess && onSuccess();
+    } catch { setError("Error de red. Revisá tu conexión e intentá de nuevo."); setSubmitting(false); }
+  };
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "center" }}>
+        <input placeholder="Usuario de IOL" value={username} onChange={(e) => setUsername(e.target.value)} style={inp} autoComplete="off" />
+        <input placeholder="Clave de IOL" type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") enviar(); }} style={inp} autoComplete="new-password" />
+        <button onClick={enviar} disabled={submitting || !username.trim() || !password} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${C.accent}`, background: C.accent, color: C.bg, whiteSpace: "nowrap", opacity: submitting ? 0.6 : 1 }}>{submitting ? "Conectando…" : "Conectar IOL"}</button>
+      </div>
+      <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>Tu contraseña no se guarda: se usa una sola vez para obtener el token de la API oficial de IOL.</div>
+      {error && <div style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{error}</div>}
+    </div>
+  );
+}
+
 function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false }) {
   const { user } = useAuth();
   const [filas, setFilas] = useState(null);
@@ -920,7 +961,6 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
   const [cred, setCred] = useState({});
   const [msg, setMsg] = useState({});
   const [guardando, setGuardando] = useState(false);
-  const [vincIol, setVincIol] = useState(false);
   const lista = Object.values(BROKER_CATALOG).filter((b) => b.id !== "manual");
 
   const recargar = useCallback(async () => {
@@ -968,7 +1008,6 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
   const btn = (primario) => ({ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${C.accent}`, background: primario ? C.accent : "transparent", color: primario ? C.bg : C.accent, whiteSpace: "nowrap" });
   const cuerpo = (
       <div onClick={(e) => e.stopPropagation()} style={inline ? { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 } : { width: "min(760px, 100%)", maxHeight: "90vh", overflow: "auto", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
-        {vincIol && <VincularIOLModal onClose={() => setVincIol(false)} onSuccess={() => { setVincIol(false); recargar(); onChanged && onChanged(); }} />}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
           <span style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'Raleway', sans-serif" }}>Dá de alta tus brokers</span>
           {!inline && <button onClick={onClose} style={{ fontSize: 13, cursor: "pointer", background: "transparent", color: C.dim, border: "none" }}>✕</button>}
@@ -995,10 +1034,14 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
             <div key={id} style={{ marginTop: 12, padding: "10px 12px", border: `1px solid ${C.border}`, borderRadius: 8 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: C.text, marginBottom: 6 }}>{b.label}</div>
               {b.type === "api" ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 11, color: C.muted, flex: 1 }}>{f?.status === "active" ? "Conectado por API." : "Se conecta con tu usuario y clave de IOL, por la API oficial. Cotizaciones en tiempo real y sincronización automática de tu cartera."}</span>
-                  {f?.status !== "active" && <button onClick={() => setVincIol(true)} style={btn(true)}>Conectar IOL con usuario y clave</button>}
-                </div>
+                f?.status === "active" ? (
+                  <div style={{ fontSize: 11, color: C.green }}>Conectado por API.</div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>Se conecta con tu usuario y clave de IOL, por la API oficial: cotizaciones en tiempo real y sincronización automática de tu cartera.</div>
+                    <VincularIOLInline onSuccess={() => { recargar(); onChanged && onChanged(); }} />
+                  </div>
+                )
               ) : b.matriz ? (
                 <div>
                   <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
@@ -1260,7 +1303,35 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
   // (12/10/2026, LP) El banner "Conectá tu cuenta IOL" se sacó: el alta de
   // brokers, IOL incluido, es el primer paso de la lista de bienvenida. Y un
   // usuario sin brokers ve la pantalla de primeros pasos en lugar del tablero.
-  const [primerosPasosListo, setPrimerosPasosListo] = useState(() => { try { return localStorage.getItem(PRIMEROS_PASOS_KEY) === "1"; } catch { return false; } });
+  // Estado de "primeros pasos": se lee de user_onboarding (y del navegador como
+  // atajo). Una vez que la pantalla se muestra, queda fija hasta que el usuario
+  // apreta Guardar o Ir al inicio: antes, conectar IOL hacía aparecer un broker
+  // y la detección automática lo mandaba al tablero a mitad del alta.
+  const [ppEstado, setPpEstado] = useState("cargando");
+  const [primerosPasosActivo, setPrimerosPasosActivo] = useState(false);
+  useEffect(() => {
+    if (!authUser?.id) return;
+    let vivo = true;
+    (async () => {
+      let listo = false;
+      try { listo = localStorage.getItem(PRIMEROS_PASOS_KEY) === "1"; } catch { /* sin storage */ }
+      if (!listo) {
+        const { data } = await supabase.from("user_onboarding").select("paso").eq("user_id", authUser.id).eq("paso", "primeros_pasos").limit(1);
+        listo = !!(data && data.length);
+      }
+      if (vivo) setPpEstado(listo ? "listo" : "pendiente");
+    })();
+    return () => { vivo = false; };
+  }, [authUser?.id]);
+  useEffect(() => {
+    if (ppEstado === "pendiente" && !brokersLoading && !hasAnyBroker && !primerosPasosActivo) setPrimerosPasosActivo(true);
+  }, [ppEstado, brokersLoading, hasAnyBroker, primerosPasosActivo]);
+  const terminarPrimerosPasos = async () => {
+    setPrimerosPasosActivo(false); setPpEstado("listo");
+    try { localStorage.setItem(PRIMEROS_PASOS_KEY, "1"); } catch { /* sin storage */ }
+    if (authUser?.id) await supabase.from("user_onboarding").insert({ user_id: authUser.id, paso: "primeros_pasos" }).then(() => {}, () => {});
+    refetchBrokers();
+  };
 
   // Mostrar badge en engranaje: punto rojo si algún broker está en error/expired,
   // punto azul si no hay ningún broker vinculado todavía. Solo después de
@@ -1970,10 +2041,10 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
             ) : active === "flujo-posiciones" ? (
               <PositionFlowModule key={active} alertsSys={globalAlerts} />
             ) : active === "primeros-pasos" ? (
-              <PrimerosPasosScreen key={active} onDone={() => { setPrimerosPasosListo(true); refetchBrokers(); setActive("dashboard"); }} onNavigate={setActive} />
+              <PrimerosPasosScreen key={active} onDone={() => { terminarPrimerosPasos(); setActive("dashboard"); }} onNavigate={setActive} />
             ) : active === "dashboard" ? (
-              (!!authUser && !brokersLoading && !hasAnyBroker && !primerosPasosListo) ? (
-                <PrimerosPasosScreen onDone={() => { setPrimerosPasosListo(true); refetchBrokers(); }} onNavigate={setActive} />
+              primerosPasosActivo ? (
+                <PrimerosPasosScreen onDone={terminarPrimerosPasos} onNavigate={setActive} />
               ) : (
               <><OnboardingChecklist onNavigate={setActive} /><DashboardModule /></>
               )
