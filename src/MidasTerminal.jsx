@@ -1085,9 +1085,8 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
  * en lugar del tablero mientras el usuario no tenga ningún broker dado de alta y
  * no la haya saltado. "Ir al inicio" la salta (queda en localStorage); con un
  * broker dado de alta ya no vuelve a aparecer. */
-const PRIMEROS_PASOS_KEY = "midas:primeros-pasos-listo";
 function PrimerosPasosScreen({ onDone, onNavigate }) {
-  const listo = () => { try { localStorage.setItem(PRIMEROS_PASOS_KEY, "1"); } catch { /* sin storage */ } onDone && onDone(); };
+  const listo = () => { onDone && onDone(); };
   return (
     <div style={{ padding: "32px 32px 60px", maxWidth: 860, margin: "0 auto" }}>
       <div style={{ fontSize: 11, color: C.accent, letterSpacing: "0.14em", textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Primeros pasos</div>
@@ -1313,13 +1312,10 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
     if (!authUser?.id) return;
     let vivo = true;
     (async () => {
-      let listo = false;
-      try { listo = localStorage.getItem(PRIMEROS_PASOS_KEY) === "1"; } catch { /* sin storage */ }
-      if (!listo) {
-        const { data } = await supabase.from("user_onboarding").select("paso").eq("user_id", authUser.id).eq("paso", "primeros_pasos").limit(1);
-        listo = !!(data && data.length);
-      }
-      if (vivo) setPpEstado(listo ? "listo" : "pendiente");
+      // Solo la base: una marca en el navegador (la versión anterior la usaba) hacía
+      // que la pantalla no apareciera en una ventana y sí en otra.
+      const { data } = await supabase.from("user_onboarding").select("paso").eq("user_id", authUser.id).eq("paso", "primeros_pasos").limit(1);
+      if (vivo) setPpEstado(data && data.length ? "listo" : "pendiente");
     })();
     return () => { vivo = false; };
   }, [authUser?.id]);
@@ -1328,7 +1324,6 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
   }, [ppEstado, brokersLoading, hasAnyBroker, primerosPasosActivo]);
   const terminarPrimerosPasos = async () => {
     setPrimerosPasosActivo(false); setPpEstado("listo");
-    try { localStorage.setItem(PRIMEROS_PASOS_KEY, "1"); } catch { /* sin storage */ }
     if (authUser?.id) await supabase.from("user_onboarding").insert({ user_id: authUser.id, paso: "primeros_pasos" }).then(() => {}, () => {});
     refetchBrokers();
   };
