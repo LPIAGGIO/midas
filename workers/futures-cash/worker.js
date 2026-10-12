@@ -50,7 +50,7 @@ async function capturarSettles(hoy) {
 
 async function ajustesDelDia(hoy) {
   const { data: pos } = await supabase.from("positions")
-    .select("user_id,ticker,operation_type,quantity,entry_price,entry_date")
+    .select("user_id,cuenta,ticker,operation_type,quantity,entry_price,entry_date")
     .eq("instrument_type", "future").eq("broker", "cocos");
   if (!pos?.length) return;
 
@@ -65,12 +65,15 @@ async function ajustesDelDia(hoy) {
     if (s.length < 2 && !s.find((x) => x.settle_date === h.settle_date)) s.push(h);
   }
 
+  // Por usuario Y cuenta (varias cuentas de Cocos, 12/10/2026): el neto de un
+  // futuro se calcula dentro de cada cuenta y su caja va a esa cuenta.
   const porUser = {};
-  for (const p of pos) (porUser[p.user_id] = porUser[p.user_id] || []).push(p);
+  for (const p of pos) { const k = `${p.user_id}|${p.cuenta || "principal"}`; (porUser[k] = porUser[k] || []).push(p); }
 
-  for (const [uid, filas] of Object.entries(porUser)) {
+  for (const [clave, filas] of Object.entries(porUser)) {
+    const [uid, cuenta] = clave.split("|");
     const { count } = await supabase.from("cash_movements")
-      .select("id", { count: "exact", head: true }).eq("user_id", uid).eq("broker", "cocos");
+      .select("id", { count: "exact", head: true }).eq("user_id", uid).eq("broker", "cocos").eq("cuenta", cuenta);
     if (!count) { log(`user ${uid.slice(0, 8)}: sin caja mantenida, salteado`); continue; }
 
     const porTicker = {};
@@ -96,7 +99,8 @@ async function ajustesDelDia(hoy) {
       const ajuste = Math.round(((sHoy - sPrev) * netoPrevio * mult + ajusteHoy) * 100) / 100;
       if (Math.abs(ajuste) < 0.005) { log(`user ${uid.slice(0, 8)} ${tk}: ajuste 0 (settle sin cambio)`); continue; }
 
-      const ref = `idx-${tk}-${hoy}-${uid.slice(0, 8)}`;
+      // La principal conserva el formato viejo de ref (idempotencia con lo ya cargado).
+      const ref = `idx-${tk}-${hoy}-${uid.slice(0, 8)}` + (cuenta === "principal" ? "" : `-${cuenta}`);
       const { data: ya } = await supabase.from("cash_movements")
         .select("id").eq("user_id", uid).eq("source_ref", ref).maybeSingle();
       if (ya) { log(`user ${uid.slice(0, 8)} ${tk}: ya cargado (${ref})`); continue; }
@@ -104,7 +108,7 @@ async function ajustesDelDia(hoy) {
       const { error } = await supabase.from("cash_movements").insert({
         user_id: uid, movement_date: hoy,
         movement_type: ajuste >= 0 ? "deposit" : "withdrawal",
-        currency: "ARS", amount: Math.abs(ajuste), broker: "cocos",
+        currency: "ARS", amount: Math.abs(ajuste), broker: "cocos", cuenta,
         notes: `${ajuste >= 0 ? "Credito" : "Debito"} indice ${tk} (settle ${sPrev} -> ${sHoy}, neto ${netoTotal})`,
         source_ref: ref,
       });

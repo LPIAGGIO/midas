@@ -98,7 +98,7 @@ async function main() {
 
   const { data: cauciones, error: e1 } = await supabase
     .from('positions')
-    .select('id, ticker, quantity, entry_currency, entry_date, extra, user_id')
+    .select('id, ticker, quantity, entry_currency, entry_date, extra, user_id, broker, cuenta')
     .eq('instrument_type', 'caucion');
 
   if (e1) {
@@ -178,6 +178,9 @@ async function main() {
             `— capital+interés teórico, ajustar al boleto si difiere`,
           related_position_id: null,
           user_id: c.user_id,
+          // La plata vuelve a la cuenta de la caución (varias cuentas por broker).
+          broker: c.broker || null,
+          cuenta: c.cuenta || 'principal',
         });
 
       if (e2) {
