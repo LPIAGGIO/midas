@@ -900,20 +900,153 @@ function ContanosButton({ onClick }) {
  * autodetectan mirando si el dato ya existe — no tiene sentido pedirle que
  * tilde algo que ya hizo.
  */
+/* Alta de brokers (12/10/2026, LP): "primero algo que diga dá de alta tus
+ * brokers, y ahí seleccionás todos los que tenés; si tenés Matriz con alguno,
+ * que puedan poner la clave y se sincronice, como el de Cocos".
+ * - Tildar un broker crea su fila en linked_brokers (status "manual"); destildar
+ *   borra la fila solo si no tiene credenciales ni conexión.
+ * - IOL se conecta por API desde Conexiones (botón).
+ * - Brokers con Matriz: usuario, clave y comitente van al RPC
+ *   guardar_credencial_matriz, que los guarda en Vault; el navegador nunca los
+ *   vuelve a leer. Queda "pendiente" hasta la primera sincronización del worker.
+ * - Los demás: se cargan por archivo desde Importaciones. */
+function AltaBrokersModal({ open, onClose, onNavigate, onChanged }) {
+  const { user } = useAuth();
+  const [filas, setFilas] = useState(null);
+  const [sel, setSel] = useState(new Set());
+  const [cred, setCred] = useState({});
+  const [msg, setMsg] = useState({});
+  const [guardando, setGuardando] = useState(false);
+  const lista = Object.values(BROKER_CATALOG).filter((b) => b.id !== "manual");
+
+  useEffect(() => {
+    if (!open || !user?.id) return;
+    let vivo = true;
+    supabase.from("linked_brokers").select("id,broker,status,vault_secret_name,broker_user_id,broker_account_id,status_message").eq("user_id", user.id)
+      .then(({ data }) => { if (!vivo) return; setFilas(data || []); setSel(new Set((data || []).map((r) => r.broker))); });
+    return () => { vivo = false; };
+  }, [open, user?.id]);
+
+  if (!open) return null;
+  const filaDe = (id) => (filas || []).find((r) => r.broker === id);
+  const toggle = (id) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const setC = (id, k, v) => setCred((c) => ({ ...c, [id]: { ...(c[id] || {}), [k]: v } }));
+
+  const guardarSeleccion = async () => {
+    if (!user?.id) return;
+    setGuardando(true);
+    try {
+      const actuales = new Set((filas || []).map((r) => r.broker));
+      const nuevos = [...sel].filter((id) => !actuales.has(id)).map((id) => ({ user_id: user.id, broker: id, label: BROKER_CATALOG[id]?.label || id, status: "manual", status_message: "Dado de alta. Cargá sus movimientos desde Importaciones." }));
+      if (nuevos.length) await supabase.from("linked_brokers").insert(nuevos);
+      // destildados: solo los que no tienen credenciales ni conexión
+      const sacar = (filas || []).filter((r) => !sel.has(r.broker) && r.status === "manual" && !r.vault_secret_name);
+      for (const r of sacar) await supabase.from("linked_brokers").delete().eq("id", r.id).eq("user_id", user.id);
+      onChanged && onChanged();
+      onClose();
+    } catch (e) {
+      setMsg((m) => ({ ...m, _: "No pude guardar: " + (e?.message || "error") }));
+    } finally { setGuardando(false); }
+  };
+
+  const guardarMatriz = async (id) => {
+    const c = cred[id] || {};
+    if (!c.usuario || !c.clave) { setMsg((m) => ({ ...m, [id]: "Falta el usuario o la clave de Matriz." })); return; }
+    setMsg((m) => ({ ...m, [id]: "Guardando…" }));
+    const { error } = await supabase.rpc("guardar_credencial_matriz", { p_broker: id, p_usuario: c.usuario, p_clave: c.clave, p_comitente: c.comitente || null, p_label: BROKER_CATALOG[id]?.label || id });
+    if (error) { setMsg((m) => ({ ...m, [id]: "No se pudo guardar: " + error.message })); return; }
+    setCred((x) => ({ ...x, [id]: { usuario: c.usuario, comitente: c.comitente, clave: "" } }));
+    setMsg((m) => ({ ...m, [id]: "Guardado. Queda pendiente de la primera sincronización." }));
+    const { data } = await supabase.from("linked_brokers").select("id,broker,status,vault_secret_name,broker_user_id,broker_account_id,status_message").eq("user_id", user.id);
+    setFilas(data || []); setSel(new Set((data || []).map((r) => r.broker)));
+    onChanged && onChanged();
+  };
+
+  const inp = { width: "100%", padding: "6px 8px", fontSize: 12, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, colorScheme: "dark" };
+  const btn = (primario) => ({ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${C.accent}`, background: primario ? C.accent : "transparent", color: primario ? C.bg : C.accent, whiteSpace: "nowrap" });
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(760px, 100%)", maxHeight: "90vh", overflow: "auto", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+          <span style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'Raleway', sans-serif" }}>Dá de alta tus brokers</span>
+          <button onClick={onClose} style={{ fontSize: 13, cursor: "pointer", background: "transparent", color: C.dim, border: "none" }}>✕</button>
+        </div>
+        <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 14 }}>Tildá todos los que usás. IOL se conecta por API. Si en alguno operás con Matriz, cargá tu clave y Midas sincroniza la cuenta solo. Los demás se cargan subiendo el archivo de movimientos.</div>
+        {filas === null ? <div style={{ color: C.muted, fontSize: 12 }}>Cargando…</div> : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+            {lista.map((b) => {
+              const on = sel.has(b.id);
+              return (
+                <label key={b.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", border: `1px solid ${on ? C.accent : C.border}`, borderRadius: 6, cursor: "pointer", background: on ? "rgba(124,156,255,0.08)" : "transparent" }}>
+                  <input type="checkbox" checked={on} onChange={() => toggle(b.id)} style={{ accentColor: C.accent }} />
+                  <span style={{ width: 28, textAlign: "center", fontSize: 9, fontWeight: 700, color: b.color, letterSpacing: "0.06em" }}>{b.short}</span>
+                  <span style={{ fontSize: 12, color: C.text, flex: 1 }}>{b.label}</span>
+                  {b.type === "api" ? <span style={{ fontSize: 9, color: C.accent }}>API</span> : b.matriz ? <span style={{ fontSize: 9, color: C.muted }}>Matriz</span> : null}
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {[...sel].filter((id) => BROKER_CATALOG[id]).map((id) => {
+          const b = BROKER_CATALOG[id], f = filaDe(id), c = cred[id] || {};
+          return (
+            <div key={id} style={{ marginTop: 12, padding: "10px 12px", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: C.text, marginBottom: 6 }}>{b.label}</div>
+              {b.type === "api" ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, color: C.muted, flex: 1 }}>{f?.status === "active" ? "Conectado por API." : "Se conecta con tu usuario de IOL, por API oficial. Cotizaciones en tiempo real y sincronización automática."}</span>
+                  {f?.status !== "active" && <button onClick={() => { onClose(); onNavigate && onNavigate("settings"); }} style={btn(true)}>Conectar IOL →</button>}
+                </div>
+              ) : b.matriz ? (
+                <div>
+                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                    {f?.vault_secret_name ? `Credenciales cargadas (usuario ${f.broker_user_id || "—"}${f.broker_account_id ? ", comitente " + f.broker_account_id : ""}). ${f.status_message || ""}` : "Si operás con Matriz en este broker, cargá tu usuario y clave de Matriz: Midas sincroniza la tenencia y el saldo todas las mañanas. La clave se guarda cifrada en el servidor y no vuelve al navegador."}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
+                    <input placeholder="Usuario de Matriz" value={c.usuario || ""} onChange={(e) => setC(id, "usuario", e.target.value)} style={inp} autoComplete="off" />
+                    <input placeholder="Clave de Matriz" type="password" value={c.clave || ""} onChange={(e) => setC(id, "clave", e.target.value)} style={inp} autoComplete="new-password" />
+                    <input placeholder="N° de comitente (opcional)" value={c.comitente || ""} onChange={(e) => setC(id, "comitente", e.target.value)} style={inp} autoComplete="off" />
+                    <button onClick={() => guardarMatriz(id)} style={btn(false)}>{f?.vault_secret_name ? "Actualizar" : "Guardar y sincronizar"}</button>
+                  </div>
+                  {msg[id] && <div style={{ fontSize: 11, color: msg[id].startsWith("No") || msg[id].startsWith("Falta") ? C.red : C.green, marginTop: 6 }}>{msg[id]}</div>}
+                  {b.importa && <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>También podés subir el archivo de movimientos desde Importaciones: de ahí sale el histórico completo.</div>}
+                </div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, color: C.muted, flex: 1 }}>{b.importa ? "Se carga subiendo el archivo de tenencia o movimientos del broker, desde Importaciones." : "Todavía no hay importador para este broker: contanos qué archivo exporta y lo sumamos. Mientras tanto podés cargar posiciones a mano."}</span>
+                  <button onClick={() => { onClose(); onNavigate && onNavigate("importaciones"); }} style={btn(false)}>Ir a Importaciones →</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {msg._ && <div style={{ fontSize: 11, color: C.red, marginTop: 10 }}>{msg._}</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+          <button onClick={onClose} style={btn(false)}>Cerrar</button>
+          <button onClick={guardarSeleccion} disabled={guardando || filas === null} style={btn(true)}>{guardando ? "Guardando…" : "Guardar brokers"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OnboardingChecklist({ onNavigate }) {
   const { user } = useAuth();
   const [hechos, setHechos] = useState(null);
   const [oculto, setOculto] = useState(false);
   const [auto, setAuto] = useState({});
+  const [altaOpen, setAltaOpen] = useState(false);
+  const [refresco, setRefresco] = useState(0);
 
   useEffect(() => {
     if (!user?.id) return;
     let vivo = true;
     (async () => {
-      const [{ data: pasos }, { data: lotes }, { data: aper }] = await Promise.all([
+      const [{ data: pasos }, { data: lotes }, { data: aper }, { data: brok }] = await Promise.all([
         supabase.from("user_onboarding").select("paso").eq("user_id", user.id),
         supabase.from("import_batches").select("id").eq("user_id", user.id).limit(1),
         supabase.from("broker_opening_cash").select("currency").eq("user_id", user.id).limit(1),
+        supabase.from("linked_brokers").select("broker").eq("user_id", user.id).limit(1),
       ]);
       // el link de Telegram vive en telegram_links; si ya esta vinculado, el
       // paso va tildado solo (mismo criterio que los otros tres)
@@ -926,17 +1059,20 @@ function OnboardingChecklist({ onNavigate }) {
       if (!vivo) return;
       setHechos(new Set((pasos || []).map((p) => p.paso)));
       setAuto({
+        brokers: (brok || []).length > 0,
         importar: (lotes || []).length > 0,
         apertura: (aper || []).length > 0,
         telegram: tg.length > 0,
       });
     })();
     return () => { vivo = false; };
-  }, [user?.id]);
+  }, [user?.id, refresco]);
 
+  // El saldo de apertura recién tiene sentido después de importar: hasta ahí no se muestra.
   const PASOS = [
-    { id: "importar", t: "Importá tu cuenta corriente", d: "Bajá el CSV de movimientos de tu broker y subilo. De ahí sale tu cartera y tu caja.", ir: "importaciones", cta: "Ir a Importaciones" },
-    { id: "apertura", t: "Cargá el saldo de apertura", d: "El CSV no dice con cuánto arrancaste. Sin ese dato tu caja queda corrida contra la del broker.", ir: "importaciones", cta: "Cargarlo" },
+    { id: "brokers", t: "Dá de alta tus brokers", d: "Tildá todos los que usás. IOL se conecta por API; si operás con Matriz, cargá tu clave y se sincroniza solo.", cta: "Dar de alta" },
+    { id: "importar", t: "Importá tus movimientos", d: "Subí el archivo de movimientos de cada broker. De ahí salen tu cartera, tu caja y tu histórico.", ir: "importaciones", cta: "Ir a Importaciones" },
+    ...(auto.importar ? [{ id: "apertura", t: "Cargá el saldo de apertura", d: "El saldo que tenías el día anterior al primer movimiento del archivo. Con eso tu caja cierra igual que la del broker.", ir: "importaciones", cta: "Cargarlo" }] : []),
     { id: "telegram", t: "Conectá Telegram", d: "Para que los avisos te lleguen al teléfono, con Midas cerrado.", ir: "settings", cta: "Conectar" },
   ];
 
@@ -963,8 +1099,9 @@ function OnboardingChecklist({ onNavigate }) {
         </div>
       </div>
       <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 14 }}>
-        Con esto la pantalla empieza a decirte algo. Sin importar tu cuenta, Midas está vacío.
+        Con estos pasos Midas arma tu cartera, tu caja y tu histórico, y empieza a avisarte lo que importa.
       </div>
+      <AltaBrokersModal open={altaOpen} onClose={() => setAltaOpen(false)} onNavigate={onNavigate} onChanged={() => setRefresco((x) => x + 1)} />
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {PASOS.map((p) => {
           const ok = listo(p);
@@ -978,7 +1115,7 @@ function OnboardingChecklist({ onNavigate }) {
                 <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>{p.d}</div>
               </div>
               {!ok && (
-                <button onClick={() => { if (onNavigate) onNavigate(p.ir); }}
+                <button onClick={() => { if (p.id === "brokers") setAltaOpen(true); else if (onNavigate) onNavigate(p.ir); }}
                   style={{ padding: "6px 13px", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, background: "transparent", color: C.accent, border: `1px solid ${C.accent}`, borderRadius: 6, whiteSpace: "nowrap" }}>
                   {p.cta}
                 </button>
@@ -1092,31 +1229,8 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
     (b) => b.status === "error" || b.status === "expired"
   );
 
-  // Banner de onboarding "Conectá IOL" — el usuario lo puede dismissear
-  // y queda guardado en localStorage para no insistir.
-  const [bannerDismissed, setBannerDismissed] = useState(() => {
-    try {
-      return localStorage.getItem("midas:iol-banner-dismissed") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const dismissBanner = () => {
-    try {
-      localStorage.setItem("midas:iol-banner-dismissed", "1");
-    } catch {
-      // ignore quota / privacy errors
-    }
-    setBannerDismissed(true);
-  };
-  // Show solo si: auth resuelta, fetch terminó, no hay IOL, no dismisseó, no está
-  // ya en settings.
-  const showIolBanner =
-    !!authUser &&
-    !brokersLoading &&
-    !hasIolLinked &&
-    !bannerDismissed &&
-    active !== "settings";
+  // (12/10/2026, LP) El banner "Conectá tu cuenta IOL" se sacó: el alta de
+  // brokers, IOL incluido, es el primer paso de la lista de bienvenida.
 
   // Mostrar badge en engranaje: punto rojo si algún broker está en error/expired,
   // punto azul si no hay ningún broker vinculado todavía. Solo después de
@@ -1707,12 +1821,6 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
 
           {/* Router del workspace según item activo */}
           <div className="absolute inset-0 overflow-auto eco-scroll" style={{ paddingBottom: "calc(26px + env(safe-area-inset-bottom))" }}>
-            {showIolBanner && (
-              <IOLConnectBanner
-                onConnect={() => setActive("settings")}
-                onDismiss={dismissBanner}
-              />
-            )}
             {active === "compara-dolar" ? (
               <ComparaDolarModule />
             ) : active === "carry-trade" ? (
@@ -2633,12 +2741,32 @@ function IOLConnectBanner({ onConnect, onDismiss }) {
  * acepta cualquier string en positions.broker / linked_brokers.broker).
  */
 
+// Catálogo de brokers (12/10/2026, LP: "dá de alta tus brokers: todos los que
+// tenés"). `matriz: true` = opera con Matriz (Primary): el usuario puede cargar
+// su clave y Midas sincroniza la cuenta, como la de Cocos. `importa` = tiene
+// importador de archivo (ver BROKER_IMPORT_INFO). Los ids viejos no cambian.
 const BROKER_CATALOG = {
-  iol:    { id: "iol",    label: "InvertirOnline (IOL)", short: "IOL",  type: "api",    color: "#FFD400" },
-  cocos:  { id: "cocos",  label: "Cocos Capital",        short: "COC",  type: "manual", color: "#7C3AED" },
-  balanz: { id: "balanz", label: "Balanz",               short: "BAL",  type: "manual", color: "#34D399" },
-  eco:    { id: "eco",    label: "ECO Valores",          short: "ECO",  type: "manual", color: "#10B981" },
-  manual: { id: "manual", label: "Otro / Manual",        short: "MAN",  type: "manual", color: "#94A3B8" },
+  iol:        { id: "iol",        label: "InvertirOnline (IOL)",   short: "IOL", type: "api",    color: "#FFD400", importa: false },
+  cocos:      { id: "cocos",      label: "Cocos Capital",          short: "COC", type: "manual", color: "#7C3AED", matriz: true,  importa: true },
+  balanz:     { id: "balanz",     label: "Balanz",                 short: "BAL", type: "manual", color: "#34D399", importa: true },
+  eco:        { id: "eco",        label: "ECO Valores",            short: "ECO", type: "manual", color: "#10B981", matriz: true },
+  bullmarket: { id: "bullmarket", label: "Bull Market Brokers",    short: "BMB", type: "manual", color: "#F59E0B", matriz: true },
+  veta:       { id: "veta",       label: "Veta Capital",           short: "VET", type: "manual", color: "#F472B6", matriz: true },
+  ppi:        { id: "ppi",        label: "Portfolio Personal (PPI)", short: "PPI", type: "manual", color: "#60A5FA" },
+  allaria:    { id: "allaria",    label: "Allaria",                short: "ALL", type: "manual", color: "#A78BFA" },
+  adcap:      { id: "adcap",      label: "Adcap",                  short: "ADC", type: "manual", color: "#FB7185" },
+  rava:       { id: "rava",       label: "Rava Bursátil",          short: "RAV", type: "manual", color: "#2DD4BF" },
+  inviu:      { id: "inviu",      label: "Inviu (Galicia)",        short: "INV", type: "manual", color: "#FB923C" },
+  santander:  { id: "santander",  label: "Santander",              short: "SAN", type: "manual", color: "#EF4444" },
+  bbva:       { id: "bbva",       label: "BBVA",                   short: "BBV", type: "manual", color: "#3B82F6" },
+  macro:      { id: "macro",      label: "Banco Macro",            short: "MAC", type: "manual", color: "#06B6D4" },
+  icbc:       { id: "icbc",       label: "ICBC",                   short: "ICB", type: "manual", color: "#DC2626" },
+  supervielle:{ id: "supervielle",label: "Supervielle",            short: "SUP", type: "manual", color: "#84CC16" },
+  hsbc:       { id: "hsbc",       label: "HSBC / Galicia Más",     short: "HSB", type: "manual", color: "#E11D48" },
+  cohen:      { id: "cohen",      label: "Cohen",                  short: "COH", type: "manual", color: "#8B5CF6" },
+  sbs:        { id: "sbs",        label: "SBS",                    short: "SBS", type: "manual", color: "#14B8A6" },
+  bavsa:      { id: "bavsa",      label: "Buenos Aires Valores",   short: "BAV", type: "manual", color: "#F97316" },
+  manual:     { id: "manual",     label: "Otro / Manual",          short: "MAN", type: "manual", color: "#94A3B8" },
 };
 
 // Opciones de broker para los selectores de carga MANUAL (Agregar posición /
@@ -3679,6 +3807,7 @@ function NotificationsTab({ userId }) {
 }
 
 function BrokersTab({ brokers, loading, stats, userId, refetchBrokers, cashSnapshots }) {
+  const [altaOpen, setAltaOpen] = useState(false);   // misma ventana de alta que la lista de bienvenida
   // Merge: si hay positions con un broker pero todavía no hay row en
   // linked_brokers, lo mostramos igual como "detectado" para que el user
   // entienda que la app ya conoce ese broker (los manuales pueden no tener
@@ -3747,13 +3876,10 @@ function BrokersTab({ brokers, loading, stats, userId, refetchBrokers, cashSnaps
       </div>
 
       {/* Botón agregar broker */}
+      <AltaBrokersModal open={altaOpen} onClose={() => setAltaOpen(false)} onNavigate={null} onChanged={() => refetchBrokers && refetchBrokers()} />
       <div style={{ marginTop: 16 }}>
         <button
-          onClick={() =>
-            alert(
-              "Selector de broker manual — próximamente.\n\nPodrás registrar otros brokers que opers manualmente (por ej. Balanz, Bull Market, etc.) para que tus positions queden taggeadas correctamente."
-            )
-          }
+          onClick={() => setAltaOpen(true)}
           className="flex items-center"
           style={{
             background: "transparent",
@@ -3900,6 +4026,9 @@ function BrokerCard({ id, meta, linked, positionCount, userId, refetchBrokers, c
           </div>
           {hasError && linked.status_message && (
             <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>⚠ {linked.status_message}</div>
+          )}
+          {linked && (linked.status === "pending" || linked.status === "manual") && linked.status_message && (
+            <div style={{ fontSize: 11, color: linked.status === "pending" ? C.accent : C.dim, marginTop: 4 }}>{linked.status_message}</div>
           )}
         </div>
 
