@@ -1127,6 +1127,7 @@ function OnboardingChecklist({ onNavigate }) {
       </div>
       <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 14 }}>
         Con estos pasos Midas arma tu cartera, tu caja y tu histórico, y empieza a avisarte lo que importa.
+        {!auto.brokers && onNavigate && <>{" "}<a href="#primeros-pasos" onClick={(e) => { e.preventDefault(); onNavigate("primeros-pasos"); }} style={{ color: C.accent }}>Abrir la pantalla de primeros pasos</a>.</>}
       </div>
       <AltaBrokersModal open={altaOpen} onClose={() => setAltaOpen(false)} onNavigate={onNavigate} onChanged={() => setRefresco((x) => x + 1)} />
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1968,6 +1969,8 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
               <DesarbitrajesModule key={active} />
             ) : active === "flujo-posiciones" ? (
               <PositionFlowModule key={active} alertsSys={globalAlerts} />
+            ) : active === "primeros-pasos" ? (
+              <PrimerosPasosScreen key={active} onDone={() => { setPrimerosPasosListo(true); refetchBrokers(); setActive("dashboard"); }} onNavigate={setActive} />
             ) : active === "dashboard" ? (
               (!!authUser && !brokersLoading && !hasAnyBroker && !primerosPasosListo) ? (
                 <PrimerosPasosScreen onDone={() => { setPrimerosPasosListo(true); refetchBrokers(); }} onNavigate={setActive} />
