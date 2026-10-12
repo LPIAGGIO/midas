@@ -910,22 +910,25 @@ function ContanosButton({ onClick }) {
  *   guardar_credencial_matriz, que los guarda en Vault; el navegador nunca los
  *   vuelve a leer. Queda "pendiente" hasta la primera sincronización del worker.
  * - Los demás: se cargan por archivo desde Importaciones. */
-function AltaBrokersModal({ open, onClose, onNavigate, onChanged }) {
+// `inline`: sin ventana flotante, para la pantalla de primeros pasos; el botón
+// secundario pasa a ser "Ir al inicio". IOL se conecta acá mismo con su usuario y
+// clave (VincularIOLModal), sin mandar al usuario a otra pantalla (LP 12/10).
+function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false }) {
   const { user } = useAuth();
   const [filas, setFilas] = useState(null);
   const [sel, setSel] = useState(new Set());
   const [cred, setCred] = useState({});
   const [msg, setMsg] = useState({});
   const [guardando, setGuardando] = useState(false);
+  const [vincIol, setVincIol] = useState(false);
   const lista = Object.values(BROKER_CATALOG).filter((b) => b.id !== "manual");
 
-  useEffect(() => {
-    if (!open || !user?.id) return;
-    let vivo = true;
-    supabase.from("linked_brokers").select("id,broker,status,vault_secret_name,broker_user_id,broker_account_id,status_message").eq("user_id", user.id)
-      .then(({ data }) => { if (!vivo) return; setFilas(data || []); setSel(new Set((data || []).map((r) => r.broker))); });
-    return () => { vivo = false; };
-  }, [open, user?.id]);
+  const recargar = useCallback(async () => {
+    if (!user?.id) return;
+    const { data } = await supabase.from("linked_brokers").select("id,broker,status,vault_secret_name,broker_user_id,broker_account_id,status_message").eq("user_id", user.id);
+    setFilas(data || []); setSel(new Set((data || []).map((r) => r.broker)));
+  }, [user?.id]);
+  useEffect(() => { if (open) recargar(); }, [open, recargar]);
 
   if (!open) return null;
   const filaDe = (id) => (filas || []).find((r) => r.broker === id);
@@ -957,19 +960,18 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged }) {
     if (error) { setMsg((m) => ({ ...m, [id]: "No se pudo guardar: " + error.message })); return; }
     setCred((x) => ({ ...x, [id]: { usuario: c.usuario, comitente: c.comitente, clave: "" } }));
     setMsg((m) => ({ ...m, [id]: "Guardado. Queda pendiente de la primera sincronización." }));
-    const { data } = await supabase.from("linked_brokers").select("id,broker,status,vault_secret_name,broker_user_id,broker_account_id,status_message").eq("user_id", user.id);
-    setFilas(data || []); setSel(new Set((data || []).map((r) => r.broker)));
+    await recargar();
     onChanged && onChanged();
   };
 
   const inp = { width: "100%", padding: "6px 8px", fontSize: 12, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, colorScheme: "dark" };
   const btn = (primario) => ({ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${C.accent}`, background: primario ? C.accent : "transparent", color: primario ? C.bg : C.accent, whiteSpace: "nowrap" });
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(760px, 100%)", maxHeight: "90vh", overflow: "auto", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
+  const cuerpo = (
+      <div onClick={(e) => e.stopPropagation()} style={inline ? { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 } : { width: "min(760px, 100%)", maxHeight: "90vh", overflow: "auto", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
+        {vincIol && <VincularIOLModal onClose={() => setVincIol(false)} onSuccess={() => { setVincIol(false); recargar(); onChanged && onChanged(); }} />}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
           <span style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'Raleway', sans-serif" }}>Dá de alta tus brokers</span>
-          <button onClick={onClose} style={{ fontSize: 13, cursor: "pointer", background: "transparent", color: C.dim, border: "none" }}>✕</button>
+          {!inline && <button onClick={onClose} style={{ fontSize: 13, cursor: "pointer", background: "transparent", color: C.dim, border: "none" }}>✕</button>}
         </div>
         <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 14 }}>Tildá todos los que usás. IOL se conecta por API. Si en alguno operás con Matriz, cargá tu clave y Midas sincroniza la cuenta solo. Los demás se cargan subiendo el archivo de movimientos.</div>
         {filas === null ? <div style={{ color: C.muted, fontSize: 12 }}>Cargando…</div> : (
@@ -994,8 +996,8 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged }) {
               <div style={{ fontSize: 12.5, fontWeight: 600, color: C.text, marginBottom: 6 }}>{b.label}</div>
               {b.type === "api" ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 11, color: C.muted, flex: 1 }}>{f?.status === "active" ? "Conectado por API." : "Se conecta con tu usuario de IOL, por API oficial. Cotizaciones en tiempo real y sincronización automática."}</span>
-                  {f?.status !== "active" && <button onClick={() => { onClose(); onNavigate && onNavigate("settings"); }} style={btn(true)}>Conectar IOL →</button>}
+                  <span style={{ fontSize: 11, color: C.muted, flex: 1 }}>{f?.status === "active" ? "Conectado por API." : "Se conecta con tu usuario y clave de IOL, por la API oficial. Cotizaciones en tiempo real y sincronización automática de tu cartera."}</span>
+                  {f?.status !== "active" && <button onClick={() => setVincIol(true)} style={btn(true)}>Conectar IOL con usuario y clave</button>}
                 </div>
               ) : b.matriz ? (
                 <div>
@@ -1022,10 +1024,35 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged }) {
         })}
         {msg._ && <div style={{ fontSize: 11, color: C.red, marginTop: 10 }}>{msg._}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-          <button onClick={onClose} style={btn(false)}>Cerrar</button>
-          <button onClick={guardarSeleccion} disabled={guardando || filas === null} style={btn(true)}>{guardando ? "Guardando…" : "Guardar brokers"}</button>
+          <button onClick={onClose} style={btn(false)}>{inline ? "Ir al inicio" : "Cerrar"}</button>
+          <button onClick={guardarSeleccion} disabled={guardando || filas === null} style={btn(true)}>{guardando ? "Guardando…" : inline ? "Guardar e ir al inicio" : "Guardar brokers"}</button>
         </div>
       </div>
+  );
+  if (inline) return cuerpo;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      {cuerpo}
+    </div>
+  );
+}
+
+/* Pantalla de primeros pasos (LP 12/10/2026: "cuando recién te logueás tendría
+ * que ser una pantalla que no sea el dashboard, solo para vincular"). Se muestra
+ * en lugar del tablero mientras el usuario no tenga ningún broker dado de alta y
+ * no la haya saltado. "Ir al inicio" la salta (queda en localStorage); con un
+ * broker dado de alta ya no vuelve a aparecer. */
+const PRIMEROS_PASOS_KEY = "midas:primeros-pasos-listo";
+function PrimerosPasosScreen({ onDone, onNavigate }) {
+  const listo = () => { try { localStorage.setItem(PRIMEROS_PASOS_KEY, "1"); } catch { /* sin storage */ } onDone && onDone(); };
+  return (
+    <div style={{ padding: "32px 32px 60px", maxWidth: 860, margin: "0 auto" }}>
+      <div style={{ fontSize: 11, color: C.accent, letterSpacing: "0.14em", textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Primeros pasos</div>
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: C.text, margin: "0 0 8px", fontFamily: "'Raleway', sans-serif" }}>Bienvenido a Midas</h1>
+      <p style={{ fontSize: 13, color: C.muted, margin: "0 0 20px", maxWidth: 640, lineHeight: 1.55 }}>
+        Midas arma tu cartera, tu caja y tu histórico a partir de tus brokers. Empezá dando de alta los que usás: IOL se conecta con tu usuario y clave; en los que operás con Matriz podés cargar la clave para que se sincronice solo; el resto se carga subiendo el archivo de movimientos. Después, desde el tablero, seguís con la importación.
+      </p>
+      <AltaBrokersModal open inline onClose={listo} onNavigate={onNavigate} onChanged={() => {}} />
     </div>
   );
 }
@@ -1230,7 +1257,9 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
   );
 
   // (12/10/2026, LP) El banner "Conectá tu cuenta IOL" se sacó: el alta de
-  // brokers, IOL incluido, es el primer paso de la lista de bienvenida.
+  // brokers, IOL incluido, es el primer paso de la lista de bienvenida. Y un
+  // usuario sin brokers ve la pantalla de primeros pasos en lugar del tablero.
+  const [primerosPasosListo, setPrimerosPasosListo] = useState(() => { try { return localStorage.getItem(PRIMEROS_PASOS_KEY) === "1"; } catch { return false; } });
 
   // Mostrar badge en engranaje: punto rojo si algún broker está en error/expired,
   // punto azul si no hay ningún broker vinculado todavía. Solo después de
@@ -1940,7 +1969,11 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
             ) : active === "flujo-posiciones" ? (
               <PositionFlowModule key={active} alertsSys={globalAlerts} />
             ) : active === "dashboard" ? (
+              (!!authUser && !brokersLoading && !hasAnyBroker && !primerosPasosListo) ? (
+                <PrimerosPasosScreen onDone={() => { setPrimerosPasosListo(true); refetchBrokers(); }} onNavigate={setActive} />
+              ) : (
               <><OnboardingChecklist onNavigate={setActive} /><DashboardModule /></>
+              )
             ) : (
               <EmptyWorkspace key={active} active={active} />
             )}
