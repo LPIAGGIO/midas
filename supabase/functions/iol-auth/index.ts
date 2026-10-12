@@ -184,7 +184,7 @@ async function handleLogin(sb: SupabaseClient, userId: string, body: any) {
         last_sync_status: "ok",
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "user_id,broker" }
+      { onConflict: "user_id,broker,cuenta" }
     )
     .select(
       "id, broker, status, label, broker_user_id, broker_account_id, access_expires_at, refresh_expires_at, last_sync_at"

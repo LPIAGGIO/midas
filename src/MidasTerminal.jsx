@@ -965,18 +965,29 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
 
   const recargar = useCallback(async () => {
     if (!user?.id) return;
-    const { data } = await supabase.from("linked_brokers").select("id,broker,status,vault_secret_name,broker_user_id,broker_account_id,status_message").eq("user_id", user.id);
+    const { data } = await supabase.from("linked_brokers").select("id,broker,cuenta,label,status,vault_secret_name,broker_user_id,broker_account_id,status_message,created_at").eq("user_id", user.id).order("created_at", { ascending: true });
     setFilas(data || []); setSel(new Set((data || []).map((r) => r.broker)));
   }, [user?.id]);
   useEffect(() => { if (open) recargar(); }, [open, recargar]);
 
   if (!open) return null;
-  const filaDe = (id) => (filas || []).find((r) => r.broker === id);
+  const filaDe = (id) => (filas || []).find((r) => r.broker === id && (r.cuenta || "principal") === "principal") || (filas || []).find((r) => r.broker === id);
+  // Todas las cuentas de un broker, la principal primero.
+  const cuentasDe = (id) => (filas || []).filter((r) => r.broker === id)
+    .sort((a, b) => ((a.cuenta || "principal") === "principal" ? -1 : (b.cuenta || "principal") === "principal" ? 1 : 0));
+  const nombreCuenta = (r) => {
+    const cta = r?.cuenta || "principal";
+    const base = cta === "principal" ? "Cuenta principal" : (String(r.label || "").split(" · ").slice(1).join(" · ") || r.label || cta);
+    return base + (r?.broker_account_id ? ` · comitente ${r.broker_account_id}` : "");
+  };
   const toggle = (id) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const setC = (id, k, v) => setCred((c) => ({ ...c, [id]: { ...(c[id] || {}), [k]: v } }));
   // Con la clave ya cargada el recuadro muestra "Conectado" como el de IOL;
   // el formulario vuelve solo si el usuario apreta "Cambiar usuario o clave".
   const [editando, setEditando] = useState(() => new Set());
+  // Alta de una cuenta adicional del mismo broker (cotitular, sociedad...).
+  const [nuevaDe, setNuevaDe] = useState(null);
+  const [nueva, setNueva] = useState({ nombre: "", comitente: "" });
   const editar = (id, on) => setEditando((e) => { const n = new Set(e); if (on) n.add(id); else n.delete(id); return n; });
 
   const guardarSeleccion = async () => {
@@ -996,21 +1007,72 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
     } finally { setGuardando(false); }
   };
 
-  const guardarMatriz = async (id) => {
-    const c = cred[id] || {};
-    if (!c.usuario || !c.clave) { setMsg((m) => ({ ...m, [id]: "Falta el usuario o la clave de Matriz." })); return; }
-    setMsg((m) => ({ ...m, [id]: "Guardando…" }));
-    const { error } = await supabase.rpc("guardar_credencial_matriz", { p_broker: id, p_usuario: c.usuario, p_clave: c.clave, p_comitente: c.comitente || null, p_label: BROKER_CATALOG[id]?.label || id });
-    if (error) { setMsg((m) => ({ ...m, [id]: "No se pudo guardar: " + error.message })); return; }
-    setCred((x) => ({ ...x, [id]: { usuario: c.usuario, comitente: c.comitente, clave: "" } }));
-    setMsg((m) => ({ ...m, [id]: "Guardado. Queda pendiente de la primera sincronización." }));
-    editar(id, false);
+  const guardarMatriz = async (id, cta = "principal") => {
+    const k = `${id}:${cta}`;
+    const c = cred[k] || {};
+    const fila = (filas || []).find((r) => r.broker === id && (r.cuenta || "principal") === cta);
+    if (!c.usuario || !c.clave) { setMsg((m) => ({ ...m, [k]: "Falta el usuario o la clave de Matriz." })); return; }
+    setMsg((m) => ({ ...m, [k]: "Guardando…" }));
+    const { error } = await supabase.rpc("guardar_credencial_matriz", { p_broker: id, p_usuario: c.usuario, p_clave: c.clave, p_comitente: c.comitente || null, p_label: fila?.label || BROKER_CATALOG[id]?.label || id, p_cuenta: cta });
+    if (error) { setMsg((m) => ({ ...m, [k]: "No se pudo guardar: " + error.message })); return; }
+    setCred((x) => ({ ...x, [k]: { usuario: c.usuario, comitente: c.comitente, clave: "" } }));
+    setMsg((m) => ({ ...m, [k]: "Guardado. Queda pendiente de la primera sincronización." }));
+    editar(k, false);
+    await recargar();
+    onChanged && onChanged();
+  };
+
+  // La clave interna de la cuenta: el número de comitente si lo hay (es lo
+  // que identifica la cuenta en el broker), si no el nombre sin acentos.
+  const agregarCuenta = async (id) => {
+    const nombre = nueva.nombre.trim(), comit = nueva.comitente.replace(/\D/g, "");
+    if (!nombre) { setMsg((m) => ({ ...m, [`nueva:${id}`]: "Poné un nombre para reconocerla (por ejemplo Sociedad o Cotitular con Juan)." })); return; }
+    const slug = (comit || nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")).slice(0, 30) || "cuenta";
+    const cta = slug === "principal" ? "principal-2" : slug;
+    if ((filas || []).some((r) => r.broker === id && (r.cuenta || "principal") === cta)) { setMsg((m) => ({ ...m, [`nueva:${id}`]: "Ya tenés una cuenta con ese número o nombre en este broker." })); return; }
+    const label = `${BROKER_CATALOG[id]?.label || id} · ${nombre}`;
+    const filasNuevas = [];
+    // Si el broker todavía no estaba dado de alta, se crea también la principal.
+    if (!(filas || []).some((r) => r.broker === id)) filasNuevas.push({ user_id: user.id, broker: id, cuenta: "principal", label: BROKER_CATALOG[id]?.label || id, status: "manual", status_message: "Dado de alta. Cargá sus movimientos desde Importaciones." });
+    filasNuevas.push({ user_id: user.id, broker: id, cuenta: cta, label, status: "manual", broker_account_id: comit || null, status_message: "Cuenta adicional. Cargá su clave de Matriz o subí su archivo desde Importaciones." });
+    const { error } = await supabase.from("linked_brokers").insert(filasNuevas);
+    if (error) { setMsg((m) => ({ ...m, [`nueva:${id}`]: "No se pudo agregar: " + error.message })); return; }
+    setNueva({ nombre: "", comitente: "" }); setNuevaDe(null); setMsg((m) => ({ ...m, [`nueva:${id}`]: "" }));
     await recargar();
     onChanged && onChanged();
   };
 
   const inp = { width: "100%", padding: "6px 8px", fontSize: 12, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, colorScheme: "dark" };
   const btn = (primario) => ({ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${C.accent}`, background: primario ? C.accent : "transparent", color: primario ? C.bg : C.accent, whiteSpace: "nowrap" });
+  const linkBtn = { background: "none", border: "none", padding: 0, fontSize: 11, color: C.accent, cursor: "pointer" };
+  // Recuadro de Matriz de UNA cuenta: "Conectado" si ya tiene clave, si no el formulario.
+  const bloqueMatriz = (b, id, cta, f) => {
+    const k = `${id}:${cta}`, c = cred[k] || {};
+    if (f?.vault_secret_name && !editando.has(k)) return (
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, color: C.green, flex: 1 }}>
+          Conectado por API a Matriz con usuario y clave{f.broker_user_id ? ` (usuario ${f.broker_user_id}${f.broker_account_id ? ", comitente " + f.broker_account_id : ""})` : ""}.
+          {f.status === "active" ? " Sincroniza la tenencia y el saldo todas las mañanas." : " Pendiente de la primera sincronización."}
+        </span>
+        <button onClick={() => { setMsg((m) => ({ ...m, [k]: "" })); editar(k, true); }} style={{ ...btn(false), padding: "4px 10px", fontWeight: 500 }}>Cambiar usuario o clave</button>
+      </div>
+    );
+    return (
+      <div>
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+          {f?.vault_secret_name ? "Cargá el usuario y la clave nuevos de Matriz. La clave se guarda cifrada en el servidor y no vuelve al navegador." : "Si operás con Matriz en este broker, cargá tu usuario y clave de Matriz: Midas sincroniza la tenencia y el saldo todas las mañanas. La clave se guarda cifrada en el servidor y no vuelve al navegador."}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
+          <input placeholder="Usuario de Matriz" value={c.usuario || ""} onChange={(e) => setC(k, "usuario", e.target.value)} style={inp} autoComplete="off" />
+          <input placeholder="Clave de Matriz" type="password" value={c.clave || ""} onChange={(e) => setC(k, "clave", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") guardarMatriz(id, cta); }} style={inp} autoComplete="new-password" />
+          <input placeholder="N° de comitente (opcional)" value={c.comitente ?? (f?.broker_account_id || "")} onChange={(e) => setC(k, "comitente", e.target.value)} style={inp} autoComplete="off" />
+          <button onClick={() => guardarMatriz(id, cta)} style={btn(true)}>{f?.vault_secret_name ? "Guardar" : "Guardar y sincronizar"}</button>
+        </div>
+        {f?.vault_secret_name && <button onClick={() => editar(k, false)} style={{ background: "none", border: "none", padding: 0, marginTop: 6, fontSize: 11, color: C.dim, cursor: "pointer", textDecoration: "underline" }}>Cancelar</button>}
+        {msg[k] && <div style={{ fontSize: 11, color: msg[k].startsWith("No") || msg[k].startsWith("Falta") ? C.red : C.green, marginTop: 6 }}>{msg[k]}</div>}
+      </div>
+    );
+  };
   const cuerpo = (
       <div onClick={(e) => e.stopPropagation()} style={inline ? { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 } : { width: "min(760px, 100%)", maxHeight: "90vh", overflow: "auto", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
@@ -1034,10 +1096,13 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
           </div>
         )}
         {[...sel].filter((id) => BROKER_CATALOG[id]).map((id) => {
-          const b = BROKER_CATALOG[id], f = filaDe(id), c = cred[id] || {};
+          const b = BROKER_CATALOG[id], f = filaDe(id);
+          const cuentas = cuentasDe(id);
+          const varias = cuentas.length > 1;
+          const textoImporta = b.importa ? "Se carga subiendo el archivo de tenencia o movimientos del broker, desde Importaciones." : "Todavía no hay importador para este broker: contanos qué archivo exporta y lo sumamos. Mientras tanto podés cargar posiciones a mano.";
           return (
             <div key={id} style={{ marginTop: 12, padding: "10px 12px", border: `1px solid ${C.border}`, borderRadius: 8 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: C.text, marginBottom: 6 }}>{b.label}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: C.text, marginBottom: 6 }}>{b.label}{varias && <span style={{ fontSize: 11, color: C.dim, fontWeight: 400 }}> · {cuentas.length} cuentas</span>}</div>
               {b.type === "api" ? (
                 f?.status === "active" ? (
                   <div style={{ fontSize: 11, color: C.green }}>Conectado por API.</div>
@@ -1047,38 +1112,39 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
                     <VincularIOLInline onSuccess={() => { recargar(); onChanged && onChanged(); }} />
                   </div>
                 )
-              ) : b.matriz ? (
-                f?.vault_secret_name && !editando.has(id) ? (
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 11, color: C.green, flex: 1 }}>
-                        Conectado por API a Matriz con usuario y clave{f.broker_user_id ? ` (usuario ${f.broker_user_id}${f.broker_account_id ? ", comitente " + f.broker_account_id : ""})` : ""}.
-                        {f.status === "active" ? " Sincroniza la tenencia y el saldo todas las mañanas." : " Pendiente de la primera sincronización."}
-                      </span>
-                      <button onClick={() => { setMsg((m) => ({ ...m, [id]: "" })); editar(id, true); }} style={{ ...btn(false), padding: "4px 10px", fontWeight: 500 }}>Cambiar usuario o clave</button>
-                    </div>
-                    {b.importa && <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>También podés subir el archivo de movimientos desde Importaciones: de ahí sale el histórico completo.</div>}
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                      {f?.vault_secret_name ? "Cargá el usuario y la clave nuevos de Matriz. La clave se guarda cifrada en el servidor y no vuelve al navegador." : "Si operás con Matriz en este broker, cargá tu usuario y clave de Matriz: Midas sincroniza la tenencia y el saldo todas las mañanas. La clave se guarda cifrada en el servidor y no vuelve al navegador."}
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
-                      <input placeholder="Usuario de Matriz" value={c.usuario || ""} onChange={(e) => setC(id, "usuario", e.target.value)} style={inp} autoComplete="off" />
-                      <input placeholder="Clave de Matriz" type="password" value={c.clave || ""} onChange={(e) => setC(id, "clave", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") guardarMatriz(id); }} style={inp} autoComplete="new-password" />
-                      <input placeholder="N° de comitente (opcional)" value={c.comitente || ""} onChange={(e) => setC(id, "comitente", e.target.value)} style={inp} autoComplete="off" />
-                      <button onClick={() => guardarMatriz(id)} style={btn(true)}>{f?.vault_secret_name ? "Guardar" : "Guardar y sincronizar"}</button>
-                    </div>
-                    {f?.vault_secret_name && <button onClick={() => editar(id, false)} style={{ background: "none", border: "none", padding: 0, marginTop: 6, fontSize: 11, color: C.dim, cursor: "pointer", textDecoration: "underline" }}>Cancelar</button>}
-                    {msg[id] && <div style={{ fontSize: 11, color: msg[id].startsWith("No") || msg[id].startsWith("Falta") ? C.red : C.green, marginTop: 6 }}>{msg[id]}</div>}
-                    {b.importa && <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>También podés subir el archivo de movimientos desde Importaciones: de ahí sale el histórico completo.</div>}
-                  </div>
-                )
               ) : (
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 11, color: C.muted, flex: 1 }}>{b.importa ? "Se carga subiendo el archivo de tenencia o movimientos del broker, desde Importaciones." : "Todavía no hay importador para este broker: contanos qué archivo exporta y lo sumamos. Mientras tanto podés cargar posiciones a mano."}</span>
-                  <button onClick={() => { onClose(); onNavigate && onNavigate("importaciones"); }} style={btn(false)}>Ir a Importaciones →</button>
+                <div>
+                  {b.matriz ? (
+                    (cuentas.length ? cuentas : [null]).map((r, i) => {
+                      const cta = r?.cuenta || "principal";
+                      return (
+                        <div key={cta} style={varias ? { padding: "8px 0", borderTop: i ? `1px solid ${C.border}` : "none" } : undefined}>
+                          {varias && <div style={{ fontSize: 11.5, fontWeight: 600, color: C.text, marginBottom: 6 }}>{nombreCuenta(r)}</div>}
+                          {bloqueMatriz(b, id, cta, r)}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, color: C.muted, flex: 1 }}>{textoImporta}{varias && <span style={{ color: C.dim }}> Cuentas: {cuentas.map(nombreCuenta).join(", ")}.</span>}</span>
+                      <button onClick={() => { onClose(); onNavigate && onNavigate("importaciones"); }} style={btn(false)}>Ir a Importaciones →</button>
+                    </div>
+                  )}
+                  {b.matriz && b.importa && <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>También podés subir el archivo de movimientos desde Importaciones: de ahí sale el histórico completo.</div>}
+                  {nuevaDe === id ? (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${C.border}` }}>
+                      <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>Otra cuenta en {b.label}: de una sociedad, de la que sos cotitular, la de un familiar. Cada una lleva su clave de Matriz y sus archivos; en el tablero se ven sumadas.</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: 8, alignItems: "center" }}>
+                        <input placeholder="Nombre (ej. Sociedad)" value={nueva.nombre} onChange={(e) => setNueva((x) => ({ ...x, nombre: e.target.value }))} style={inp} autoComplete="off" />
+                        <input placeholder="N° de comitente" value={nueva.comitente} onChange={(e) => setNueva((x) => ({ ...x, comitente: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") agregarCuenta(id); }} style={inp} autoComplete="off" />
+                        <button onClick={() => agregarCuenta(id)} style={btn(true)}>Agregar</button>
+                        <button onClick={() => { setNuevaDe(null); setNueva({ nombre: "", comitente: "" }); }} style={{ ...linkBtn, color: C.dim }}>Cancelar</button>
+                      </div>
+                      {msg[`nueva:${id}`] && <div style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{msg[`nueva:${id}`]}</div>}
+                    </div>
+                  ) : (
+                    <button onClick={() => { setNuevaDe(id); setNueva({ nombre: "", comitente: "" }); }} style={{ ...linkBtn, marginTop: 8 }}>+ Agregar otra cuenta de {b.label}</button>
+                  )}
                 </div>
               )}
             </div>
@@ -4652,11 +4718,12 @@ function parseMovimientosCsv(text, existing) {
 // devolvía 1.000 y la derivación armaba 5.250 YPFD fantasma (las ventas que
 // cerraban la posición habían quedado afuera). El orden por nro_comprobante
 // es estable, así que ninguna fila se repite ni se saltea entre páginas.
-async function leerLibroCompleto(userId, columnas = "*") {
+async function leerLibroCompleto(userId, columnas = "*", cuenta = null) {
   const todas = [];
   for (let desde = 0; ; desde += 1000) {
-    const { data, error } = await supabase.from("libro_movimientos").select(columnas)
-      .eq("user_id", userId).order("nro_comprobante", { ascending: true }).range(desde, desde + 999);
+    let q = supabase.from("libro_movimientos").select(columnas).eq("user_id", userId);
+    if (cuenta) q = q.eq("cuenta", cuenta);
+    const { data, error } = await q.order("nro_comprobante", { ascending: true }).range(desde, desde + 999);
     if (error) return { data: null, error };
     todas.push(...(data || []));
     if (!data || data.length < 1000) break;
@@ -4717,7 +4784,7 @@ function ImportCuentaCorrienteModal({ existingComprobantes, onDone, onClose }) {
       const chunk = newRows.slice(k, k + 300).map(({ status, ...r }) => ({ ...r, user_id: user.id }));
       const { error } = await supabase
         .from("libro_movimientos")
-        .upsert(chunk, { onConflict: "user_id,nro_comprobante", ignoreDuplicates: true });
+        .upsert(chunk, { onConflict: "user_id,cuenta,nro_comprobante", ignoreDuplicates: true });
       if (error) { errs.push(error.message); break; }
       inserted += chunk.length;
     }
@@ -5123,13 +5190,14 @@ function fciOpFromMov(m) {
 // mismo día con la misma cantidad (05/05: 2 × 7.556,7556 cp), un Set los
 // comería. Estas filas NO son source='derivado_libro': el rebuild del libro
 // no las pisa, el dedup las mantiene únicas.
-async function syncFciOps(userId, fciOps) {
+async function syncFciOps(userId, fciOps, cuenta = "principal") {
   if (!fciOps || !fciOps.length) return { inserted: 0, error: null };
   const { data: existing, error } = await supabase
     .from("positions")
     .select("ticker, quantity, entry_date, operation_type, extra")
     .eq("user_id", userId)
     .eq("broker", "cocos")
+    .eq("cuenta", cuenta)
     .eq("instrument_type", "fci");
   if (error) return { inserted: 0, error: error.message };
   // La clave incluye buy/sell: hay suscripción y rescate el mismo día por la
@@ -5154,7 +5222,7 @@ async function syncFciOps(userId, fciOps) {
       user_id: userId, ticker: o.ticker, instrument_type: "fci",
       operation_type: o.operation_type, quantity: o.quantity,
       entry_price: o.entry_price, entry_currency: o.entry_currency,
-      entry_date: o.entry_date, broker: "cocos", settlement: "CI",
+      entry_date: o.entry_date, broker: "cocos", cuenta, settlement: "CI",
       extra: { source: "libro_fci", libro_comprobante: o.comprobante },
     });
   }
@@ -5330,7 +5398,7 @@ function ImportacionesModule() {
  * Se carga una vez. applyDerived lo suma como un movimiento mas cada vez que
  * reconstruye la caja.
  */
-function SaldoAperturaCard({ userId, onSaved }) {
+function SaldoAperturaCard({ userId, onSaved, cuenta = "principal", nombreCuenta = null }) {
   const MONEDAS = ["ARS", "USD-MEP", "USD-CCL"];
   const [vals, setVals] = useState({});
   const [saving, setSaving] = useState(false);
@@ -5341,14 +5409,14 @@ function SaldoAperturaCard({ userId, onSaved }) {
     let vivo = true;
     (async () => {
       const { data } = await supabase.from("broker_opening_cash")
-        .select("currency, amount").eq("user_id", userId).eq("broker", "cocos");
+        .select("currency, amount").eq("user_id", userId).eq("broker", "cocos").eq("cuenta", cuenta);
       if (!vivo) return;
       const m = {};
       for (const r of data || []) m[r.currency] = String(r.amount);
       setVals(m);
     })();
     return () => { vivo = false; };
-  }, [userId]);
+  }, [userId, cuenta]);
 
   const guardar = async () => {
     if (!userId) return;
@@ -5356,9 +5424,9 @@ function SaldoAperturaCard({ userId, onSaved }) {
     const filas = MONEDAS
       .map((c) => ({ currency: c, amount: Number(String(vals[c] ?? "").replace(",", ".")) }))
       .filter((r) => Number.isFinite(r.amount))
-      .map((r) => ({ user_id: userId, broker: "cocos", currency: r.currency, amount: r.amount, updated_at: new Date().toISOString() }));
+      .map((r) => ({ user_id: userId, broker: "cocos", cuenta, currency: r.currency, amount: r.amount, updated_at: new Date().toISOString() }));
     const { error } = filas.length
-      ? await supabase.from("broker_opening_cash").upsert(filas, { onConflict: "user_id,broker,currency" })
+      ? await supabase.from("broker_opening_cash").upsert(filas, { onConflict: "user_id,broker,cuenta,currency" })
       : { error: null };
     setSaving(false);
     setMsg(error ? "Error: " + error.message : "Guardado. Reconstruí el portfolio para aplicarlo.");
@@ -5368,7 +5436,7 @@ function SaldoAperturaCard({ userId, onSaved }) {
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 16 }}>
       <div style={{ fontSize: 13, color: C.text, fontWeight: 700, marginBottom: 4, fontFamily: "'Raleway', sans-serif" }}>
-        Saldo de apertura
+        Saldo de apertura{nombreCuenta ? <span style={{ fontSize: 11.5, color: C.dim, fontWeight: 400 }}> · {nombreCuenta}</span> : null}
       </div>
       <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
         El CSV del broker no dice con cuánto arrancaste: sólo lista movimientos desde una fecha.
@@ -5410,14 +5478,25 @@ function ImportacionesView() {
   const [applying, setApplying] = useState(false);
   const [rebuildMsg, setRebuildMsg] = useState(null);
   const { rows: batches, reload: reloadBatches } = useImportBatches();
-  const { rows: movs, reload: reloadMovs } = useLibroMovimientos();
+  const { rows: movsTodos, reload: reloadMovs } = useLibroMovimientos();
+  // Cuenta de Cocos a la que va el archivo (varias cuentas del mismo broker).
+  const [cuenta, setCuenta] = useState("principal");
+  const cuentasCocos = useMemo(() => conns.filter((r) => r.broker === "cocos")
+    .sort((a, b) => ((a.cuenta || "principal") === "principal" ? -1 : (b.cuenta || "principal") === "principal" ? 1 : 0)), [conns]);
+  const nombreDeCuenta = (cta) => {
+    const r = cuentasCocos.find((x) => (x.cuenta || "principal") === cta);
+    const base = cta === "principal" ? "Cuenta principal" : (String(r?.label || "").split(" · ").slice(1).join(" · ") || r?.label || cta);
+    return base + (r?.broker_account_id ? ` · comitente ${r.broker_account_id}` : "");
+  };
+  const variasCocos = cuentasCocos.length > 1;
+  const movs = useMemo(() => movsTodos.filter((m) => (m.cuenta || "principal") === cuenta), [movsTodos, cuenta]);
   const existingComprobantes = useMemo(() => new Set(movs.map((m) => m.nro_comprobante)), [movs]);
   const batchedIds = useMemo(() => new Set(movs.filter((m) => m.import_batch_id).map((m) => m.import_batch_id)), [movs]);
   const sinLote = movs.filter((m) => !m.import_batch_id).length;
 
   useEffect(() => {
     if (!user) return;
-    supabase.from("linked_brokers").select("broker,label,status,last_sync_at").eq("user_id", user.id).then(({ data }) => setConns(data || []));
+    supabase.from("linked_brokers").select("broker,cuenta,label,status,last_sync_at,broker_account_id").eq("user_id", user.id).then(({ data }) => setConns(data || []));
   }, [user]);
 
   const onFiles = async (fileList) => {
@@ -5461,15 +5540,16 @@ function ImportacionesView() {
   // Portfolio + la misma venta re-derivada del libro = corto fantasma de 350;
   // la caución como posición + la deuda re-anclada en caja = deuda doble).
   // IOL (broker='iol') intacto. Devuelve error o null.
-  const applyDerived = async (derived) => {
+  const applyDerived = async (derived, cta = "principal") => {
     const allPos = [...derived.positions, ...derived.lots];
     const libroHasta = allPos.reduce((m, p) => (p.entry_date && p.entry_date > m ? p.entry_date : m), "");
-    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos").filter("extra->>source", "eq", "derivado_libro");
+    // Todo acotado a la cuenta: rearmar la cuenta B no puede tocar la A.
+    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos").eq("cuenta", cta).filter("extra->>source", "eq", "derivado_libro");
     // Con la derivación prendida, la reconstrucción manual vieja (historico_libro
     // / ajuste_neteo, research/reconstruir-historico) queda reemplazada: si
     // convivieran, cada papel aparecería dos veces.
     if (allPos.length) {
-      await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos")
+      await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos").eq("cuenta", cta)
         .filter("extra->>source", "in", '("historico_libro","ajuste_neteo")');
     }
     if (libroHasta) {
@@ -5480,7 +5560,7 @@ function ImportacionesView() {
       // cortos de WTI de LP y el libro no tenia con que reponerlos.
       const derivedTickers = [...new Set(allPos.map((p) => (p.ticker || "").toUpperCase()).filter(Boolean))];
       if (derivedTickers.length) {
-        await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos")
+        await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos").eq("cuenta", cta)
           .filter("extra->>source", "eq", "csv_matriz").lte("entry_date", libroHasta)
           .in("ticker", derivedTickers);
       }
@@ -5493,10 +5573,10 @@ function ImportacionesView() {
     // conservan — borrarlas dejaría la posición sin su plata (la caución como
     // posición sin su depósito descontaba $44M de patrimonio, 09/09).
     const { data: puentes } = await supabase.from("positions").select("id")
-      .eq("user_id", user.id).eq("broker", "cocos").filter("extra->>source", "eq", "csv_matriz");
+      .eq("user_id", user.id).eq("broker", "cocos").eq("cuenta", cta).filter("extra->>source", "eq", "csv_matriz");
     const keepRefs = (puentes || []).map((p) => `trg-${p.id}`);
     // Solo la caja de Cocos (o sin broker, filas viejas): IOL y Balanz no se tocan.
-    const cajaCocos = () => supabase.from("cash_movements").delete().eq("user_id", user.id).or("broker.eq.cocos,broker.is.null");
+    const cajaCocos = () => supabase.from("cash_movements").delete().eq("user_id", user.id).eq("cuenta", cta).or("broker.eq.cocos,broker.is.null");
     await cajaCocos().is("source_ref", null);
     if (keepRefs.length) {
       await cajaCocos().not("source_ref", "in", `(${keepRefs.map((r) => `"${r}"`).join(",")})`);
@@ -5507,7 +5587,7 @@ function ImportacionesView() {
     const posRows = allPos.map((p) => ({
       user_id: user.id, ticker: p.ticker, instrument_type: p.instrument_type, operation_type: p.side,
       quantity: p.quantity, entry_price: p.entry_price, entry_currency: p.entry_currency, entry_date: p.entry_date,
-      broker: "cocos", settlement: (p.instrument_type === "fci" || p.instrument_type === "future") ? "CI" : "T1",
+      broker: "cocos", cuenta: cta, settlement: (p.instrument_type === "fci" || p.instrument_type === "future") ? "CI" : "T1",
       // contract_size: sin esto un futuro no-DLR derivado del libro caeria al
       // multiplicador default de 1000 (WTI son 10 barriles, ORO 1 onza).
       extra: { source: "derivado_libro", ...(p.instrument_type === "future" ? { contract_size: futMultiplier(p.ticker) } : {}) },
@@ -5521,7 +5601,7 @@ function ImportacionesView() {
     // wipe de arriba no las toca y el dedup evita que se dupliquen — pero tras
     // un "Borrar todo" (que sí las borra, junto con el libro) este mismo sync
     // las reconstruye completas del libro re-importado.
-    const fciSync = await syncFciOps(user.id, derived.fciOps);
+    const fciSync = await syncFciOps(user.id, derived.fciOps, cta);
     if (fciSync.error) return fciSync.error;
     // Caja itemizada: costos DESGLOSADOS (comisión / derechos de mercado / IVA,
     // cada uno alimenta "Comisiones acumuladas") + caución (alimenta su fila en
@@ -5553,7 +5633,8 @@ function ImportacionesView() {
         .from("broker_opening_cash")
         .select("currency, amount")
         .eq("user_id", user.id)
-        .eq("broker", "cocos");
+        .eq("broker", "cocos")
+        .eq("cuenta", cta);
       for (const a of aperturas || []) {
         const monto = Number(a?.amount);
         if (!Number.isFinite(monto) || Math.abs(monto) < 0.005) continue;
@@ -5586,6 +5667,7 @@ function ImportacionesView() {
       const venc = (typeof addBusinessDays === "function") ? addBusinessDays(o.date, 1) : o.date;
       cashRows.push({ user_id: user.id, movement_date: venc, movement_type: ret >= 0 ? "deposit" : "withdrawal", currency: o.cur || "ARS", amount: Math.abs(ret), notes: `Devolución caución ${o.side === "tom" ? "tomadora" : "colocadora"} (proyectada)`, broker: "cocos" });
     }
+    for (const r of cashRows) r.cuenta = cta;
     for (let k = 0; k < cashRows.length; k += 200) {
       const { error } = await supabase.from("cash_movements").insert(cashRows.slice(k, k + 200));
       if (error) return error.message;
@@ -5629,15 +5711,15 @@ function ImportacionesView() {
     const newRows = parsed.rows.filter((r) => r.status === "new");
     setImporting(true); setResult(null);
     if (newRows.length) {
-      const { data: batch, error: be } = await supabase.from("import_batches").insert({ user_id: user.id, file_name: parsed.fileName, broker, source: "movimientos_cuenta", n_rows: newRows.length }).select().single();
+      const { data: batch, error: be } = await supabase.from("import_batches").insert({ user_id: user.id, file_name: parsed.fileName, broker, cuenta, source: "movimientos_cuenta", n_rows: newRows.length }).select().single();
       if (be) { setImporting(false); setResult({ err: be.message }); return; }
       for (let k = 0; k < newRows.length; k += 300) {
-        const chunk = newRows.slice(k, k + 300).map(({ status, ...r }) => ({ ...r, user_id: user.id, import_batch_id: batch.id }));
-        const { error } = await supabase.from("libro_movimientos").upsert(chunk, { onConflict: "user_id,nro_comprobante", ignoreDuplicates: true });
+        const chunk = newRows.slice(k, k + 300).map(({ status, ...r }) => ({ ...r, user_id: user.id, cuenta, import_batch_id: batch.id }));
+        const { error } = await supabase.from("libro_movimientos").upsert(chunk, { onConflict: "user_id,cuenta,nro_comprobante", ignoreDuplicates: true });
         if (error) { setImporting(false); setResult({ err: error.message }); return; }
       }
     }
-    const { data: fresh, error: errLibro } = await leerLibroCompleto(user.id);
+    const { data: fresh, error: errLibro } = await leerLibroCompleto(user.id, "*", cuenta);
     // Sin el libro entero NO se deriva: una lectura a medias fabrica tenencias.
     if (errLibro || !fresh) { setImporting(false); setResult({ err: `No pude leer el libro completo: ${errLibro?.message || "sin datos"}` }); return; }
     const derived = deriveFromLedger(fresh);
@@ -5654,7 +5736,7 @@ function ImportacionesView() {
     const derivedSeguro = DERIVACION_POSICIONES_OFF
       ? { ...derived, positions: [], lots: [] }   // caja y FCI sí; posiciones no
       : derived;
-    const err = await applyDerived(derivedSeguro);
+    const err = await applyDerived(derivedSeguro, cuenta);
     setImporting(false);
     if (err) { setResult({ err }); return; }
     setResult({ ok: newRows.length, applied: derived.positions.length + derived.lots.length + (derived.fciOps || []).length });
@@ -5671,12 +5753,14 @@ function ImportacionesView() {
       setConfirmDel(null); reloadBatches();
       return;
     }
-    // Cocos "Borrar todo": wipe INTEGRAL de Cocos (lotes + libro + posiciones
-    // broker='cocos' de cualquier fuente + caja). IOL y Balanz quedan intactos.
-    await supabase.from("import_batches").delete().eq("user_id", user.id).or("broker.is.null,broker.neq.balanz");
-    await supabase.from("libro_movimientos").delete().eq("user_id", user.id);
-    await borrarPosicionesCocos(user.id);
-    await supabase.from("cash_movements").delete().eq("user_id", user.id).or("broker.eq.cocos,broker.is.null");
+    // Cocos "Borrar todo" de ESA cuenta: lotes + libro + posiciones broker='cocos'
+    // de cualquier fuente + caja, solo de la cuenta del lote. Las otras cuentas
+    // de Cocos, IOL y Balanz quedan intactas.
+    const cta = b?.cuenta || "principal";
+    await supabase.from("import_batches").delete().eq("user_id", user.id).eq("cuenta", cta).or("broker.is.null,broker.neq.balanz");
+    await supabase.from("libro_movimientos").delete().eq("user_id", user.id).eq("cuenta", cta);
+    await supabase.from("positions").delete().eq("user_id", user.id).eq("broker", "cocos").eq("cuenta", cta);
+    await supabase.from("cash_movements").delete().eq("user_id", user.id).eq("cuenta", cta).or("broker.eq.cocos,broker.is.null");
     setConfirmDel(null); reloadBatches(); reloadMovs();
   };
 
@@ -5684,8 +5768,8 @@ function ImportacionesView() {
   // posiciones (27/09/2026: derivación de posiciones prendida).
   const reaplicar = async () => {
     setApplying(true); setRebuildMsg(null);
-    const d = deriveFromLedger(movs);
-    const err = await applyDerived(d);
+    const d = deriveFromLedger(movs); // movs ya viene filtrado por la cuenta elegida
+    const err = await applyDerived(d, cuenta);
     setApplying(false);
     setRebuildMsg(err ? "Error: " + err : "✓ Caja, FCI y posiciones reconstruidos desde el libro.");
   };
@@ -5714,6 +5798,15 @@ function ImportacionesView() {
               </button>
             ))}
           </div>
+          {broker === "cocos" && variasCocos && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <span style={{ fontSize: 12, color: C.muted }}>¿De qué cuenta es el archivo?</span>
+              {cuentasCocos.map((r) => {
+                const cta = r.cuenta || "principal", on = cuenta === cta;
+                return <button key={cta} onClick={() => { setCuenta(cta); setParsed(null); setResult(null); setRebuildMsg(null); }} style={{ padding: "6px 12px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${on ? C.accent : C.border}`, background: on ? "rgba(96,165,250,0.10)" : "transparent", color: on ? C.text : C.muted }}>{nombreDeCuenta(cta)}</button>;
+              })}
+            </div>
+          )}
           <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>{info.label}</div>
             <ol style={{ margin: 0, paddingLeft: 18, fontSize: 11.5, color: C.muted, lineHeight: 1.7 }}>{info.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
@@ -5745,7 +5838,7 @@ function ImportacionesView() {
                   <button onClick={importarYAplicar} disabled={importing} style={{ padding: "8px 18px", fontSize: 12.5, fontWeight: 700, cursor: importing ? "default" : "pointer", border: "none", background: C.accent, color: "#0b0e11" }}>{importing ? "Importando y aplicando…" : "Importar y aplicar al portfolio"}</button>
                 </div>
               </div>
-              <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 10 }}>{isBalanzParsed ? "Es tu foto de tenencia de Balanz — reemplaza tus posiciones de Balanz. Cocos e IOL quedan intactos." : "Se cargan al libro y se reconstruye tu portfolio (posiciones + caja) de una. Reemplaza tus posiciones de Cocos; IOL queda intacto."}</div>
+              <div style={{ fontSize: 10.5, color: C.dim, marginBottom: 10 }}>{isBalanzParsed ? "Es tu foto de tenencia de Balanz — reemplaza tus posiciones de Balanz. Cocos e IOL quedan intactos." : variasCocos ? `Va a ${nombreDeCuenta(cuenta)}. Se carga al libro de esa cuenta y se reconstruyen sus posiciones y su caja; tus otras cuentas e IOL quedan intactos.` : "Se cargan al libro y se reconstruye tu portfolio (posiciones + caja) de una. Reemplaza tus posiciones de Cocos; IOL queda intacto."}</div>
               {isBalanzParsed ? (
                 <div style={{ overflowX: "auto", maxHeight: 300, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 6 }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
@@ -5798,7 +5891,7 @@ function ImportacionesView() {
               {movs.length > 0 && <button onClick={reaplicar} disabled={applying} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: applying ? "default" : "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>{applying ? "Reconstruyendo…" : "↻ Reconstruir portfolio desde el libro"}</button>}
             </div>
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 14 }}>Cada archivo que importás, por broker. Son independientes — podés tener imports de distintos brokers.</div>
-            <SaldoAperturaCard userId={user?.id} onSaved={reloadMovs} />
+            <SaldoAperturaCard userId={user?.id} onSaved={reloadMovs} cuenta={cuenta} nombreCuenta={variasCocos ? nombreDeCuenta(cuenta) : null} />
             {rebuildMsg && <div style={{ fontSize: 11.5, marginBottom: 10, color: rebuildMsg.startsWith("Error") ? C.red : "#34d399" }}>{rebuildMsg}</div>}
             {batches.length === 0 && sinLote === 0 ? (
               <div style={{ fontSize: 12, color: C.dim, padding: "16px 0" }}>Todavía no importaste nada. Subí tu CSV arriba.</div>
@@ -5810,12 +5903,13 @@ function ImportacionesView() {
                       <div style={{ fontSize: 12.5, color: C.text, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.06em", color: "#0b0e11", background: b.broker === "cocos" ? "#22D3EE" : b.broker === "iol" ? "#FBBF24" : b.broker === "balanz" ? "#34D399" : C.accent, borderRadius: 3, padding: "2px 6px", textTransform: "uppercase" }}>{b.broker}</span>
                         {b.file_name || "importación"}
+                        {variasCocos && b.broker !== "balanz" && <span style={{ fontSize: 10.5, color: C.dim, fontWeight: 400 }}>· {nombreDeCuenta(b.cuenta || "principal")}</span>}
                       </div>
                       <div style={{ fontSize: 10.5, color: C.dim, marginTop: 3 }}>{b.n_rows} movimientos · {fmtDate(b.created_at)}</div>
                     </div>
                     {confirmDel === b.id ? (
                       <div className="flex" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 10.5, color: C.muted }}>{b.broker === "balanz" ? "Borra la foto de Balanz y sus posiciones. ¿Seguro?" : "Borra TODO Cocos: movimientos, caja y todas las posiciones (también WTI y opciones cargadas a mano). IOL y Balanz no se tocan. Al reimportar se arma de nuevo. ¿Seguro?"}</span>
+                        <span style={{ fontSize: 10.5, color: C.muted }}>{b.broker === "balanz" ? "Borra la foto de Balanz y sus posiciones. ¿Seguro?" : (variasCocos ? `Borra TODO ${nombreDeCuenta(b.cuenta || "principal")} de Cocos: movimientos, caja y todas sus posiciones (también WTI y opciones cargadas a mano). Tus otras cuentas, IOL y Balanz no se tocan. Al reimportar se arma de nuevo. ¿Seguro?` : "Borra TODO Cocos: movimientos, caja y todas las posiciones (también WTI y opciones cargadas a mano). IOL y Balanz no se tocan. Al reimportar se arma de nuevo. ¿Seguro?")}</span>
                         <button onClick={() => setConfirmDel(null)} style={{ padding: "6px 11px", fontSize: 11, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted }}>No</button>
                         <button onClick={() => deleteBatch(b.id)} style={{ padding: "6px 11px", fontSize: 11, fontWeight: 700, cursor: "pointer", border: "none", background: C.red, color: "#fff" }}>Sí, borrar todo</button>
                       </div>
