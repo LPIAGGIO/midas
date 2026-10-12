@@ -974,6 +974,10 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
   const filaDe = (id) => (filas || []).find((r) => r.broker === id);
   const toggle = (id) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const setC = (id, k, v) => setCred((c) => ({ ...c, [id]: { ...(c[id] || {}), [k]: v } }));
+  // Con la clave ya cargada el recuadro muestra "Conectado" como el de IOL;
+  // el formulario vuelve solo si el usuario apreta "Cambiar usuario o clave".
+  const [editando, setEditando] = useState(() => new Set());
+  const editar = (id, on) => setEditando((e) => { const n = new Set(e); if (on) n.add(id); else n.delete(id); return n; });
 
   const guardarSeleccion = async () => {
     if (!user?.id) return;
@@ -1000,6 +1004,7 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
     if (error) { setMsg((m) => ({ ...m, [id]: "No se pudo guardar: " + error.message })); return; }
     setCred((x) => ({ ...x, [id]: { usuario: c.usuario, comitente: c.comitente, clave: "" } }));
     setMsg((m) => ({ ...m, [id]: "Guardado. Queda pendiente de la primera sincronización." }));
+    editar(id, false);
     await recargar();
     onChanged && onChanged();
   };
@@ -1043,19 +1048,33 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
                   </div>
                 )
               ) : b.matriz ? (
-                <div>
-                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                    {f?.vault_secret_name ? `Credenciales cargadas (usuario ${f.broker_user_id || "—"}${f.broker_account_id ? ", comitente " + f.broker_account_id : ""}). ${f.status_message || ""}` : "Si operás con Matriz en este broker, cargá tu usuario y clave de Matriz: Midas sincroniza la tenencia y el saldo todas las mañanas. La clave se guarda cifrada en el servidor y no vuelve al navegador."}
+                f?.vault_secret_name && !editando.has(id) ? (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, color: C.green, flex: 1 }}>
+                        Conectado por API a Matriz con usuario y clave{f.broker_user_id ? ` (usuario ${f.broker_user_id}${f.broker_account_id ? ", comitente " + f.broker_account_id : ""})` : ""}.
+                        {f.status === "active" ? " Sincroniza la tenencia y el saldo todas las mañanas." : " Pendiente de la primera sincronización."}
+                      </span>
+                      <button onClick={() => { setMsg((m) => ({ ...m, [id]: "" })); editar(id, true); }} style={{ ...btn(false), padding: "4px 10px", fontWeight: 500 }}>Cambiar usuario o clave</button>
+                    </div>
+                    {b.importa && <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>También podés subir el archivo de movimientos desde Importaciones: de ahí sale el histórico completo.</div>}
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
-                    <input placeholder="Usuario de Matriz" value={c.usuario || ""} onChange={(e) => setC(id, "usuario", e.target.value)} style={inp} autoComplete="off" />
-                    <input placeholder="Clave de Matriz" type="password" value={c.clave || ""} onChange={(e) => setC(id, "clave", e.target.value)} style={inp} autoComplete="new-password" />
-                    <input placeholder="N° de comitente (opcional)" value={c.comitente || ""} onChange={(e) => setC(id, "comitente", e.target.value)} style={inp} autoComplete="off" />
-                    <button onClick={() => guardarMatriz(id)} style={btn(false)}>{f?.vault_secret_name ? "Actualizar" : "Guardar y sincronizar"}</button>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                      {f?.vault_secret_name ? "Cargá el usuario y la clave nuevos de Matriz. La clave se guarda cifrada en el servidor y no vuelve al navegador." : "Si operás con Matriz en este broker, cargá tu usuario y clave de Matriz: Midas sincroniza la tenencia y el saldo todas las mañanas. La clave se guarda cifrada en el servidor y no vuelve al navegador."}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
+                      <input placeholder="Usuario de Matriz" value={c.usuario || ""} onChange={(e) => setC(id, "usuario", e.target.value)} style={inp} autoComplete="off" />
+                      <input placeholder="Clave de Matriz" type="password" value={c.clave || ""} onChange={(e) => setC(id, "clave", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") guardarMatriz(id); }} style={inp} autoComplete="new-password" />
+                      <input placeholder="N° de comitente (opcional)" value={c.comitente || ""} onChange={(e) => setC(id, "comitente", e.target.value)} style={inp} autoComplete="off" />
+                      <button onClick={() => guardarMatriz(id)} style={btn(true)}>{f?.vault_secret_name ? "Guardar" : "Guardar y sincronizar"}</button>
+                    </div>
+                    {f?.vault_secret_name && <button onClick={() => editar(id, false)} style={{ background: "none", border: "none", padding: 0, marginTop: 6, fontSize: 11, color: C.dim, cursor: "pointer", textDecoration: "underline" }}>Cancelar</button>}
+                    {msg[id] && <div style={{ fontSize: 11, color: msg[id].startsWith("No") || msg[id].startsWith("Falta") ? C.red : C.green, marginTop: 6 }}>{msg[id]}</div>}
+                    {b.importa && <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>También podés subir el archivo de movimientos desde Importaciones: de ahí sale el histórico completo.</div>}
                   </div>
-                  {msg[id] && <div style={{ fontSize: 11, color: msg[id].startsWith("No") || msg[id].startsWith("Falta") ? C.red : C.green, marginTop: 6 }}>{msg[id]}</div>}
-                  {b.importa && <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>También podés subir el archivo de movimientos desde Importaciones: de ahí sale el histórico completo.</div>}
-                </div>
+                )
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 11, color: C.muted, flex: 1 }}>{b.importa ? "Se carga subiendo el archivo de tenencia o movimientos del broker, desde Importaciones." : "Todavía no hay importador para este broker: contanos qué archivo exporta y lo sumamos. Mientras tanto podés cargar posiciones a mano."}</span>
