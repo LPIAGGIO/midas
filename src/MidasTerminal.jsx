@@ -306,7 +306,9 @@ function usePrivacy() {
 const CUENTA_SEL_KEY = "midas:cuenta-sel";
 const CuentaContext = createContext({ sel: "todas", setSel: () => {}, cuentas: [], claves: [], alternar: () => {} });
 function selLista(sel) {
-  return !sel || sel === "todas" ? null : String(sel).split(",").filter(Boolean);
+  if (!sel || sel === "todas") return null;
+  if (sel === "ninguna") return [];
+  return String(sel).split(",").filter(Boolean);
 }
 const claveCuenta = (r, brokerDefault = "cocos") => `${r?.broker || brokerDefault}:${r?.cuenta || "principal"}`;
 function filaEnCuenta(row, sel, brokerDefault = "cocos") {
@@ -329,7 +331,7 @@ function CuentaProvider({ children }) {
   // Fija la selección normalizada: vacía o completa = "todas".
   const fijar = useCallback((lista) => {
     const l = claves.filter((k) => lista.includes(k));
-    setSel(!l.length || l.length === claves.length ? "todas" : l.join(","));
+    setSel(!l.length ? "ninguna" : l.length === claves.length ? "todas" : l.join(","));
   }, [claves, setSel]);
   // Prende o apaga un grupo de cuentas (una sola, o todas las de un broker).
   const alternar = useCallback((keys, on) => {
@@ -367,10 +369,12 @@ function CuentaSelector() {
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
-  if (cuentas.length < 2) return null;
   const l = selLista(sel);
   const activas = l || claves;
   const filtrando = !!l;
+  // Con todas las cuentas a la vista el control vive en las fichas del
+  // Portfolio; acá solo se avisa que hay un filtro puesto.
+  if (cuentas.length < 2 || !filtrando) return null;
   const grupos = [];
   for (const r of cuentas) {
     let g = grupos.find((x) => x.broker === r.broker);
@@ -379,7 +383,8 @@ function CuentaSelector() {
   }
   // Texto del botón: todas / un broker entero / una cuenta / "2 de 4 cuentas".
   let texto = "Todas las cuentas";
-  if (filtrando) {
+  if (filtrando && !activas.length) texto = "Ninguna cuenta";
+  else if (filtrando) {
     const g = grupos.find((x) => x.filas.length > 1 && x.filas.every((r) => activas.includes(claveCuenta(r))) && activas.length === x.filas.length);
     if (g) texto = `${BROKER_CATALOG[g.broker]?.label || g.broker} · todas`;
     else if (activas.length === 1) texto = nombreDeCuentaFila(cuentas.find((r) => claveCuenta(r) === activas[0]) || {}, cuentas);
@@ -401,7 +406,7 @@ function CuentaSelector() {
       </button>
       {open && (
         <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 260, background: C.panel, border: `1px solid ${C.borderStrong}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", zIndex: 60, padding: "4px 0" }}>
-          <button onClick={() => setSel("todas")} style={{ ...fila, fontWeight: 600 }} {...hov}>{caja(!filtrando, false)}Todas las cuentas</button>
+          <button onClick={() => setSel(filtrando ? "todas" : "ninguna")} style={{ ...fila, fontWeight: 600 }} {...hov}>{caja(!filtrando, activas.length > 0 && filtrando)}Todas las cuentas</button>
           <div style={{ height: 1, background: C.border, margin: "4px 0" }} />
           {grupos.map((g) => {
             const keys = g.filas.map((r) => claveCuenta(r));
@@ -17396,7 +17401,7 @@ function ImportCsvModal({ existingPositions, addPosition, onClose }) {
 
 function PortfolioDashboard({ onNavigate }) {
   const { positions, todas: todasPos, loading, error, addPosition, updatePosition, deletePosition } = useUserPositions();
-  const { sel: cuentaSel, cuentas: cuentasCtx, alternar: alternarCuenta } = useCuenta();
+  const { sel: cuentaSel, setSel: setCuentaSel, cuentas: cuentasCtx, alternar: alternarCuenta } = useCuenta();
   const [importCsvOpen, setImportCsvOpen] = useState(false);
 
   // Hook de cash: trackea movements (deposits, withdrawals, sale_proceeds,
@@ -17551,7 +17556,16 @@ function PortfolioDashboard({ onNavigate }) {
   // Filtro global por broker. Trackeamos el Set de claves EXCLUIDAS (vacío
   // = todo visible); así el default "todo on" no depende de saber qué
   // brokers hay antes de que carguen las posiciones.
-  const [excludedBrokers, setExcludedBrokers] = useState(() => new Set());
+  const [excludedLocal, setExcludedBrokers] = useState(() => new Set());
+  const excludedBrokers = useMemo(() => {
+    const out = new Set(excludedLocal);
+    const l = selLista(cuentaSel);
+    if (l) for (const r of cuentasCtx || []) {
+      const keys = cuentasCtx.filter((x) => x.broker === r.broker).map((x) => claveCuenta(x));
+      if (!keys.some((k) => l.includes(k))) out.add(r.broker);
+    }
+    return out;
+  }, [excludedLocal, cuentaSel, cuentasCtx]);
   const toggleBroker = useCallback((key) => {
     setExcludedBrokers((prev) => {
       const next = new Set(prev);
@@ -17593,10 +17607,12 @@ function PortfolioDashboard({ onNavigate }) {
   // la venta seguía en la cuenta → ese cash se "colaba" en los totales
   // sin un chip que lo controlara.
   // Brokers con más de una cuenta (selección por cuenta en las fichas).
+  // Con 2+ cuentas dadas de alta, las fichas de "Brokers" manejan la selección
+  // global de cuentas (todas, incluida IOL). Con una sola, el filtro local de siempre.
   const multiCuentas = useMemo(() => {
     const m = new Map();
-    for (const r of cuentasCtx || []) { if (!m.has(r.broker)) m.set(r.broker, []); m.get(r.broker).push(r); }
-    for (const [b, l] of [...m]) if (l.length < 2) m.delete(b);
+    if ((cuentasCtx || []).length < 2) return m;
+    for (const r of cuentasCtx) { if (!m.has(r.broker)) m.set(r.broker, []); m.get(r.broker).push(r); }
     return m;
   }, [cuentasCtx]);
   const cuentaOpenCounts = useMemo(() => {
@@ -17803,11 +17819,11 @@ function PortfolioDashboard({ onNavigate }) {
       )}
 
       {/* Loading inicial */}
-      {loading && positions.length === 0 ? (
+      {loading && (todasPos || []).length === 0 ? (
         <div className="flex items-center justify-center" style={{ padding: "80px 0" }}>
           <Loader2 size={24} color={C.muted} className="eco-spin" strokeWidth={1.5} />
         </div>
-      ) : positions.length === 0 ? (
+      ) : (todasPos || []).length === 0 ? (
         <PortfolioEmptyState onAdd={openCreate} />
       ) : (
         <>
@@ -17827,6 +17843,15 @@ function PortfolioDashboard({ onNavigate }) {
               >
                 Brokers
               </span>
+              {multiCuentas.size > 0 && (() => {
+                const todasOn = cuentaSel === "todas";
+                return (
+                  <button onClick={() => setCuentaSel(todasOn ? "ninguna" : "todas")} title={todasOn ? "Apagar todas las cuentas" : "Ver todas las cuentas"}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em", backgroundColor: todasOn ? C.accentSoft : "transparent", border: `1px solid ${todasOn ? C.accentBorder : C.border}`, color: todasOn ? C.accent : C.muted, cursor: "pointer", fontFamily: "'Roboto', sans-serif", transition: "all 120ms ease" }}>
+                    {todasOn ? <Check size={11} strokeWidth={2.5} /> : null}Todas
+                  </button>
+                );
+              })()}
               {chipsBrokers.map((key) => {
                 // Broker con varias cuentas: una ficha por cuenta, que prende y
                 // apaga la selección global (la misma del botón de arriba).
@@ -17836,12 +17861,13 @@ function PortfolioDashboard({ onNavigate }) {
                     <Fragment key={key}>
                       {multiCuentas.get(key).map((r) => {
                         const k = claveCuenta(r), on = filaEnCuenta(r, cuentaSel);
+                        const unica = multiCuentas.get(key).length === 1;
                         const alias = (r.cuenta || "principal") === "principal" ? (r.broker_account_id || "principal") : (String(r.label || "").split(" · ").slice(1).join(" · ") || r.cuenta);
                         return (
                           <button key={k} onClick={() => alternarCuenta([k], !on)} title="Prende o apaga esta cuenta en todas las pantallas"
                             style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", fontSize: 10.5, fontWeight: 500, letterSpacing: "0.04em", backgroundColor: on ? "rgba(255,255,255,0.04)" : "transparent", border: `1px solid ${on ? C.borderStrong : C.border}`, color: on ? C.text : C.muted, cursor: "pointer", fontFamily: "'Roboto', sans-serif", transition: "all 120ms ease" }}>
                             <span style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: meta?.color || "#94A3B8", opacity: on ? 1 : 0.35 }} />
-                            <span>{meta?.short || key} · {alias}</span>
+                            <span>{meta?.short || key}{unica ? "" : ` · ${alias}`}</span>
                             <span style={{ color: on ? C.dim : C.faint, fontSize: 9.5, marginLeft: 1, fontVariantNumeric: "tabular-nums" }}>{cuentaOpenCounts[k] || 0}</span>
                           </button>
                         );
