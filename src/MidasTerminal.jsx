@@ -2023,7 +2023,7 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
               className="px-4 flex items-center"
               style={{ borderLeft: `1px solid ${C.border}` }}
             >
-              {active !== "portfolio-ia" && <CuentaSelector />}
+              {!["portfolio-ia", "reporte-cartera", "montecarlo-cartera"].includes(active) && <CuentaSelector />}
               <UserMenu onNavigate={setActive} />
             </div>
           </div>
@@ -32327,6 +32327,9 @@ function CarteraMonteCarloModule() {
   // Filtro por broker (igual que el Reporte de cartera): "all" = toda la cartera.
   const BROKER_LABEL = { cocos: "Cocos", iol: "IOL", manual: "Manual", balanz: "Balanz" };
   const [brokerFilter, setBrokerFilter] = useState("all");
+  // Con 2+ cuentas dadas de alta, el filtro es la lista de cuentas global (la
+  // misma del Portfolio); los botones locales quedan para quien tiene una sola.
+  const { cuentas: cuentasSel } = useCuenta();
   const brokers = useMemo(() => {
     const s = new Set();
     for (const p of positions || []) if (MC_CONTADO.includes(p.instrument_type)) s.add(p.broker || "manual");
@@ -32470,7 +32473,12 @@ function CarteraMonteCarloModule() {
         </div>
       </div>
 
-      {brokers.length > 1 && (
+      {cuentasSel.length >= 2 ? (
+        <div className="flex items-center" style={{ gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginRight: 4 }}>Broker</span>
+          <CuentaSelector inline />
+        </div>
+      ) : brokers.length > 1 && (
         <div className="flex items-center" style={{ gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
           <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginRight: 4 }}>Broker</span>
           {["all", ...brokers].map((b) => (
@@ -33753,6 +33761,9 @@ function ReporteCarteraModule({ compact = false, onPopOut, pipActive } = {}) {
   const BROKER_LABEL = { cocos: "Cocos", iol: "IOL", manual: "Manual", balanz: "Balanz" };
 
   const [brokerFilter, setBrokerFilter] = useState("all");
+  // Con 2+ cuentas dadas de alta, el filtro es la lista de cuentas global (la
+  // misma del Portfolio); los botones locales quedan para quien tiene una sola.
+  const { cuentas: cuentasSel } = useCuenta();
   const brokers = useMemo(() => {
     const s = new Set();
     for (const p of positions || []) { if (CONTADO.includes(p.instrument_type)) s.add(p.broker || "manual"); }
@@ -33865,7 +33876,12 @@ function ReporteCarteraModule({ compact = false, onPopOut, pipActive } = {}) {
         </div>
       </div>
 
-      {brokers.length > 1 && (
+      {cuentasSel.length >= 2 ? (
+        <div className="flex items-center" style={{ gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginRight: 4 }}>Broker</span>
+          <CuentaSelector inline />
+        </div>
+      ) : brokers.length > 1 && (
         <div className="flex items-center" style={{ gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
           <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginRight: 4 }}>Broker</span>
           {["all", ...brokers].map((b) => (
