@@ -368,7 +368,7 @@ function nombreDeCuentaFila(r, cuentas) {
 }
 // Selector de la barra de arriba: casillas agrupadas por broker. Solo aparece
 // con más de una cuenta.
-function CuentaSelector() {
+function CuentaSelector({ inline = false }) {
   const { sel, cuentas, claves, alternar, setSel } = useCuenta();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -383,7 +383,7 @@ function CuentaSelector() {
   const filtrando = !!l;
   // Con todas las cuentas a la vista el control vive en las fichas del
   // Portfolio; acá solo se avisa que hay un filtro puesto.
-  if (cuentas.length < 2 || !filtrando) return null;
+  if (cuentas.length < 2 || (!inline && !filtrando)) return null;
   const grupos = [];
   for (const r of cuentas) {
     let g = grupos.find((x) => x.broker === r.broker);
@@ -407,14 +407,14 @@ function CuentaSelector() {
   const fila = { display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "7px 12px", background: "transparent", border: "none", color: C.text, fontSize: 12, cursor: "pointer", textAlign: "left", fontFamily: "'Roboto', sans-serif" };
   const hov = { onMouseEnter: (e) => { e.currentTarget.style.backgroundColor = C.deep; }, onMouseLeave: (e) => { e.currentTarget.style.backgroundColor = "transparent"; } };
   return (
-    <div ref={ref} style={{ position: "relative", margin: "0 10px" }}>
+    <div ref={ref} style={{ position: "relative", margin: inline ? "0 6px 0 0" : "0 10px" }}>
       <button onClick={() => setOpen((v) => !v)} title="Cuentas que se muestran en todas las pantallas"
         style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", fontSize: 11.5, maxWidth: 240, background: filtrando ? C.accentSoft : C.panel, color: filtrando ? C.accent : C.muted, border: `1px solid ${filtrando ? C.accentBorder : C.border}`, borderRadius: 6, cursor: "pointer", fontFamily: "'Roboto', sans-serif", whiteSpace: "nowrap", overflow: "hidden" }}>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{texto}</span>
         <ChevronDown size={13} style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms" }} />
       </button>
       {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 260, background: C.panel, border: `1px solid ${C.borderStrong}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", zIndex: 60, padding: "4px 0" }}>
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", ...(inline ? { left: 0 } : { right: 0 }), minWidth: 260, background: C.panel, border: `1px solid ${C.borderStrong}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", zIndex: 60, padding: "4px 0" }}>
           <button onClick={() => setSel(filtrando ? "todas" : "ninguna")} style={{ ...fila, fontWeight: 600 }} {...hov}>{caja(!filtrando, activas.length > 0 && filtrando)}Todas las cuentas</button>
           <div style={{ height: 1, background: C.border, margin: "4px 0" }} />
           {grupos.map((g) => {
@@ -2020,7 +2020,7 @@ function MidasApp({ allowedModules = null, isAdmin = false }) {
               className="px-4 flex items-center"
               style={{ borderLeft: `1px solid ${C.border}` }}
             >
-              <CuentaSelector />
+              {active !== "portfolio-ia" && <CuentaSelector />}
               <UserMenu onNavigate={setActive} />
             </div>
           </div>
@@ -17927,38 +17927,10 @@ function PortfolioDashboard({ onNavigate }) {
               >
                 Brokers
               </span>
-              {multiCuentas.size > 0 && (() => {
-                const todasOn = cuentaSel === "todas";
-                return (
-                  <button onClick={() => setCuentaSel(todasOn ? "ninguna" : "todas")} title={todasOn ? "Apagar todas las cuentas" : "Ver todas las cuentas"}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em", backgroundColor: todasOn ? C.accentSoft : "transparent", border: `1px solid ${todasOn ? C.accentBorder : C.border}`, color: todasOn ? C.accent : C.muted, cursor: "pointer", fontFamily: "'Roboto', sans-serif", transition: "all 120ms ease" }}>
-                    {todasOn ? <Check size={11} strokeWidth={2.5} /> : null}Todas
-                  </button>
-                );
-              })()}
+              {multiCuentas.size > 0 && <CuentaSelector inline />}
               {chipsBrokers.map((key) => {
-                // Broker con varias cuentas: una ficha por cuenta, que prende y
-                // apaga la selección global (la misma del botón de arriba).
-                if (multiCuentas.has(key)) {
-                  const meta = BROKER_CATALOG[key];
-                  return (
-                    <Fragment key={key}>
-                      {multiCuentas.get(key).map((r) => {
-                        const k = claveCuenta(r), on = filaEnCuenta(r, cuentaSel);
-                        const unica = multiCuentas.get(key).length === 1;
-                        const alias = (r.cuenta || "principal") === "principal" ? (r.broker_account_id || "principal") : (String(r.label || "").split(" · ").slice(1).join(" · ") || r.cuenta);
-                        return (
-                          <button key={k} onClick={() => alternarCuenta([k], !on)} title="Prende o apaga esta cuenta en todas las pantallas"
-                            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", fontSize: 10.5, fontWeight: 500, letterSpacing: "0.04em", backgroundColor: on ? "rgba(255,255,255,0.04)" : "transparent", border: `1px solid ${on ? C.borderStrong : C.border}`, color: on ? C.text : C.muted, cursor: "pointer", fontFamily: "'Roboto', sans-serif", transition: "all 120ms ease" }}>
-                            <span style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: meta?.color || "#94A3B8", opacity: on ? 1 : 0.35 }} />
-                            <span>{meta?.short || key}{unica ? "" : ` · ${alias}`}</span>
-                            <span style={{ color: on ? C.dim : C.faint, fontSize: 9.5, marginLeft: 1, fontVariantNumeric: "tabular-nums" }}>{cuentaOpenCounts[k] || 0}</span>
-                          </button>
-                        );
-                      })}
-                    </Fragment>
-                  );
-                }
+                // Brokers con cuentas dadas de alta: se eligen en la lista de al lado.
+                if (multiCuentas.has(key)) return null;
                 const isActive = !excludedBrokers.has(key);
                 const isEfectivo = key === "efectivo";
                 const count = isEfectivo ? null : (brokerOpenCounts[key] || 0);
