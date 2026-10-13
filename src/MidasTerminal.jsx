@@ -35645,22 +35645,27 @@ function PnlPorInstrumentoModule() {
   // de asumir el arancel de tabla, Σ(comisión+derechos+IVA) ÷ Σ|bruto| de todas
   // las operaciones importadas. Es TU costo promedio por punta, con IVA.
   const [tarifaEf, setTarifaEf] = useState(null);
+  // Respeta la cuenta elegida (13/10/2026: con la Axon elegida mostraba la
+  // tarifa de las dos cuentas juntas desde abril).
+  const { sel: cuentaSelTarifa } = useCuenta();
   useEffect(() => {
     if (!user) return;
     let cancel = false;
-    leerLibroCompleto(user.id, "nro_comprobante,comision,ddmm,iva,monto_bruto,categoria")
+    leerLibroCompleto(user.id, "nro_comprobante,comision,ddmm,iva,monto_bruto,categoria,cuenta")
       .then(({ data }) => {
-        if (cancel || !data || !data.length) return;
+        if (cancel) return;
+        if (!data || !data.length) { setTarifaEf(null); return; }
         let fees = 0, vol = 0;
         for (const m of data) {
+          if (!filaEnCuenta({ broker: "cocos", cuenta: m.cuenta }, cuentaSelTarifa)) continue;
           if (!/^(trade_|futuro)/.test(m.categoria || "")) continue;
           fees += Math.abs(Number(m.comision) || 0) + Math.abs(Number(m.ddmm) || 0) + Math.abs(Number(m.iva) || 0);
           vol += Math.abs(Number(m.monto_bruto) || 0);
         }
-        if (vol > 0 && fees > 0) setTarifaEf({ rate: fees / vol, fees, vol });
+        setTarifaEf(vol > 0 && fees > 0 ? { rate: fees / vol, fees, vol } : null);
       });
     return () => { cancel = true; };
-  }, [user]);
+  }, [user, cuentaSelTarifa]);
 
   // Precios en vivo: sin esto el "no realizado" (P&L de lo abierto a mercado)
   // sale 0 y los instrumentos abiertos quedaban en "—". Mismos hooks que la
@@ -35915,7 +35920,7 @@ function PnlPorInstrumentoModule() {
             Comisiones acumuladas <span style={{ fontSize: 10, color: C.dim, fontWeight: 400 }}>· derechos de mercado + IVA + aranceles</span>
             {tarifaEf && (
               <span style={{ display: "block", fontSize: 10.5, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-                Tu tarifa efectiva real (medida del libro Cocos): <b style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>{(tarifaEf.rate * 100).toFixed(3)}%</b> por punta sobre ${Math.round(tarifaEf.vol / 1e6).toLocaleString("es-AR")}M operados
+                Tu tarifa efectiva real (medida del libro Cocos): <b style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>{(tarifaEf.rate * 100).toFixed(3)}%</b> por punta sobre ${Math.round(tarifaEf.vol / 1e6).toLocaleString("es-AR")} millones operados
               </span>
             )}
           </span>
