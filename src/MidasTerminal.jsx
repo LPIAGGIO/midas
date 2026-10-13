@@ -4277,7 +4277,7 @@ function BrokerCard({ id, meta, linked, positionCount, userId, refetchBrokers, c
                 padding: "1px 6px",
               }}
             >
-              {isApi ? "API" : "Manual"}
+              {isApi ? "API" : linked?.vault_secret_name ? "Matriz" : "Manual"}
             </span>
           </div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>
