@@ -383,7 +383,10 @@ function CuentaSelector({ inline = false }) {
   const filtrando = !!l;
   // Con todas las cuentas a la vista el control vive en las fichas del
   // Portfolio; acá solo se avisa que hay un filtro puesto.
-  if (cuentas.length < 2 || (!inline && !filtrando)) return null;
+  // Siempre visible con 2+ cuentas (LP 12/10: "tendría que estar siempre para
+  // las otras pantallas"); en el Portfolio la barra no lo muestra porque la
+  // lista está al lado de Brokers.
+  if (cuentas.length < 2) return null;
   const grupos = [];
   for (const r of cuentas) {
     let g = grupos.find((x) => x.broker === r.broker);
