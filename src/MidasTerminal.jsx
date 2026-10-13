@@ -5442,6 +5442,9 @@ function useImportBatches() {
 // que no esté acá NO genera posición (solo caja) — ampliar el mapa.
 const FCI_LEDGER_MAP = {
   COCORMA: "Cocos Rendimiento - Clase A|rentaMixta",
+  // Clase B del mismo fondo: la suscribe la cuenta 3893 (13/10/2026). Sin esto
+  // la suscripción quedaba solo como caja y faltaban ~$18 M de tenencia.
+  COCORMB: "Cocos Rendimiento - Clase B|rentaMixta",
   COCOSPPA: "Cocos Pesos Plus - Clase A|rentaFija",
   COCOAUSD: "Cocos Ahorro - Clase A|rentaFija",
 };
@@ -10092,6 +10095,7 @@ function useFciCatalog() {
 // el nombre largo. Ampliable a otros FCI.
 const FCI_SYMBOL = {
   "Cocos Rendimiento - Clase A": "COCORMA",
+  "Cocos Rendimiento - Clase B": "COCORMB",
 };
 function fciDisplayName(ticker) {
   if (!ticker || typeof ticker !== "string") return ticker;
