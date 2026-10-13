@@ -1029,6 +1029,15 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
     setFilas(data || []); setSel(new Set((data || []).map((r) => r.broker)));
   }, [user?.id]);
   useEffect(() => { if (open) recargar(); }, [open, recargar]);
+  // Todos los hooks ANTES del return temprano: con la ventana cerrada y después
+  // abierta, React veía más estados que en el render anterior y se caía la app
+  // entera (pantalla en blanco al apretar "Agregar broker", 12/10/2026).
+  // Con la clave ya cargada el recuadro muestra "Conectado" como el de IOL;
+  // el formulario vuelve solo si el usuario apreta "Cambiar usuario o clave".
+  const [editando, setEditando] = useState(() => new Set());
+  // Alta de una cuenta adicional del mismo broker (cotitular, sociedad...).
+  const [nuevaDe, setNuevaDe] = useState(null);
+  const [nueva, setNueva] = useState({ nombre: "", comitente: "" });
 
   if (!open) return null;
   const filaDe = (id) => (filas || []).find((r) => r.broker === id && (r.cuenta || "principal") === "principal") || (filas || []).find((r) => r.broker === id);
@@ -1042,12 +1051,6 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
   };
   const toggle = (id) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const setC = (id, k, v) => setCred((c) => ({ ...c, [id]: { ...(c[id] || {}), [k]: v } }));
-  // Con la clave ya cargada el recuadro muestra "Conectado" como el de IOL;
-  // el formulario vuelve solo si el usuario apreta "Cambiar usuario o clave".
-  const [editando, setEditando] = useState(() => new Set());
-  // Alta de una cuenta adicional del mismo broker (cotitular, sociedad...).
-  const [nuevaDe, setNuevaDe] = useState(null);
-  const [nueva, setNueva] = useState({ nombre: "", comitente: "" });
   const editar = (id, on) => setEditando((e) => { const n = new Set(e); if (on) n.add(id); else n.delete(id); return n; });
 
   const guardarSeleccion = async () => {
