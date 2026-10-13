@@ -3054,7 +3054,7 @@ function useLinkedBrokers(userId) {
     supabase
       .from("linked_brokers")
       .select(
-        "id, broker, label, status, status_message, vault_secret_name, bot_enabled, bot_extra_calls_allowed, last_sync_at, last_sync_status, created_at, updated_at"
+        "id, broker, cuenta, broker_account_id, label, status, status_message, vault_secret_name, bot_enabled, bot_extra_calls_allowed, last_sync_at, last_sync_status, created_at, updated_at"
       )
       .eq("user_id", userId)
       .order("created_at", { ascending: true })
@@ -3335,6 +3335,7 @@ function iolBalanceCurrency(accountType) {
 
 function usePositionsBrokerStats(userId) {
   const [data, setData] = useState({});
+  const [porCuenta, setPorCuenta] = useState({});   // "broker|cuenta" -> cantidad
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -3343,28 +3344,33 @@ function usePositionsBrokerStats(userId) {
       return;
     }
     let cancelled = false;
-    supabase
-      .from("positions")
-      .select("broker")
-      .eq("user_id", userId)
-      .then(({ data: rows, error: err }) => {
-        if (cancelled) return;
-        if (!err && rows) {
-          const counts = {};
-          rows.forEach((r) => {
-            const b = r.broker || "manual";
-            counts[b] = (counts[b] || 0) + 1;
-          });
-          setData(counts);
-        }
-        setLoading(false);
-      });
+    (async () => {
+      const rows = []; let err = null;
+      for (let desde = 0; ; desde += 1000) {
+        const r = await supabase.from("positions").select("broker,cuenta").eq("user_id", userId).order("id", { ascending: true }).range(desde, desde + 999);
+        if (r.error) { err = r.error; break; }
+        rows.push(...(r.data || []));
+        if (!r.data || r.data.length < 1000) break;
+      }
+      if (cancelled) return;
+      if (!err) {
+        const counts = {}, pc = {};
+        rows.forEach((r) => {
+          const b = r.broker || "manual";
+          counts[b] = (counts[b] || 0) + 1;
+          const k = `${b}|${r.cuenta || "principal"}`;
+          pc[k] = (pc[k] || 0) + 1;
+        });
+        setData(counts); setPorCuenta(pc);
+      }
+      setLoading(false);
+    })();
     return () => {
       cancelled = true;
     };
   }, [userId]);
 
-  return { data, loading };
+  return { data, porCuenta, loading };
 }
 
 /* ─────────────── VincularIOLModal ───────────────
@@ -3689,7 +3695,7 @@ function SettingsModule({ onNavigate, linkedBrokers, brokersLoading, refetchBrok
 
 function SettingsDashboard({ userId, brokers, brokersLoading, refetchBrokers }) {
   const [tab, setTab] = useState("brokers");
-  const { data: stats } = usePositionsBrokerStats(userId);
+  const { data: stats, porCuenta: statsCuenta } = usePositionsBrokerStats(userId);
   const { data: cashSnapshots } = useBrokerCashSnapshots(userId);
 
   return (
@@ -3751,6 +3757,7 @@ function SettingsDashboard({ userId, brokers, brokersLoading, refetchBrokers }) 
           brokers={brokers}
           loading={brokersLoading}
           stats={stats}
+          statsCuenta={statsCuenta}
           userId={userId}
           refetchBrokers={refetchBrokers}
           cashSnapshots={cashSnapshots}
@@ -4057,7 +4064,7 @@ function NotificationsTab({ userId }) {
   );
 }
 
-function BrokersTab({ brokers, loading, stats, userId, refetchBrokers, cashSnapshots }) {
+function BrokersTab({ brokers, loading, stats, statsCuenta = {}, userId, refetchBrokers, cashSnapshots }) {
   const [altaOpen, setAltaOpen] = useState(false);   // misma ventana de alta que la lista de bienvenida
   // Merge: si hay positions con un broker pero todavía no hay row en
   // linked_brokers, lo mostramos igual como "detectado" para que el user
@@ -4071,12 +4078,20 @@ function BrokersTab({ brokers, loading, stats, userId, refetchBrokers, cashSnaps
   // así el usuario ve la opción de vincularlo.
   allBrokerIds.add("iol");
 
-  const items = Array.from(allBrokerIds).map((bid) => {
-    const linked = brokers.find((b) => b.broker === bid);
+  // Una tarjeta por cuenta (varias cuentas del mismo broker, 12/10/2026). Los
+  // brokers con posiciones pero sin fila en linked_brokers siguen apareciendo
+  // como "detectados", en una sola tarjeta.
+  const items = [];
+  for (const bid of allBrokerIds) {
     const meta = BROKER_CATALOG[bid] || BROKER_CATALOG.manual;
-    const positionCount = stats[bid] || 0;
-    return { id: bid, meta, linked, positionCount };
-  });
+    const filas = brokers.filter((b) => b.broker === bid);
+    if (!filas.length) { items.push({ k: bid, id: bid, meta, linked: undefined, positionCount: stats[bid] || 0 }); continue; }
+    for (const linked of filas) {
+      const cta = linked.cuenta || "principal";
+      const n = statsCuenta[`${bid}|${cta}`];
+      items.push({ k: `${bid}:${cta}`, id: bid, meta, linked, positionCount: n != null ? n : (filas.length === 1 ? (stats[bid] || 0) : 0) });
+    }
+  }
 
   // Orden: API primero, después los que tienen más positions, después el resto.
   items.sort((a, b) => {
@@ -4122,7 +4137,7 @@ function BrokersTab({ brokers, loading, stats, userId, refetchBrokers, cashSnaps
       {/* Lista de brokers */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {items.map((item) => (
-          <BrokerCard key={item.id} {...item} userId={userId} refetchBrokers={refetchBrokers} cashSnapshots={cashSnapshots} />
+          <BrokerCard key={item.k} {...item} userId={userId} refetchBrokers={refetchBrokers} cashSnapshots={cashSnapshots} />
         ))}
       </div>
 
@@ -4249,7 +4264,7 @@ function BrokerCard({ id, meta, linked, positionCount, userId, refetchBrokers, c
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="flex items-center" style={{ gap: 8 }}>
             <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>
-              {linked && linked.label ? linked.label : meta.label}
+              {linked && linked.label ? linked.label : meta.label}{linked?.broker_account_id && !String(linked.label || "").includes(String(linked.broker_account_id)) ? ` · ${linked.broker_account_id}` : ""}
             </div>
             <span
               style={{
