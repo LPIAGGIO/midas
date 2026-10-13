@@ -21104,24 +21104,48 @@ function tickerMidasDesdeMatriz(tipo, simbolo) {
   return s;
 }
 
+/* Varias cuentas (12/10/2026): cocos-sync guarda una foto por comitente
+ * (account). Cada foto se compara SOLO contra las posiciones de su cuenta
+ * (linked_brokers.broker_account_id → cuenta), y solo se muestran las
+ * cuentas que estan en el selector de arriba. */
 function ControlCocosBanner({ positions }) {
   const { user } = useAuth();
-  const [foto, setFoto] = useState(null);
-  const [abierto, setAbierto] = useState(false);
+  const { sel, cuentas } = useCuenta();
+  const [fotos, setFotos] = useState([]);
   useEffect(() => {
     if (!user?.id) return;
     let vivo = true;
     supabase.from("broker_account_snapshot")
-      .select("snapshot_at,snapshot_date,cash,positions,totals")
+      .select("account,snapshot_at,snapshot_date,cash,positions,totals")
       .eq("user_id", user.id).eq("broker", "cocos")
-      .order("snapshot_date", { ascending: false }).limit(5)
+      .order("snapshot_date", { ascending: false }).limit(30)
       .then(({ data }) => {
         if (!vivo) return;
-        setFoto((data || []).find((f) => f?.totals?.cargada) || null);
+        // La ultima foto cargada de cada comitente.
+        const porCuenta = new Map();
+        for (const f of data || []) if (f?.totals?.cargada && !porCuenta.has(f.account)) porCuenta.set(f.account, f);
+        setFotos([...porCuenta.values()]);
       });
     return () => { vivo = false; };
   }, [user?.id]);
 
+  const lista = fotos.map((foto) => {
+    const fila = cuentas.find((r) => (r.broker || "cocos") === "cocos" && String(r.broker_account_id || "") === String(foto.account));
+    return { foto, cuenta: fila?.cuenta || "principal" };
+  }).filter((x) => filaEnCuenta({ broker: "cocos", cuenta: x.cuenta }, sel));
+  if (!lista.length) return null;
+  return lista.map(({ foto, cuenta }) => (
+    <ControlCocosCuenta
+      key={foto.account}
+      foto={foto}
+      etiqueta={fotos.length > 1 ? foto.account : null}
+      positions={(positions || []).filter((p) => (p.cuenta || "principal") === cuenta)}
+    />
+  ));
+}
+
+function ControlCocosCuenta({ foto, etiqueta, positions }) {
+  const [abierto, setAbierto] = useState(false);
   const comp = useMemo(() => {
     if (!foto) return null;
     const dia = foto.snapshot_date;
@@ -21165,9 +21189,10 @@ function ControlCocosBanner({ positions }) {
   const ars24 = foto.cash?.["24hs"]?.saldo?.ARS?.disponible;
   const ok = comp.dif === 0 && comp.difHoy === 0;
   const color = ok ? C.green : C.cat.amber;
-  const titulo = ok ? "Cocos coincide con Matriz"
-    : comp.dif > 0 ? `Cocos: ${comp.dif} ${comp.dif === 1 ? "papel no coincide" : "papeles no coinciden"} con Matriz al abrir`
-    : `Cocos: ${comp.difHoy} ${comp.difHoy === 1 ? "papel operado hoy falta" : "papeles operados hoy faltan"} en Midas`;
+  const nom = etiqueta ? `Cocos ${etiqueta}` : "Cocos";
+  const titulo = ok ? `${nom} coincide con Matriz`
+    : comp.dif > 0 ? `${nom}: ${comp.dif} ${comp.dif === 1 ? "papel no coincide" : "papeles no coinciden"} con Matriz al abrir`
+    : `${nom}: ${comp.difHoy} ${comp.difHoy === 1 ? "papel operado hoy falta" : "papeles operados hoy faltan"} en Midas`;
   const fN = (n) => fmtNumber(n, { maxDecimals: 0 });
   return (
     <div style={{ margin: "0 0 10px", border: `1px solid ${ok ? C.border : "rgba(251,191,36,0.35)"}`, borderRadius: 6, background: C.panel, fontSize: 11.5 }}>
