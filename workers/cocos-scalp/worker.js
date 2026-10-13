@@ -567,7 +567,11 @@ async function ciclo() {
   if (!(b.bid > 0) || !(b.ask > 0)) return;                       // sin libro no se decide nada
   if (CIERRE_VERDE > 0 && hm >= CIERRE_VERDE && S.verdeDia !== diaAr()) {
     S.verdeDia = diaAr(); guardar();
-    if (heldTot() > 0) return venderVerde(b);
+    // Solo ciclos que arrancaron con la configuración vigente (LP 13/10/2026): un
+    // ciclo viejo que viene de varios días de baja no se corta por quedar apenas
+    // en verde; sigue con sus ventas por escalón hasta cerrar el ciclo.
+    if (heldTot() > 0 && Math.abs(pasoC() - PASO) > 1e-9) log(`${CIERRE_VERDE}: ciclo anterior a la configuración vigente (paso ${(pasoC() * 100).toFixed(2)}%): no vendo lo verde, sigo con las ventas por escalón`);
+    else if (heldTot() > 0) return venderVerde(b);
   }
   const tot = heldTot();
   const abierto = tot > 0 ? tot * b.bid - S.niveles.reduce((a, n) => a + n.costo, 0) : 0;
