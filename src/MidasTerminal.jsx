@@ -1108,6 +1108,42 @@ function VincularIOLInline({ onSuccess }) {
   );
 }
 
+/* Seguridad de las cuentas conectadas (LP 13/10/2026: "darle al usuario
+ * tranquilidad"). Cada frase describe cómo funciona hoy:
+ *  - IOL: la contraseña se usa una vez para pedir el permiso a la API oficial
+ *    (iol-auth) y no se guarda.
+ *  - Matriz: la clave va a Vault (cifrada); el navegador no la vuelve a ver y
+ *    solo la lee el proceso de sincronización (cocos-sync: reporte de cuenta y
+ *    posiciones, sin llamadas de órdenes).
+ *  - Midas no tiene pantallas para comprar o vender; RLS: cada usuario ve lo suyo. */
+function SeguridadCuentasNota({ compacta = false }) {
+  const items = [
+    ["Solo consulta.", "Midas lee tu tenencia, tus saldos y tus movimientos para mostrártelos. Desde Midas no se compra ni se vende: no hay botones para operar y no se mandan órdenes a tu broker."],
+    ["Claves protegidas.", "La contraseña de IOL no se guarda: se usa una sola vez para pedirle a IOL un permiso de acceso por su API oficial. La clave de Matriz se guarda cifrada en el servidor, no vuelve a tu navegador y solo la usa el proceso que sincroniza tu cuenta."],
+    ["Tus datos son tuyos.", "Cada usuario ve únicamente su información. Los archivos que subís se usan solo para calcular tu cartera."],
+    ["Lo cortás cuando quieras.", "Con Desvincular se borra la clave o el permiso guardado. Tus operaciones cargadas no se borran salvo que quites la cuenta."],
+  ];
+  if (compacta) return (
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 11, color: C.dim, lineHeight: 1.5, marginBottom: 14 }}>
+      <ShieldCheck size={14} strokeWidth={1.8} style={{ color: C.green, flexShrink: 0, marginTop: 1 }} />
+      <span>Midas solo consulta tu cuenta, no opera. La contraseña de IOL no se guarda y la clave de Matriz se guarda cifrada en el servidor. Podés desvincular cuando quieras.</span>
+    </div>
+  );
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 6, padding: "14px 16px", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <ShieldCheck size={16} strokeWidth={1.8} style={{ color: C.green }} />
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: C.text }}>Tus cuentas, seguras</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "10px 22px" }}>
+        {items.map(([t, d]) => (
+          <div key={t} style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}><b style={{ color: C.text, fontWeight: 600 }}>{t}</b> {d}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false }) {
   const { user } = useAuth();
   const [filas, setFilas] = useState(null);
@@ -1238,7 +1274,8 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
           <span style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'Raleway', sans-serif" }}>Dá de alta tus brokers</span>
           {!inline && <button onClick={onClose} style={{ fontSize: 13, cursor: "pointer", background: "transparent", color: C.dim, border: "none" }}>✕</button>}
         </div>
-        <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 14 }}>Tildá todos los que usás. IOL se conecta por API. Si en alguno operás con Matriz, cargá tu clave y Midas sincroniza la cuenta solo. Los demás se cargan subiendo el archivo de movimientos.</div>
+        <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 10 }}>Tildá todos los que usás. IOL se conecta por API. Si en alguno operás con Matriz, cargá tu clave y Midas sincroniza la cuenta solo. Los demás se cargan subiendo el archivo de movimientos.</div>
+        <SeguridadCuentasNota compacta />
         {filas === null ? <div style={{ color: C.muted, fontSize: 12 }}>Cargando…</div> : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
             {lista.map((b) => {
@@ -4229,6 +4266,8 @@ function BrokersTab({ brokers, loading, stats, statsCuenta = {}, userId, refetch
           </div>
         </div>
       )}
+
+      <SeguridadCuentasNota />
 
       {/* Lista de brokers */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
