@@ -19163,7 +19163,9 @@ function ConsolidatedSection({
         </div>
       </div>
 
-      <ControlCocosBanner positions={positions} />
+      {/* Control "Matriz al abrir / Midas al abrir" sacado de la pantalla (LP 12/10/2026: "es confuso").
+          El worker cocos-sync sigue guardando la foto en broker_account_snapshot; el
+          componente ControlCocosBanner queda por si se quiere volver a mostrar. */}
 
       {/* Filtros (chips por tipo). El número del chip es la cantidad de
           papeles con posición ABIERTA (neto ≠ 0), no de operaciones ni de
