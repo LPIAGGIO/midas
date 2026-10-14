@@ -578,14 +578,26 @@ async function ciclo() {
   if (S.ancla && b.bid <= S.ancla * (1 - CORTE)) return liquidar(`cayó ${(CORTE * 100).toFixed(1)}% desde el ancla ${pesos(S.ancla)}`);
   if (S.pnl + abierto <= -PERDIDA_MAX) return liquidar(`pérdida del día ${pesos(S.pnl + abierto)}`);
 
-  // Control contra duplicados: la cuenta no puede tener MÁS papeles de los que
-  // este bot cree tener (base = tenencia al arrancar, antes de la primera orden).
+  // Cuenta propia (LP 14/10/2026: "que el bot continúe solo con lo de él; así
+  // tienen que ser todos"). base = papeles de la cuenta que no son del bot.
+  // Si la tenencia cambia por una operación a mano (dos lecturas seguidas, un
+  // minuto entre sí, para no confundirla con un fill propio que todavía no se
+  // registró), se ajusta la base y el bot sigue solo con lo suyo. Solo si la
+  // cuenta tiene MENOS papeles que los del bot se pausan las compras.
   if (REAL && S.base != null && Date.now() - ultimaTenencia > 60_000) {
     ultimaTenencia = Date.now();
     try {
       const t = await tenenciaCuenta();
-      if (t > S.base + tot) { if (++excesos >= 2 && !pausaCompras) { pausaCompras = 1; log(`ERROR la cuenta tiene ${t} ${TK} y yo llevo ${tot} (base ${S.base}): pauso las compras`); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\nLa cuenta tiene ${t} y el bot lleva ${tot}: compras pausadas. Revisar.`); } }
-      else excesos = 0;
+      if (t < tot) {
+        if (++excesos >= 2 && !pausaCompras) { pausaCompras = 1; log(`ERROR la cuenta tiene ${t} ${TK} y el bot lleva ${tot}: faltan papeles del bot, pauso las compras`); await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\nLa cuenta tiene ${t} y el bot lleva ${tot}: faltan papeles del bot. Compras pausadas. Revisar.`); }
+      } else if (t !== S.base + tot) {
+        if (++excesos >= 2) {
+          const antes = S.base; S.base = t - tot; excesos = 0; guardar();
+          if (pausaCompras) { pausaCompras = 0; log("la cuenta vuelve a cubrir los papeles del bot: retomo las compras"); }
+          log(`la cuenta tiene ${t} ${TK}: ${S.base} no son del bot (antes ${antes}); sigo solo con mis ${tot}`);
+          await tg(`<b>SCALP ${TK} · cuenta ${CUENTA}</b>\nLa cuenta tiene ${t} y el bot lleva ${tot}. Tomo ${S.base} como papeles tuyos (antes ${antes}): no los toco y sigo con lo mío.`);
+        }
+      } else { excesos = 0; if (pausaCompras) { pausaCompras = 0; log("tenencia en orden: retomo las compras"); } }
     } catch (e) { log(`tenencia: ${e.message}`); }
   }
 
