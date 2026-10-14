@@ -42,7 +42,11 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False, pausa_suba=0.0, bal=None):
+    # bal (14/10/2026, balances): dict(ventana=set de fechas, salto=set de fechas, modo='A'|'B').
+    # En los dias de 'ventana' (las N ruedas antes del salto del balance) y en el gap de apertura
+    # de los dias de 'salto': modo A = no compra nada (ni ciclo nuevo ni escalon); modo B = compra
+    # con medio lote. Las ventas siguen igual. Fuera de esas fechas no cambia nada.
     # senales (11/10, LP): {indice de barra: nivel de entrada} del motor de niveles del
     # bot de IOL. Con solo_senales=True la grilla NO abre ciclos por su cuenta: al cerrar
     # la barra de la señal deja una compra límite en el nivel que vive `ventana` barras
@@ -53,7 +57,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
     # OTRA VEZ la misma cantidad que tiene y pasa a salir todo junto en promedio + gan.
     X = 99
     # permitido: fechas en las que se puede ABRIR un ciclo nuevo (None = siempre)
-    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV, espera=0, idle=0, nx=0, extras=0, paso=paso, gan=gan, pg=(paso, gan), nb=False, bs=0, tope=None, topes=0, od=None, sube=0, nsen=0, ciclos=0)
+    E = dict(ancla=None, reent=None, parado=None, real=0.0, rondas=0, cortes=0, perd=0.0, fx=1.0, ok=True, capmax=LOTE * NIV, espera=0, idle=0, nx=0, extras=0, paso=paso, gan=gan, pg=(paso, gan), nb=False, bs=0, tope=None, topes=0, od=None, sube=0, nsen=0, ciclos=0, lf=1.0)
     lots = {}          # k -> (precio, unidades, costo_usd)
     if inicial:
         E['ancla'] = inicial.get('ancla')
@@ -66,7 +70,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
 
     def comprar(k, px):
         E['idle'] = 0
-        lots[k] = (px, LOTE * E['fx'] / px, LOTE)
+        lots[k] = (px, LOTE * E['lf'] * E['fx'] / px, LOTE * E['lf'])
         if E['ancla'] is None:
             E['ancla'] = px
             E['ciclos'] += 1
@@ -165,8 +169,20 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
     peor_abierto = 0.0
     prev_c = inicial.get('prev_c') if inicial else None
     prev_f = None
+    E['pausas'] = 0
+    cierre_ant = None; ult_c = None; f_ant = None
     for i, (fecha, o, h, l, c) in enumerate(bars):
+        # pausa_suba (LP 13/10/2026): ciclo cerrado con el papel >= pausa_suba arriba del
+        # cierre del día anterior -> no abre otro ciclo hasta el día siguiente.
+        if fecha != f_ant:
+            cierre_ant = ult_c; f_ant = fecha
         E['nb'] = nobuy is not None and i in nobuy
+        E['lf'] = 1.0
+        if bal is not None and fecha in bal['ventana']:
+            if bal['modo'] == 'A':
+                E['nb'] = True
+            else:
+                E['lf'] = 0.5
         if E['nb']:
             E['idle'] = 0               # el reloj del lateral arranca con las compras
         E['bs'] = 0 if fecha != prev_f else E['bs'] + 1
@@ -182,7 +198,14 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         if E['parado'] is not None and E['parado'] != fecha:
             E['parado'] = None          # dia nuevo despues de un corte
         if prev_c is not None:
+            sv = (E['nb'], E['lf'])
+            if bal is not None and fecha in bal['salto'] and fecha != prev_f:
+                if bal['modo'] == 'A':
+                    E['nb'] = True
+                else:
+                    E['lf'] = 0.5
             mover(prev_c, o, fecha, True)
+            E['nb'], E['lf'] = sv
         E['ok'] = permitido is None or fecha in permitido
         if not solo_senales and E['ok'] and E['ancla'] is None and E['parado'] is None and E['reent'] is None and not E['nb'] and not lots:
             if entrada_off > 0:
@@ -192,6 +215,9 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         camino = [o, l, h, c] if c >= o else [o, h, l, c]
         for a, b in zip(camino, camino[1:]):
             mover(a, b, fecha, False)
+        if pausa_suba and cierre_ant and not lots and E['ancla'] is None and E['parado'] is None and c >= cierre_ant * (1 + pausa_suba):
+            E['parado'] = fecha; E['reent'] = None; E['pausas'] += 1
+        ult_c = c
         if solo_senales:
             if E['ancla'] is None and E['parado'] is None and not lots:
                 if E['espera'] > 0:
@@ -263,7 +289,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
             vivos = sum(1 for k in lots if k >= 100)
             if vivos < lateral_max:
                 E['nx'] += 1
-                lots[100 + E['nx']] = (c, lateral_frac * LOTE * E['fx'] / c, lateral_frac * LOTE)
+                lots[100 + E['nx']] = (c, lateral_frac * LOTE * E['lf'] * E['fx'] / c, lateral_frac * LOTE * E['lf'])
                 E['extras'] += 1
                 E['idle'] = 0
         E['capmax'] = max(E['capmax'], sum(v[2] for v in lots.values()))
@@ -288,7 +314,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         pico = max(pico, e)
         dd = min(dd, e - pico)
     dias = len({b[0] for b in bars})
-    return dict(total=eq[-1], real=E['real'], abierto=eq[-1] - E['real'], rondas=E['rondas'], cortes=E['cortes'], perd=E['perd'], dd=dd,
+    return dict(pausas=E['pausas'], total=eq[-1], real=E['real'], abierto=eq[-1] - E['real'], rondas=E['rondas'], cortes=E['cortes'], perd=E['perd'], dd=dd,
                 capmax=E['capmax'], dobles=sum(1 for _ in [0]) * 0, peor_abierto=peor_abierto, cargado=100.0 * cargado / dias, racha=racha_max, dias=dias, anio=por_anio, eq=eq, s_ab=s_ab, s_lot=s_lot, s_cap=s_cap, extras=E['extras'], topes=E['topes'], nsen=E['nsen'], ciclos=E['ciclos'], s_u=s_u)
 
 

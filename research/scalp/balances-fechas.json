@@ -1,0 +1,863 @@
+{
+ "fallos": [],
+ "balances": {
+  "JNJ": [
+   {
+    "fecha": "2023-10-17",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2023",
+    "eps": "$2.66"
+   },
+   {
+    "fecha": "2024-01-23",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2023",
+    "eps": "$2.29"
+   },
+   {
+    "fecha": "2024-04-16",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2024",
+    "eps": "$2.71"
+   },
+   {
+    "fecha": "2024-07-17",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2024",
+    "eps": "$2.82"
+   },
+   {
+    "fecha": "2024-10-15",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2024",
+    "eps": "$2.42"
+   },
+   {
+    "fecha": "2025-01-22",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2024",
+    "eps": "$2.04"
+   },
+   {
+    "fecha": "2025-04-15",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "$2.77"
+   },
+   {
+    "fecha": "2025-07-16",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "$2.77"
+   },
+   {
+    "fecha": "2025-10-14",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$2.80"
+   },
+   {
+    "fecha": "2026-01-21",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$2.46"
+   },
+   {
+    "fecha": "2026-04-14",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$2.70"
+   },
+   {
+    "fecha": "2026-07-15",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$2.90"
+   }
+  ],
+  "GOOGL": [
+   {
+    "fecha": "2023-10-24",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2023",
+    "eps": "$1.55"
+   },
+   {
+    "fecha": "2024-01-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2023",
+    "eps": "$1.64"
+   },
+   {
+    "fecha": "2024-04-25",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2024",
+    "eps": "$1.89"
+   },
+   {
+    "fecha": "2024-07-23",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2024",
+    "eps": "$1.89"
+   },
+   {
+    "fecha": "2024-10-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2024",
+    "eps": "$2.12"
+   },
+   {
+    "fecha": "2025-02-04",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2024",
+    "eps": "$2.15"
+   },
+   {
+    "fecha": "2025-04-24",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "$2.81"
+   },
+   {
+    "fecha": "2025-07-23",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "$2.31"
+   },
+   {
+    "fecha": "2025-10-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$2.87"
+   },
+   {
+    "fecha": "2026-02-04",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$2.82"
+   },
+   {
+    "fecha": "2026-04-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$5.11"
+   },
+   {
+    "fecha": "2026-07-22",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$9.11"
+   }
+  ],
+  "MSFT": [
+   {
+    "fecha": "2023-10-24",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2023",
+    "eps": "$2.99"
+   },
+   {
+    "fecha": "2024-01-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2023",
+    "eps": "$2.93"
+   },
+   {
+    "fecha": "2024-04-25",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2024",
+    "eps": "$2.94"
+   },
+   {
+    "fecha": "2024-07-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2024",
+    "eps": "$2.95"
+   },
+   {
+    "fecha": "2024-10-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2024",
+    "eps": "$3.30"
+   },
+   {
+    "fecha": "2025-01-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2024",
+    "eps": "$3.23"
+   },
+   {
+    "fecha": "2025-04-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "$3.46"
+   },
+   {
+    "fecha": "2025-07-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "$3.65"
+   },
+   {
+    "fecha": "2025-10-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$4.13"
+   },
+   {
+    "fecha": "2026-01-28",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$4.14"
+   },
+   {
+    "fecha": "2026-04-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$4.27"
+   },
+   {
+    "fecha": "2026-07-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$4.74"
+   }
+  ],
+  "META": [
+   {
+    "fecha": "2023-10-25",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2023",
+    "eps": "$4.39"
+   },
+   {
+    "fecha": "2024-02-01",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2023",
+    "eps": "$5.33"
+   },
+   {
+    "fecha": "2024-04-24",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2024",
+    "eps": "$4.71"
+   },
+   {
+    "fecha": "2024-07-31",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2024",
+    "eps": "$5.16"
+   },
+   {
+    "fecha": "2024-10-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2024",
+    "eps": "$6.03"
+   },
+   {
+    "fecha": "2025-01-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2024",
+    "eps": "$8.02"
+   },
+   {
+    "fecha": "2025-04-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "$6.43"
+   },
+   {
+    "fecha": "2025-07-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "$7.14"
+   },
+   {
+    "fecha": "2025-10-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$7.25"
+   },
+   {
+    "fecha": "2026-01-28",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$8.88"
+   },
+   {
+    "fecha": "2026-04-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$7.31"
+   },
+   {
+    "fecha": "2026-07-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$6.18"
+   }
+  ],
+  "AMZN": [
+   {
+    "fecha": "2023-10-26",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2023",
+    "eps": "$0.85"
+   },
+   {
+    "fecha": "2024-02-01",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2023",
+    "eps": "$1.01"
+   },
+   {
+    "fecha": "2024-04-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2024",
+    "eps": "$1.13"
+   },
+   {
+    "fecha": "2024-08-01",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2024",
+    "eps": "$1.23"
+   },
+   {
+    "fecha": "2024-10-31",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2024",
+    "eps": "$1.43"
+   },
+   {
+    "fecha": "2025-02-06",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2024",
+    "eps": "$1.86"
+   },
+   {
+    "fecha": "2025-05-01",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "$1.59"
+   },
+   {
+    "fecha": "2025-07-31",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "$1.68"
+   },
+   {
+    "fecha": "2025-10-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$1.95"
+   },
+   {
+    "fecha": "2026-02-05",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$1.95"
+   },
+   {
+    "fecha": "2026-04-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$1.56"
+   },
+   {
+    "fecha": "2026-07-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$1.88"
+   }
+  ],
+  "INTC": [
+   {
+    "fecha": "2023-10-26",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2023",
+    "eps": "$0.28"
+   },
+   {
+    "fecha": "2024-01-25",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2023",
+    "eps": "$0.38"
+   },
+   {
+    "fecha": "2024-04-25",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2024",
+    "eps": "($0.06)"
+   },
+   {
+    "fecha": "2024-08-01",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2024",
+    "eps": "($0.14)"
+   },
+   {
+    "fecha": "2024-10-31",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2024",
+    "eps": "($0.63)"
+   },
+   {
+    "fecha": "2025-01-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2024",
+    "eps": "($0.02)"
+   },
+   {
+    "fecha": "2025-04-24",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "($0.02)"
+   },
+   {
+    "fecha": "2025-07-24",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "($0.26)"
+   },
+   {
+    "fecha": "2025-10-23",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$0.11"
+   },
+   {
+    "fecha": "2026-01-22",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$0.04"
+   },
+   {
+    "fecha": "2026-04-23",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$0.17"
+   },
+   {
+    "fecha": "2026-07-23",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$0.30"
+   }
+  ],
+  "AMD": [
+   {
+    "fecha": "2023-10-31",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2023",
+    "eps": "$0.53"
+   },
+   {
+    "fecha": "2024-01-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2023",
+    "eps": "$0.59"
+   },
+   {
+    "fecha": "2024-04-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2024",
+    "eps": "$0.43"
+   },
+   {
+    "fecha": "2024-07-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2024",
+    "eps": "$0.50"
+   },
+   {
+    "fecha": "2024-10-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2024",
+    "eps": "$0.76"
+   },
+   {
+    "fecha": "2025-02-04",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2024",
+    "eps": "$0.88"
+   },
+   {
+    "fecha": "2025-05-06",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "$0.78"
+   },
+   {
+    "fecha": "2025-08-05",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "$0.27"
+   },
+   {
+    "fecha": "2025-11-04",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$0.97"
+   },
+   {
+    "fecha": "2026-02-03",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$1.24"
+   },
+   {
+    "fecha": "2026-05-05",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$1.11"
+   },
+   {
+    "fecha": "2026-08-04",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$1.44"
+   }
+  ],
+  "AAPL": [
+   {
+    "fecha": "2023-11-02",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2023",
+    "eps": "$1.46"
+   },
+   {
+    "fecha": "2024-02-01",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2023",
+    "eps": "$2.18"
+   },
+   {
+    "fecha": "2024-05-02",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2024",
+    "eps": "$1.53"
+   },
+   {
+    "fecha": "2024-08-01",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2024",
+    "eps": "$1.40"
+   },
+   {
+    "fecha": "2024-10-31",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2024",
+    "eps": "$1.64"
+   },
+   {
+    "fecha": "2025-01-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2024",
+    "eps": "$2.40"
+   },
+   {
+    "fecha": "2025-05-01",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "$1.65"
+   },
+   {
+    "fecha": "2025-07-31",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "$1.57"
+   },
+   {
+    "fecha": "2025-10-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$1.85"
+   },
+   {
+    "fecha": "2026-01-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$2.84"
+   },
+   {
+    "fecha": "2026-04-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$2.01"
+   },
+   {
+    "fecha": "2026-07-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$1.91"
+   }
+  ],
+  "NU": [
+   {
+    "fecha": "2023-11-14",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2023",
+    "eps": "$0.07"
+   },
+   {
+    "fecha": "2024-02-22",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2023",
+    "eps": "$0.08"
+   },
+   {
+    "fecha": "2024-05-14",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2024",
+    "eps": "$0.09"
+   },
+   {
+    "fecha": "2024-08-13",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2024",
+    "eps": "$0.12"
+   },
+   {
+    "fecha": "2024-11-13",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2024",
+    "eps": "$0.12"
+   },
+   {
+    "fecha": "2025-02-20",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2024",
+    "eps": "$0.12"
+   },
+   {
+    "fecha": "2025-05-13",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "$0.12"
+   },
+   {
+    "fecha": "2025-08-14",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "$0.14"
+   },
+   {
+    "fecha": "2025-11-13",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$0.17"
+   },
+   {
+    "fecha": "2026-02-19",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": null
+   },
+   {
+    "fecha": "2026-02-25",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$0.19"
+   },
+   {
+    "fecha": "2026-05-14",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$0.19"
+   },
+   {
+    "fecha": "2026-08-13",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$0.22"
+   }
+  ],
+  "NVDA": [
+   {
+    "fecha": "2023-11-21",
+    "hora": "time-not-supplied",
+    "trimestre": "Oct/2023",
+    "eps": "$3.77"
+   },
+   {
+    "fecha": "2024-02-21",
+    "hora": "time-not-supplied",
+    "trimestre": "Jan/2024",
+    "eps": "$4.91"
+   },
+   {
+    "fecha": "2024-05-22",
+    "hora": "time-not-supplied",
+    "trimestre": "Apr/2024",
+    "eps": "$5.80"
+   },
+   {
+    "fecha": "2024-08-28",
+    "hora": "time-not-supplied",
+    "trimestre": "Jul/2024",
+    "eps": "$0.65"
+   },
+   {
+    "fecha": "2024-11-20",
+    "hora": "time-not-supplied",
+    "trimestre": "Oct/2024",
+    "eps": "$0.78"
+   },
+   {
+    "fecha": "2025-02-26",
+    "hora": "time-not-supplied",
+    "trimestre": "Jan/2025",
+    "eps": "$0.85"
+   },
+   {
+    "fecha": "2025-05-28",
+    "hora": "time-not-supplied",
+    "trimestre": "Apr/2025",
+    "eps": "$0.77"
+   },
+   {
+    "fecha": "2025-08-27",
+    "hora": "time-not-supplied",
+    "trimestre": "Jul/2025",
+    "eps": "$0.99"
+   },
+   {
+    "fecha": "2025-11-19",
+    "hora": "time-not-supplied",
+    "trimestre": "Oct/2025",
+    "eps": "$1.24"
+   },
+   {
+    "fecha": "2026-02-25",
+    "hora": "time-not-supplied",
+    "trimestre": "Jan/2026",
+    "eps": "$1.57"
+   },
+   {
+    "fecha": "2026-05-20",
+    "hora": "time-not-supplied",
+    "trimestre": "Apr/2026",
+    "eps": "$2.39"
+   },
+   {
+    "fecha": "2026-08-26",
+    "hora": "time-not-supplied",
+    "trimestre": "Jul/2026",
+    "eps": "$2.22"
+   }
+  ],
+  "MU": [
+   {
+    "fecha": "2023-12-20",
+    "hora": "time-not-supplied",
+    "trimestre": "Nov/2023",
+    "eps": "($1.12)"
+   },
+   {
+    "fecha": "2024-03-20",
+    "hora": "time-not-supplied",
+    "trimestre": "Feb/2024",
+    "eps": "$0.27"
+   },
+   {
+    "fecha": "2024-06-26",
+    "hora": "time-not-supplied",
+    "trimestre": "May/2024",
+    "eps": "$0.43"
+   },
+   {
+    "fecha": "2024-09-25",
+    "hora": "time-not-supplied",
+    "trimestre": "Aug/2024",
+    "eps": "$0.99"
+   },
+   {
+    "fecha": "2024-12-18",
+    "hora": "time-not-supplied",
+    "trimestre": "Nov/2024",
+    "eps": "$1.62"
+   },
+   {
+    "fecha": "2025-03-20",
+    "hora": "time-not-supplied",
+    "trimestre": "Feb/2025",
+    "eps": "$1.41"
+   },
+   {
+    "fecha": "2025-06-25",
+    "hora": "time-not-supplied",
+    "trimestre": "May/2025",
+    "eps": "$1.73"
+   },
+   {
+    "fecha": "2025-09-23",
+    "hora": "time-not-supplied",
+    "trimestre": "Aug/2025",
+    "eps": "$2.86"
+   },
+   {
+    "fecha": "2025-12-17",
+    "hora": "time-not-supplied",
+    "trimestre": "Nov/2025",
+    "eps": "$4.61"
+   },
+   {
+    "fecha": "2026-03-18",
+    "hora": "time-not-supplied",
+    "trimestre": "Feb/2026",
+    "eps": "$12.08"
+   },
+   {
+    "fecha": "2026-06-24",
+    "hora": "time-not-supplied",
+    "trimestre": "May/2026",
+    "eps": "$24.89"
+   },
+   {
+    "fecha": "2026-09-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Aug/2026",
+    "eps": "$33.19"
+   }
+  ],
+  "SNDK": [
+   {
+    "fecha": "2025-05-07",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2025",
+    "eps": "($0.60)"
+   },
+   {
+    "fecha": "2025-08-14",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2025",
+    "eps": "$0.02"
+   },
+   {
+    "fecha": "2025-11-06",
+    "hora": "time-not-supplied",
+    "trimestre": "Sep/2025",
+    "eps": "$0.90"
+   },
+   {
+    "fecha": "2026-01-29",
+    "hora": "time-not-supplied",
+    "trimestre": "Dec/2025",
+    "eps": "$5.83"
+   },
+   {
+    "fecha": "2026-04-30",
+    "hora": "time-not-supplied",
+    "trimestre": "Mar/2026",
+    "eps": "$23.22"
+   },
+   {
+    "fecha": "2026-08-05",
+    "hora": "time-not-supplied",
+    "trimestre": "Jun/2026",
+    "eps": "$38.82"
+   }
+  ]
+ }
+}

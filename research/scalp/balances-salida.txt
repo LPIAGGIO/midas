@@ -1,0 +1,117 @@
+velas horarias 2023-10-19 a 2026-09-17 · corte de mitades 2025-04-04
+
+BALANCES USADOS (fecha de reporte > rueda del salto, aaaa omitido)
+  MU    11 balances: 23-12-20>12-21 24-03-20>03-21 24-06-26>06-27 24-09-25>09-26 24-12-18>12-19 25-03-20>03-21 25-06-25>06-26 25-09-23>09-24 25-12-17>12-18 26-03-18>03-19 26-06-24>06-25
+  SNDK   6 balances: 25-05-07>05-08 25-08-14>08-15 25-11-06>11-07 26-01-29>01-30 26-04-30>05-01 26-08-05>08-06
+  NVDA  12 balances: 23-11-21>11-22 24-02-21>02-22 24-05-22>05-23 24-08-28>08-29 24-11-20>11-21 25-02-26>02-27 25-05-28>05-29 25-08-27>08-28 25-11-19>11-20 26-02-25>02-26 26-05-20>05-21 26-08-26>08-27
+  AMD   12 balances: 23-10-31>11-01 24-01-30>01-31 24-04-30>05-01 24-07-30>07-31 24-10-29>10-30 25-02-04>02-05 25-05-06>05-07 25-08-05>08-06 25-11-04>11-05 26-02-03>02-04 26-05-05>05-06 26-08-04>08-05
+  INTC  12 balances: 23-10-26>10-27 24-01-25>01-26 24-04-25>04-26 24-08-01>08-02 24-10-31>11-01 25-01-30>01-31 25-04-24>04-25 25-07-24>07-25 25-10-23>10-24 26-01-22>01-23 26-04-23>04-24 26-07-23>07-24
+  META  12 balances: 23-10-25>10-26 24-02-01>02-02 24-04-24>04-25 24-07-31>08-01 24-10-30>10-31 25-01-29>01-30 25-04-30>05-01 25-07-30>07-31 25-10-29>10-30 26-01-28>01-29 26-04-29>04-30 26-07-29>07-30
+  GOOGL 12 balances: 23-10-24>10-25 24-01-30>01-31 24-04-25>04-26 24-07-23>07-24 24-10-29>10-30 25-02-04>02-05 25-04-24>04-25 25-07-23>07-24 25-10-29>10-30 26-02-04>02-05 26-04-29>04-30 26-07-22>07-23
+  AAPL  12 balances: 23-11-02>11-03 24-02-01>02-02 24-05-02>05-03 24-08-01>08-02 24-10-31>11-01 25-01-30>01-31 25-05-01>05-02 25-07-31>08-01 25-10-30>10-31 26-01-29>01-30 26-04-30>05-01 26-07-30>07-31
+  MSFT  12 balances: 23-10-24>10-25 24-01-30>01-31 24-04-25>04-26 24-07-30>07-31 24-10-30>10-31 25-01-29>01-30 25-04-30>05-01 25-07-30>07-31 25-10-29>10-30 26-01-28>01-29 26-04-29>04-30 26-07-29>07-30
+  AMZN  12 balances: 23-10-26>10-27 24-02-01>02-02 24-04-30>05-01 24-08-01>08-02 24-10-31>11-01 25-02-06>02-07 25-05-01>05-02 25-07-31>08-01 25-10-30>10-31 26-02-05>02-06 26-04-29>04-30 26-07-30>07-31
+  NU    12 balances: 23-11-14>11-15 24-02-22>02-23 24-05-14>05-15 24-08-13>08-14 24-11-13>11-14 25-02-20>02-21 25-05-13>05-14 25-08-14>08-15 25-11-13>11-14 26-02-25>02-26 26-05-14>05-15 26-08-13>08-14
+  JNJ   11 balances: 24-01-23>01-23 24-04-16>04-16 24-07-17>07-17 24-10-15>10-15 25-01-22>01-22 25-04-15>04-15 25-07-16>07-16 25-10-14>10-14 26-01-21>01-21 26-04-14>04-14 26-07-15>07-15
+  total 136 balances papel-trimestre (1ra mitad 65, 2da mitad 71)
+
+CHEQUEO DE LA HORA DEL REPORTE (promedio de |gap de apertura| del dia R y del dia R+1)
+  MU    gap abre R 1.1% · gap abre R+1 9.6% (11 eventos) -> despues del cierre
+  SNDK  gap abre R 1.9% · gap abre R+1 7.4% (6 eventos) -> despues del cierre
+  NVDA  gap abre R 0.9% · gap abre R+1 4.0% (12 eventos) -> despues del cierre
+  AMD   gap abre R 1.6% · gap abre R+1 6.8% (12 eventos) -> despues del cierre
+  INTC  gap abre R 0.9% · gap abre R+1 9.9% (12 eventos) -> despues del cierre
+  META  gap abre R 1.1% · gap abre R+1 8.7% (12 eventos) -> despues del cierre
+  GOOGL gap abre R 1.0% · gap abre R+1 6.2% (12 eventos) -> despues del cierre
+  AAPL  gap abre R 0.8% · gap abre R+1 3.4% (12 eventos) -> despues del cierre
+  MSFT  gap abre R 0.8% · gap abre R+1 4.9% (12 eventos) -> despues del cierre
+  AMZN  gap abre R 1.6% · gap abre R+1 6.5% (12 eventos) -> despues del cierre
+  NU    gap abre R 0.9% · gap abre R+1 6.3% (12 eventos) -> despues del cierre
+  JNJ   gap abre R 1.7% · gap abre R+1 0.4% (11 eventos) -> antes de apertura
+
+======================================================================================================================
+== cuenta 72404 (paso x2)
+  variante                    total  1ra mit  2da mit |  eventos    resto | vueltas |  peor lat peor cart
+                                USD      USD      USD |      USD      USD |         | suma pap.   por dia
+  C  control                 +40207    +3006   +35418 |     +187   +38238 |    8577 |    -19469    -17223
+  A1 no compra 1 rueda       +39549    +3215   +34632 |     -292   +38139 |    8671 |    -19153    -16906
+  A2 no compra 2 ruedas      +38977    +3103   +34213 |     +249   +37066 |    8623 |    -18994    -16677
+  B1 medio lote 1 rueda      +39111    +3507   +34686 |      +89   +38104 |    8568 |    -18573    -16204
+  B2 medio lote 2 ruedas     +38469    +3489   +34141 |     +779   +36850 |    8572 |    -18153    -15985
+  (eventos = ventana de N ruedas + dia del salto, N de la variante; el control usa N=1 en su fila)
+  control medido con N=2: eventos +1297 resto +37128
+  --- contra el control, por mitad (dif de total de la mitad) y por balance
+   A1 no compra 1 rueda   mitad1    +208 (eventos   -121) · mitad2    -786 (eventos   -358) · balances mejora 30 / empeora 42 / igual 64 · peor lat. dif +316 · peor cartera dif +317
+   A2 no compra 2 ruedas  mitad1     +97 (eventos   -202) · mitad2   -1206 (eventos   -846) · balances mejora 36 / empeora 56 / igual 44 · peor lat. dif +476 · peor cartera dif +546
+   B1 medio lote 1 rueda  mitad1    +501 (eventos    +53) · mitad2    -732 (eventos   -151) · balances mejora 34 / empeora 47 / igual 55 · peor lat. dif +897 · peor cartera dif +1019
+   B2 medio lote 2 ruedas mitad1    +482 (eventos    +61) · mitad2   -1277 (eventos   -579) · balances mejora 37 / empeora 59 / igual 40 · peor lat. dif +1316 · peor cartera dif +1238
+  --- por papel: dif de total contra el control en (mitad1 / mitad2) por variante; eventos del control (N=1)
+   papel    total C  evento C | A1              A2              B1              B2             
+   MU         +6920     +1015 |    -34 /  -232     -40 /  -538     -17 /   -29     -20 /  -295 
+   SNDK       +7053      +299 |     +0 /  -367      +0 /  -528      +0 /  -211      +0 /  -282 
+   NVDA       +4518      +111 |   -115 /    -4    -175 /   -38     -74 /   -22    -122 /   -39 
+   AMD        +4225      -658 |    +13 /   +62*     +7 /   +25*     -9 /   -69     -12 /   -90 
+   INTC       +2986     -1170 |   +313 /  -133    +274 /  -203    +163 /   -84    +144 /  -117 
+   META       +2927      +188 |     -0 /   +37    -106 /   -45     -69 /   -91    -133 /  -132 
+   GOOGL      +2586       -24 |   +142 /  -126    +145 /   -50    +432 /   -84    +423 /  -110 
+   AAPL       +2180      +255 |    +16 /   +33*    +15 /   +97*    -12 /   -37     -16 /   -68 
+   MSFT       +1067      -421 |    -36 /    -5     -55 /  +173     -18 /   +12     -27 /   +34 
+   AMZN       +2443      +757 |    -70 /   -35    -115 /   -77    +156 /   -93    +130 /  -137 
+   NU         +1782      -311 |    -26 /   -18    +140 /   -29     -46 /   -18    +123 /   -29 
+   JNJ        +1520      +146 |     +6 /    +4*     +6 /    +8*     -6 /    -8      -6 /   -12 
+   (* = mejora en las dos mitades)
+
+======================================================================================================================
+== cuenta 3893 (paso x2,5)
+  variante                    total  1ra mit  2da mit |  eventos    resto | vueltas |  peor lat peor cart
+                                USD      USD      USD |      USD      USD |         | suma pap.   por dia
+  C  control                 +39976    +3044   +34430 |      +72   +37403 |    6837 |    -18416    -16188
+  A1 no compra 1 rueda       +39155    +2816   +33797 |     -506   +37120 |    6861 |    -18343    -16099
+  A2 no compra 2 ruedas      +38545    +2568   +33399 |     +213   +35754 |    6859 |    -18260    -16083
+  B1 medio lote 1 rueda      +38914    +3498   +33718 |     -108   +37325 |    6840 |    -17697    -15228
+  B2 medio lote 2 ruedas     +38223    +3456   +33159 |     +755   +35860 |    6847 |    -17266    -15071
+  (eventos = ventana de N ruedas + dia del salto, N de la variante; el control usa N=1 en su fila)
+  control medido con N=2: eventos +1062 resto +36412
+  --- contra el control, por mitad (dif de total de la mitad) y por balance
+   A1 no compra 1 rueda   mitad1    -228 (eventos   -166) · mitad2    -633 (eventos   -412) · balances mejora 31 / empeora 46 / igual 59 · peor lat. dif +73 · peor cartera dif +89
+   A2 no compra 2 ruedas  mitad1    -476 (eventos   -351) · mitad2   -1031 (eventos   -498) · balances mejora 36 / empeora 58 / igual 42 · peor lat. dif +156 · peor cartera dif +105
+   B1 medio lote 1 rueda  mitad1    +454 (eventos    +96) · mitad2    -711 (eventos   -276) · balances mejora 38 / empeora 47 / igual 51 · peor lat. dif +719 · peor cartera dif +960
+   B2 medio lote 2 ruedas mitad1    +412 (eventos    +83) · mitad2   -1271 (eventos   -391) · balances mejora 43 / empeora 58 / igual 35 · peor lat. dif +1150 · peor cartera dif +1117
+  --- por papel: dif de total contra el control en (mitad1 / mitad2) por variante; eventos del control (N=1)
+   papel    total C  evento C | A1              A2              B1              B2             
+   MU         +6272      +778 |    -34 /   +34     -42 /  -287    +129 /   -32    +125 /  -199 
+   SNDK       +6820      +374 |     +0 /  -345      +0 /  -504      +0 /  -195      +0 /  -270 
+   NVDA       +4464      +250 |   -125 /   -28    -201 /   -77     -70 /   -14    -121 /   -39 
+   AMD        +4680      -806 |     +5 /   +63*     -3 /   +37      -7 /   -67     -11 /   -86 
+   INTC       +2836     -1209 |    -21 /  -144     -47 /  -178    +147 /  -116    +134 /  -150 
+   META       +3331      +245 |    +37 /    -8     -11 /  -206     -36 /   -26     -70 /  -225 
+   GOOGL      +2530       +20 |     +7 /  -106      +7 /   +55*   +232 /   -77    +227 /   -96 
+   AAPL       +1786      +154 |    +10 /   -35     +20 /   +70*     -8 /   -28     -18 /   -22 
+   MSFT       +1632      -259 |    -39 /   -19     -47 /    +8     +88 /   -15     +84 /    -4 
+   AMZN       +2454      +714 |    -38 /   -28     -94 /   +70     +34 /  -113      +3 /  -133 
+   NU         +1716      -284 |    -62 /   -22     -90 /   -37     -51 /   -15     +62 /   -30 
+   JNJ        +1454       +95 |    +32 /    +5*    +32 /   +20*     -4 /   -13      -4 /   -18 
+   (* = mejora en las dos mitades)
+
+======================================================================================================================
+VEREDICTO (14/10/2026) - NO SIRVE
+Criterio de LP: se recomienda solo si mejora en las dos mitades y no empeora el peor latente.
+- Ninguna de las 4 variantes (A1, A2, B1, B2) mejora el total en las dos mitades, en ninguna de las dos cuentas.
+  Todas pierden en la 2da mitad (-630 a -1.280 USD sobre ~34.000, es decir 2% a 4%); en la 1ra mitad unas ganan
+  (B1/B2 hasta +500 en cuenta 2x, ~+450 en 2,5x) y otras pierden (A en cuenta 2,5x).
+- El salto del balance no es una zona de perdida neta para la grilla: con el control los eventos (ventana + dia
+  del salto, 136 balances) suman +187 USD (cuenta 2x) y +72 USD (cuenta 2,5x) en tres años, o sea ~1 USD por
+  balance. Se pierde mucho en INTC (-1.170), AMD (-658), MSFT (-421), NU (-311) y se gana en MU (+1.015),
+  AMZN (+757), SNDK (+299), AAPL (+255); queda neto en cero. Frenar compras en la ventana te saca tanto
+  las que perdian como las que ganaban (balances que mejoran/empeoran con la variante: ~35/50, no hay sesgo util).
+- El peor latente SI mejora con las variantes (medio lote B: de -19.469 a -18.573/-18.153 en la cuenta 2x, 4% a 7%;
+  A: 1% a 2%), pero eso es menos exposicion, no mas plata: el costo es el resultado de la 2da mitad.
+- Por papel (12 x 4 variantes = 48 combinaciones, mucho para lo que muestra la muestra): las que mejoran en las dos
+  mitades y en las dos cuentas son A1 y A2 en JNJ (+10 a +50 USD en total, ruido) y A1 en AMD (+75 USD); AAPL A2
+  en ambas cuentas (+90 a +110). Montos de decenas de dolares en tres años: no justifican tocar un bot. INTC y SNDK
+  (los que reportan el 29/10): INTC A1 +313/-133 (cuenta 2x) y -21/-144 (2,5x), SNDK cotiza desde 02/2025 y sus 6
+  balances caen todos en la 2da mitad; pierde en todas las variantes (-195 a -528).
+- Limites: la 1ra mitad es chica (2023-10 a 2025-04, ~3.000 USD de resultado) asi que el test de "las dos mitades" tiene poco poder; igual el sentido es consistente (la 2da mitad,
+  que es la que tiene resultado, rechaza todo). Supuestos: en modo A se cancelan las compras que quedaban
+  colgadas toda la noche (no compran en el gap) y se rearman en la apertura; el reporte se toma como posterior al
+  cierre salvo JNJ (verificado con el gap de apertura, ver arriba). El 29/10 no hay nada que cambiar en la grilla.
