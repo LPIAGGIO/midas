@@ -153,17 +153,19 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                 if X in lots:
                     ut = sum(v[1] for v in lots.values())
                     avg = sum(v[0] * v[1] for v in lots.values()) / ut
-                    obj = E['split'] if E.get('split') else avg * (1 + E['gan'])
+                    obj = E['split'] if E.get('split') else avg * (1 + E['gan']) * ((1 + E['pg'][0]) if ref_split == 'todo' else 1)
                     if obj > p1:
                         return
-                    if ref_split and not E.get('split'):
-                        # 1ra mitad ahora; la 2da queda en X con su objetivo más alto
+                    if ref_split and ref_split != 'todo' and not E.get('split'):
+                        # 1ra parte ahora; el resto queda en X con su objetivo más alto
                         cu = sum(v[2] for v in lots.values())
+                        f1 = 1 / 3 if ref_split == 'tercio' else 0.5
                         lots.clear()
-                        lots[X] = (avg, ut / 2, cu / 2)
-                        lots[201] = (avg, ut / 2, cu / 2)
+                        lots[X] = (avg, ut * (1 - f1), cu * (1 - f1))
+                        lots[201] = (avg, ut * f1, cu * f1)
                         vender(201, p1 if salto else obj, fecha)
-                        E['split'] = obj * (1 + E['pg'][0]) if ref_split == 'paso' else avg * (1 + 2 * E['gan'])
+                        E['split'] = (obj * (1 + E['pg'][0]) if ref_split in ('paso', 'tercio') else
+                                      obj * (1 + 2 * E['pg'][0]) if ref_split == 'paso2' else avg * (1 + 2 * E['gan']))
                         if E['split'] > p1:
                             return
                         obj = E['split']
