@@ -1,0 +1,15 @@
+velas 2023-10-19 a 2026-09-17 · corte de mitades 2025-04-04 · USD, lote 460
+
+== cuenta 72404 (2x)
+  variante                                     total     1ra mit   2da mit   vueltas  peor lat   dif total (mitad1 / mitad2)
+  todo junto en promedio + ganancia (hoy)       +40207     +3006    +35418    8577     -19469
+  mitad ahí, mitad un escalón más arriba        +42114     +3181    +37051    7886     -19469    +1907 ( +174 / +1633)
+  mitad ahí, mitad en promedio + 2 ganancias    +41765     +3203    +36673    8043     -19469    +1559 ( +196 / +1255)
+  por papel (hoy / un escalón / 2 ganancias): MU +6920/+7428/+7212 · SNDK +7053/+7385/+7341 · NVDA +4518/+4389/+4495 · AMD +4225/+4328/+4488 · INTC +2986/+3108/+3113 · META +2927/+3020/+2981 · GOOGL +2586/+2754/+2690 · AAPL +2180/+2419/+2318 · MSFT +1067/+1139/+1101 · AMZN +2443/+2602/+2556 · NU +1782/+1865/+1849 · JNJ +1520/+1677/+1622
+
+== cuenta 3893 (2,5x)
+  variante                                     total     1ra mit   2da mit   vueltas  peor lat   dif total (mitad1 / mitad2)
+  todo junto en promedio + ganancia (hoy)       +39976     +3044    +34430    6837     -18416
+  mitad ahí, mitad un escalón más arriba        +40610     +3156    +34398    6320     -18470     +634 ( +112 /   -31)
+  mitad ahí, mitad en promedio + 2 ganancias    +40065     +3281    +33999    6404     -18470      +89 ( +236 /  -431)
+  por papel (hoy / un escalón / 2 ganancias): MU +6272/+6562/+6390 · SNDK +6820/+6997/+6893 · NVDA +4464/+4746/+4721 · AMD +4680/+4802/+4764 · INTC +2836/+2992/+2931 · META +3331/+2691/+2679 · GOOGL +2530/+2697/+2586 · AAPL +1786/+1950/+1884 · MSFT +1632/+1306/+1501 · AMZN +2454/+2606/+2519 · NU +1716/+1835/+1797 · JNJ +1454/+1426/+1401

@@ -42,7 +42,11 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False, pausa_suba=0.0, bal=None, reent_modo=None, post_ref=None):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False, pausa_suba=0.0, bal=None, reent_modo=None, post_ref=None, ref_split=None):
+    # ref_split (15/10/2026, LP): la salida del refuerzo en dos mitades en vez de todo junto.
+    # La 1ra mitad sale en promedio + ganancia (como hoy); la 2da en 'paso' = un escalón
+    # más arriba de ese precio, o 'gan' = promedio + 2 veces la ganancia. Mientras la 2da
+    # mitad espera, la grilla sigue en modo refuerzo (no abre ciclo nuevo).
     # post_ref (15/10/2026, LP: "comprar 1 lote más de los que tienen refuerzo y ya no se
     # mueven"): con el refuerzo hecho, compra UN lote más cuando la vela cierra post_ref
     # escalones abajo del precio del refuerzo (0 = en cuanto cierra en o bajo ese precio).
@@ -148,9 +152,22 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
             while lots:
                 if X in lots:
                     ut = sum(v[1] for v in lots.values())
-                    obj = sum(v[0] * v[1] for v in lots.values()) / ut * (1 + E['gan'])
+                    avg = sum(v[0] * v[1] for v in lots.values()) / ut
+                    obj = E['split'] if E.get('split') else avg * (1 + E['gan'])
                     if obj > p1:
                         return
+                    if ref_split and not E.get('split'):
+                        # 1ra mitad ahora; la 2da queda en X con su objetivo más alto
+                        cu = sum(v[2] for v in lots.values())
+                        lots.clear()
+                        lots[X] = (avg, ut / 2, cu / 2)
+                        lots[201] = (avg, ut / 2, cu / 2)
+                        vender(201, p1 if salto else obj, fecha)
+                        E['split'] = obj * (1 + E['pg'][0]) if ref_split == 'paso' else avg * (1 + 2 * E['gan'])
+                        if E['split'] > p1:
+                            return
+                        obj = E['split']
+                    E['split'] = None
                     for kk in list(lots):
                         vender(kk, p1 if salto else obj, fecha)
                     E['fin_px'], E['fin_f'] = (p1 if salto else obj), fecha
