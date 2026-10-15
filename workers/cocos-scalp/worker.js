@@ -332,6 +332,13 @@ function normalizar() {
 }
 const pasoC = () => S.paso || PASO;              // paso del ciclo en curso
 const ganC = () => S.gan || GANANCIA;            // ganancia del ciclo en curso
+/* Salida del refuerzo un escalón más arriba (LP 15/10/2026, medido en
+ * research/scalp/salida_partida.py: +6,8% en la 72404 y +2,6% en la 3893, gana en
+ * las dos mitades y no empeora el peor latente). La salida conjunta pasa de
+ * promedio × (1 + ganancia) a promedio × (1 + ganancia) × (1 + REF_PASOS × paso).
+ * SCALP_REF_SALIDA_PASOS=0 vuelve a la salida anterior. */
+const REF_PASOS = Number(ENV.SCALP_REF_SALIDA_PASOS ?? 1);
+const salidaRefuerzo = (costo, held) => alTick((costo / held) * (1 + ganC()) * (1 + REF_PASOS * pasoC()), "arriba");
 // Papeles que puede llegar a tener: grilla llena + refuerzo + extras del lateral.
 const EXPO_MAX = MAX * (1 + REFUERZO_FRAC) + (LATERAL_MIN > 0 ? LATERAL_MAX * Math.max(1, Math.round(LOTE * LATERAL_FRAC)) : 0);
 const heldGrilla = () => S.niveles.slice(0, NIVELES).reduce((a, n) => a + n.held, 0);
@@ -619,7 +626,7 @@ async function ciclo() {
     const costo = S.niveles.reduce((a, n) => a + n.costo, 0);
     S.niveles.forEach((n, k) => { n.held = k === 0 ? tot : 0; n.costo = k === 0 ? costo : 0; });
     S.reforzado = true; guardar();
-    log(`refuerzo: ${tot} papeles a un promedio de ${pesos(costo / tot)} · salida conjunta a ${pesos(alTick((costo / tot) * (1 + ganC()), "arriba"))}`);
+    log(`refuerzo: ${tot} papeles a un promedio de ${pesos(costo / tot)} · salida conjunta a ${pesos(salidaRefuerzo(costo, tot))}`);
     return;
   }
   // Ventas: cada escalón con papeles y sin compra en curso tiene su venta.
@@ -629,7 +636,8 @@ async function ciclo() {
     if (vs.some((o) => o.lado === "BUY" && o.nivel === k)) continue;
     const v = vs.find((o) => o.lado === "SELL" && o.nivel === k);
     if (!v && pausaVenta[k] > Date.now()) continue;  // esperando a que Cocos ajuste el stock
-    if (!v) await colocar("SELL", k, L.held, alTick((L.costo / L.held) * (1 + ganC()), "arriba"));
+    const pxV = S.reforzado && k === 0 ? salidaRefuerzo(L.costo, L.held) : alTick((L.costo / L.held) * (1 + ganC()), "arriba");
+    if (!v) await colocar("SELL", k, L.held, pxV);
     else if (!v.duda && v.qty - v.cum !== L.held) await cancelar(v, "cantidad distinta a la tenencia");
   }
   // Compra: una sola apoyada, en el escalón siguiente al más bajo con papeles.
