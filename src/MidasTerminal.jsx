@@ -31217,13 +31217,14 @@ function CedearValuacionModule({ compact = false, onPopOut, pipActive } = {}) {
 // Cargás tus lotes de compra, simulás vender N papeles a un precio X, y te dice
 // el P&L NETO (con derechos de mercado + IVA de las dos patas), lo que queda, y
 // el precio de BREAK-EVEN: el mínimo al que tenés que vender para no perder.
-// Costos Cocos CEDEAR: 0 comisión, pero derechos de mercado (~0,044% del monto)
-// + IVA 21% sobre los derechos, en cada pata.
+// Costos Cocos CEDEAR: 0 comisión, pero derechos de mercado + IVA 21% sobre los
+// derechos, en cada pata. Medido en el extracto real de Cocos (01-15/10/2026, 274
+// operaciones de CEDEARs, $615M): derechos 0,0467% del monto, 0,0565% con IVA.
 // ═══════════════════════════════════════════════════════════════════════
 function SimuladorVentaCedearModule({ compact = false, onPopOut, pipActive } = {}) {
   const { positions } = useUserPositions();
   const [lots, setLots] = useState([{ qty: "", price: "" }, { qty: "", price: "" }, { qty: "", price: "" }]);
-  const [derechos, setDerechos] = useState("0,044");
+  const [derechos, setDerechos] = useState("0,0467");
   const [iva, setIva] = useState("21");
   const [sells, setSells] = useState([{ qty: "", price: "" }]);
   const [simTicker, setSimTicker] = useState("");
@@ -33974,10 +33975,10 @@ function ReporteCarteraModule({ compact = false, onPopOut, pipActive } = {}) {
 
   // Break-even de VENTA (pedido de LP 02/09, para armar la salida sin abrir el
   // Simulador): precio mínimo para no perder cubriendo derechos+IVA de las DOS
-  // patas. Mismo costo que el Simulador de venta: 0,044% + 21% IVA por pata
+  // patas. Mismo costo que el Simulador de venta: 0,0467% + 21% IVA por pata
   // (Cocos CEDEARs/acciones, sin comisión). Solo renta variable: bonos y FCI
   // van sin derechos en Cocos y su B/E es el propio PPC.
-  const BE_COSTO = 0.00044 * 1.21;
+  const BE_COSTO = 0.000467 * 1.21;
   const breakEven = (r) => (["cedear", "stock"].includes(r.type) && r.ppc > 0)
     ? r.ppc * (1 + BE_COSTO) / (1 - BE_COSTO) : null;
   // Distancia del precio actual al B/E: + = ya lo superó (margen de ganancia
