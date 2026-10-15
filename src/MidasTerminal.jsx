@@ -1099,7 +1099,7 @@ function VincularIOLInline({ onSuccess }) {
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "center" }}>
         <input placeholder="Usuario de IOL" value={username} onChange={(e) => setUsername(e.target.value)} style={inp} autoComplete="off" />
-        <input placeholder="Clave de IOL" type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") enviar(); }} style={inp} autoComplete="new-password" />
+        <ClaveInput placeholder="Clave de IOL" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") enviar(); }} style={inp} autoComplete="new-password" />
         <button onClick={enviar} disabled={submitting || !username.trim() || !password} style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${C.accent}`, background: C.accent, color: C.bg, whiteSpace: "nowrap", opacity: submitting ? 0.6 : 1 }}>{submitting ? "Conectando…" : "Conectar IOL"}</button>
       </div>
       <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>Tu contraseña no se guarda: se usa una sola vez para obtener el token de la API oficial de IOL.</div>
@@ -1140,6 +1140,22 @@ function SeguridadCuentasNota({ compacta = false }) {
           <div key={t} style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}><b style={{ color: C.text, fontWeight: 600 }}>{t}</b> {d}</div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* Campo de clave con ojito: muestra lo tipeado para revisarlo antes de mandar.
+ * Varios intentos con una clave mal escrita bloquean el usuario en el broker. */
+function ClaveInput({ style, ...props }) {
+  const [ver, setVer] = useState(false);
+  const { width, ...resto } = style || {};
+  return (
+    <div style={{ position: "relative", width: width || "100%" }}>
+      <input {...props} type={ver ? "text" : "password"} style={{ ...resto, width: "100%", paddingRight: 30, boxSizing: "border-box" }} />
+      <button type="button" onClick={() => setVer((v) => !v)} title={ver ? "Ocultar la clave" : "Mostrar la clave para revisarla"} aria-label={ver ? "Ocultar la clave" : "Mostrar la clave"}
+        style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", padding: 2, cursor: "pointer", color: C.muted, display: "flex", alignItems: "center" }}>
+        {ver ? <EyeOff size={14} strokeWidth={1.7} /> : <Eye size={14} strokeWidth={1.7} />}
+      </button>
     </div>
   );
 }
@@ -1296,7 +1312,7 @@ function AltaBrokersModal({ open, onClose, onNavigate, onChanged, inline = false
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
           <input placeholder="Usuario de Matriz" value={c.usuario || ""} onChange={(e) => setC(k, "usuario", e.target.value)} style={inp} autoComplete="off" />
-          <input placeholder="Clave de Matriz" type="password" value={c.clave || ""} onChange={(e) => setC(k, "clave", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") guardarMatriz(id, cta); }} style={inp} autoComplete="new-password" />
+          <ClaveInput placeholder="Clave de Matriz" value={c.clave || ""} onChange={(e) => setC(k, "clave", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") guardarMatriz(id, cta); }} style={inp} autoComplete="new-password" />
           <input placeholder="N° de comitente" inputMode="numeric" value={c.comitente ?? (f?.broker_account_id || "")} onChange={(e) => setC(k, "comitente", e.target.value)} style={inp} autoComplete="off" />
           {(() => {
             const listo = !!c.usuario && !!c.clave && !!String(c.comitente ?? f?.broker_account_id ?? "").replace(/\D/g, "");
@@ -3735,8 +3751,7 @@ function VincularIOLModal({ onClose, onSuccess }) {
           >
             Contraseña IOL
           </label>
-          <input
-            type="password"
+          <ClaveInput
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => {
