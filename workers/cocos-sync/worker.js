@@ -194,6 +194,7 @@ async function marcar(sb, c, campos) {
 
 // Todas las filas de linked_brokers con clave de Matriz (paginado: Supabase
 // corta en 1.000).
+const MSG_CLAVE_MALA = "Usuario o clave de Matriz incorrectos. No se reintenta hasta que vuelvas a cargar la clave (varios intentos fallidos bloquean el usuario en el broker).";
 async function cuentasConClave(sb) {
   const out = [];
   for (let desde = 0; ; desde += 1000) {
@@ -255,6 +256,15 @@ async function main() {
         await marcar(sb, c, { status: "error", last_sync_status: "error", status_message: "Falta el número de comitente. Volvé a cargar la conexión con el número de cuenta." });
         fallas++; continue;
       }
+      /* Clave rechazada (LP 15/10/2026, a Pablo le bloquearon el usuario de
+       * Cocos): si Matriz ya dijo que el usuario o la clave estan mal, NO se
+       * reintenta cada hora — varios logins fallidos bloquean el usuario en el
+       * broker. Se vuelve a probar recien cuando la persona guarda la clave de
+       * nuevo (guardar_credencial_matriz pasa la fila a 'pending'). */
+      if (c.statusPrevio === "error" && c.msgPrevio === MSG_CLAVE_MALA) {
+        log(`${c.pre} la clave fue rechazada antes: no reintento hasta que la vuelvan a cargar`);
+        fallas++; continue;
+      }
       const k = `${c.userId}|${c.broker}|${c.comitente}`;
       if (vistas.has(k)) { log(`${c.pre} comitente repetida para el mismo usuario: salteo`); continue; }
       vistas.add(k);
@@ -304,7 +314,7 @@ async function main() {
       // Nunca se loguea ni se guarda la clave: los errores solo llevan HTTP y ruta.
       log(`${c.pre} fallo: ${e.message}`);
       if (e.tipo === "credenciales") {
-        await marcar(sb, c, { status: "error", last_sync_status: "error", status_message: "Usuario o clave de Matriz incorrectos" });
+        await marcar(sb, c, { status: "error", last_sync_status: "error", status_message: MSG_CLAVE_MALA });
       } else if (e.tipo === "cuenta") {
         await marcar(sb, c, { status: "error", last_sync_status: "error", status_message: `Matriz no devolvió la comitente ${c.comitente}: revisá el número de cuenta.` });
       } else {
