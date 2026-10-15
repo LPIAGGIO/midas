@@ -42,7 +42,12 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False, pausa_suba=0.0, bal=None, reent_modo=None, post_ref=None, ref_split=None):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False, pausa_suba=0.0, bal=None, reent_modo=None, post_ref=None, ref_split=None, reent_temprano=False):
+    # reent_modo 'v' / 'cc' / 'vd' (15/10/2026, LP, JNJ vendió todo en la apertura y volvió a
+    # entrar más caro): 'v' = solo reentra si baja al precio de la última venta, ese día (si no,
+    # mañana en la apertura); 'cc' = solo si baja al cierre del día anterior, ese día; 'vd' = al
+    # precio de venta sin límite de días. reent_temprano=True: la regla vale solo si el ciclo se
+    # cerró en la primera vela del día (la apertura); si no, sigue al precio como hoy.
     # ref_split (15/10/2026, LP): la salida del refuerzo en dos mitades en vez de todo junto.
     # La 1ra mitad sale en promedio + ganancia (como hoy); la 2da en 'paso' = un escalón
     # más arriba de ese precio, o 'gan' = promedio + 2 veces la ganancia. Mientras la 2da
@@ -172,7 +177,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                     E['split'] = None
                     for kk in list(lots):
                         vender(kk, p1 if salto else obj, fecha)
-                    E['fin_px'], E['fin_f'] = (p1 if salto else obj), fecha
+                    E['fin_px'], E['fin_f'], E['fin_tem'] = (p1 if salto else obj), fecha, E['bs'] == 0
                     E['reent'] = E['ancla']
                     E['ancla'] = None
                     E['espera'] = espera_barras
@@ -183,7 +188,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                     return
                 vender(k, p1 if salto else obj, fecha)
                 if not lots:
-                    E['fin_px'], E['fin_f'] = (p1 if salto else obj), fecha
+                    E['fin_px'], E['fin_f'], E['fin_tem'] = (p1 if salto else obj), fecha, E['bs'] == 0
                     E['reent'] = E['ancla']
                     E['ancla'] = None
                     E['espera'] = espera_barras
@@ -219,7 +224,8 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
         E['bs'] = 0 if fecha != prev_f else E['bs'] + 1
         if fecha != prev_f:
             E['od'] = o * (ccl(fecha) if en_pesos else 1.0)   # apertura del día (para reent_sube)
-            if reent_modo in ('b1', 'b2', 'c') and E.get('fin_f') is not None and E['fin_f'] != fecha and not lots and E['ancla'] is None:
+            E['cad'] = prev_c
+            if reent_modo in ('b1', 'b2', 'c', 'v', 'cc') and E.get('fin_f') is not None and E['fin_f'] != fecha and not lots and E['ancla'] is None:
                 E['reent'] = None; E['espera'] = 0; E['fin_f'] = None   # no bajó ayer: entra en la apertura de hoy
         if E['tope'] is not None and E['bs'] >= tope_barras:
             E['tope'] = None            # paso la ventana: vuelve a seguir al precio
@@ -264,9 +270,12 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
                         comprar(0, c)
                     else:
                         E['reent'] = senales[i]; E['espera'] = ventana
-        elif reent_modo and E.get('fin_f') is not None and E['ancla'] is None and not lots:
+        elif reent_modo and E.get('fin_f') is not None and E['ancla'] is None and not lots and (not reent_temprano or E.get('fin_tem')):
             n = {'b1': 1, 'b2': 2, 'd': 1}.get(reent_modo)
-            if n:
+            if reent_modo in ('v', 'vd', 'cc'):
+                E['reent'] = (E.get('cad') or E['fin_px']) if reent_modo == 'cc' else E['fin_px']
+                E['espera'] = 1
+            elif n:
                 E['reent'] = E['fin_px'] * (1 - n * E['pg'][0])   # compra apoyada n escalones abajo de la última venta
                 E['espera'] = 1
             else:

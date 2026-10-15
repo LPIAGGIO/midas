@@ -1,0 +1,19 @@
+velas 2023-10-19 a 2026-09-17 · corte de mitades 2025-04-04 · USD, lote 460 · con la salida del refuerzo un escalón arriba
+
+== cuenta 72404 (2x)
+  variante                                                     total     1ra mit   2da mit   vueltas  peor lat   dif total (mitad1 / mitad2)
+  como hoy: sigue al precio                                      +42924     +3246    +37917    8133     -19469
+  cierre en la apertura: espera el precio de venta (hoy)         +40606     +2561    +35869    7688     -19555    -2319 ( -685 / -2048)
+  cierre en la apertura: espera el cierre de ayer (hoy)          +39453     +2537    +34037    7551     -19682    -3471 ( -709 / -3880)
+  cierre en la apertura: espera el precio de venta (sin límite)   +21113     +1766    +13657    4084     -16030   -21811 (-1480 / -24260)
+  cualquier cierre: espera el precio de venta (hoy)              +40002     +2305    +35082    7584     -19882    -2922 ( -940 / -2834)
+  cualquier cierre: espera el cierre de ayer (hoy)               +39322     +2763    +33263    7563     -19458    -3602 ( -483 / -4654)
+
+== cuenta 3893 (2,5x)
+  variante                                                     total     1ra mit   2da mit   vueltas  peor lat   dif total (mitad1 / mitad2)
+  como hoy: sigue al precio                                      +41033     +3271    +34689    6467     -18470
+  cierre en la apertura: espera el precio de venta (hoy)         +39865     +2641    +33286    6237     -18872    -1168 ( -630 / -1402)
+  cierre en la apertura: espera el cierre de ayer (hoy)          +39115     +3269    +31782    6129     -18576    -1918 (   -2 / -2907)
+  cierre en la apertura: espera el precio de venta (sin límite)   +18808      +936    +12274    3151     -15722   -22226 (-2335 / -22415)
+  cualquier cierre: espera el precio de venta (hoy)              +39524     +2254    +33245    6203     -19389    -1509 (-1017 / -1444)
+  cualquier cierre: espera el cierre de ayer (hoy)               +38359     +2767    +31841    6028     -18566    -2674 ( -504 / -2848)
