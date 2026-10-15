@@ -338,6 +338,13 @@ const ganC = () => S.gan || GANANCIA;            // ganancia del ciclo en curso
  * promedio × (1 + ganancia) a promedio × (1 + ganancia) × (1 + REF_PASOS × paso).
  * SCALP_REF_SALIDA_PASOS=0 vuelve a la salida anterior. */
 const REF_PASOS = Number(ENV.SCALP_REF_SALIDA_PASOS ?? 1);
+/* Entrada inicial en un soporte (LP 15/10/2026, LLY y UNH estaban en máximos): con
+ * SCALP_ENTRADA_INICIAL=precio, el PRIMER ciclo del bot no entra al precio: deja la
+ * compra del escalón 1 apoyada en ese precio (o a la punta vendedora si ya está más
+ * abajo) y la repone cada día hasta que se llena. Desde el primer ciclo el bot sigue
+ * normal. S.entradaHecha queda en el estado para no volver a esperar. */
+const ENTRADA_INICIAL = Number(ENV.SCALP_ENTRADA_INICIAL || 0);
+const esperaEntrada = () => ENTRADA_INICIAL > 0 && !S.entradaHecha;
 const salidaRefuerzo = (costo, held) => alTick((costo / held) * (1 + ganC()) * (1 + REF_PASOS * pasoC()), "arriba");
 // Papeles que puede llegar a tener: grilla llena + refuerzo + extras del lateral.
 const EXPO_MAX = MAX * (1 + REFUERZO_FRAC) + (LATERAL_MIN > 0 ? LATERAL_MAX * Math.max(1, Math.round(LOTE * LATERAL_FRAC)) : 0);
@@ -379,7 +386,7 @@ function aplicarFill(o, cum, avg) {
   const L = S.niveles[o.nivel];
   if (o.lado === "BUY") {
     L.held += dq; L.costo += dN; S.comprado += dN;
-    if (S.ancla == null) { S.ancla = avg; S.reentrada = null; S.paso = PASO; S.gan = GANANCIA; }
+    if (S.ancla == null) { S.ancla = avg; S.reentrada = null; S.paso = PASO; S.gan = GANANCIA; S.entradaHecha = true; }
     log(`COMPRA ejecutada · escalón ${o.nivel + 1} · ${dq} × ${pesos(dN / dq)} · tengo ${heldTot()}`);
   } else {
     const costo = L.held > 0 ? L.costo * (dq / L.held) : 0;
@@ -654,7 +661,7 @@ async function ciclo() {
   const temprano = hm < (S.horaCompras || HORA_COMPRAS);   // todavía solo se vende lo arrastrado
   if (temprano) S.ultOp = Date.now();            // el reloj del lateral arranca con las compras
   if (c0 && h === -1 && tarde) await cancelar(c0, "ya no se abren ciclos nuevos hoy");
-  else if (c0 && h === -1 && !enReentrada && b.bid > c0.px * 1.001 && Date.now() - c0.t > (FAKE ? 300 : 60_000)) await cancelar(c0, "el precio se alejó");
+  else if (c0 && h === -1 && !enReentrada && !esperaEntrada() && b.bid > c0.px * 1.001 && Date.now() - c0.t > (FAKE ? 300 : 60_000)) await cancelar(c0, "el precio se alejó");
   // Refuerzo: grilla llena, sin refuerzo previo en este ciclo.
   if (REFUERZO_FRAC > 0 && !S.reforzado && !compras.length && S.ancla && llena && ref.held === 0 && !pausaCompras && !temprano) {
     const pxRef = alTick(S.ancla * (1 - REFUERZO_MULT * pasoC() * (NIVELES - 1)), "abajo");
@@ -663,7 +670,10 @@ async function ciclo() {
   }
   if (!S.reforzado && !compras.length && deseado < NIVELES && totG + LOTE <= MAX && !pausaCompras && !temprano && (deseado === 0 ? !tarde : S.ancla)) {
     let px;
-    if (deseado === 0) {
+    if (deseado === 0 && esperaEntrada()) {
+      px = Math.min(alTick(ENTRADA_INICIAL, "abajo"), b.ask);
+      log(`primer ciclo: espero la entrada en el soporte, compra apoyada a ${pesos(px)} (precio ${pesos(b.bid)})`);
+    } else if (deseado === 0) {
       px = enReentrada && b.bid > S.reentrada.px ? S.reentrada.px : alPrecioCierre ? alTick(b.ask, "arriba") : b.bid;
       if (alPrecioCierre) log(`no bajó al escalón de reentrada ${pesos(S.reentrada.px)}: entro al precio de cierre`);
     } else px = Math.min(alTick(S.ancla * (1 - pasoC() * deseado), "abajo"), b.ask);
