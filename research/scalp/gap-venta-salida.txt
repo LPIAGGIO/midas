@@ -1,0 +1,22 @@
+
+== abren >= 1% arriba del cierre anterior: 1653 eventos (12 papeles, velas 1h, corte de mitades 2025-06-20)
+  regla                                   promedio   mediana  mitad1   mitad2   %mejor
+  límite apertura+0,3%, 1 hora            -0.019%  +0.300%  +0.014%  -0.051%    84%
+  límite apertura+0,5%, 1 hora            -0.003%  +0.500%  +0.046%  -0.052%    76%
+  límite apertura+1%, 1 hora              +0.035%  +1.000%  +0.090%  -0.019%    63%
+  límite apertura+0,5%, 2 horas           +0.000%  +0.500%  +0.032%  -0.032%    78%
+  límite apertura+1%, 2 horas             +0.048%  +1.000%  +0.091%  +0.006%    66%
+  vender al cierre de la 1ra hora         +0.063%  +0.092%  +0.130%  -0.005%    52%
+  vender al cierre del día                +0.120%  +0.099%  +0.042%  +0.198%    52%
+  por papel, límite +0,5% 1 hora: AAPL -0.01% (n=59) · AMD +0.09% (n=210) · AMZN -0.04% (n=113) · GOOGL +0.09% (n=104) · INTC +0.24% (n=187) · JNJ -0.13% (n=28) · META -0.06% (n=120) · MSFT +0.01% (n=73) · MU -0.14% (n=256) · NU +0.05% (n=122) · NVDA +0.05% (n=216) · SNDK -0.26% (n=165)
+
+== abren >= 2% arriba del cierre anterior: 739 eventos (12 papeles, velas 1h, corte de mitades 2025-10-15)
+  regla                                   promedio   mediana  mitad1   mitad2   %mejor
+  límite apertura+0,3%, 1 hora            -0.078%  +0.300%  -0.047%  -0.108%    83%
+  límite apertura+0,5%, 1 hora            -0.039%  +0.500%  +0.026%  -0.104%    78%
+  límite apertura+1%, 1 hora              -0.005%  +1.000%  +0.070%  -0.080%    65%
+  límite apertura+0,5%, 2 horas           -0.037%  +0.500%  -0.034%  -0.041%    80%
+  límite apertura+1%, 2 horas             +0.010%  +1.000%  +0.024%  -0.005%    68%
+  vender al cierre de la 1ra hora         +0.014%  +0.062%  +0.087%  -0.060%    51%
+  vender al cierre del día                +0.079%  +0.057%  -0.177%  +0.335%    51%
+  por papel, límite +0,5% 1 hora: AAPL -0.33% (n=15) · AMD +0.08% (n=115) · AMZN -0.19% (n=37) · GOOGL +0.10% (n=31) · INTC +0.26% (n=97) · JNJ +0.27% (n=5) · META -0.23% (n=43) · MSFT -0.21% (n=20) · MU -0.14% (n=140) · NU -0.01% (n=39) · NVDA -0.01% (n=85) · SNDK -0.19% (n=112)

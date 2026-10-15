@@ -1,0 +1,32 @@
+
+=== SPCX · spot US$ 143.29 = $4,650 CEDEAR (ratio 50) · ATR diario US$ 7.27 (5.1%) · mínimo 1 año US$ 104.83 · máximo US$ 225.64
+  resistencias arriba (piso de zona → CEDEAR): 149.80→$4,845 (1t D) · 150.80→$4,877 (1tH) · 153.00→$4,948 (2tH) · 154.94→$5,011 (2t DH)
+  soportes abajo (techo de zona → CEDEAR):      142.87→$4,620 (2t DH) · 130.39→$4,217 (1t D) · 104.83→$3,390 (1t D)
+  modelo: soporte 2 toque(s)   entrada $4,620 (US$ 142.87, -0.3%) · stop modelo $4,187 (-9.4%) · stop 1,5×ATR $4,268 (-7.6%) · objetivo $4,845 (+4.8%) · R:R 0.5
+  modelo: soporte 1 toque(s)   entrada $4,217 (US$ 130.39, -9.0%) · stop modelo $3,366 (-20.2%) · stop 1,5×ATR $3,864 (-8.4%) · objetivo $4,845 (+14.9%) · R:R 0.7
+  modelo: soporte 1 toque(s)   entrada $3,390 (US$ 104.83, -26.8%) · stop modelo $3,155 (-6.9%) · stop 1,5×ATR $3,037 (-10.4%) · objetivo $4,845 (+42.9%) · R:R 6.2
+  Pablo: orden a $4,350        entrada $4,350 (US$ 134.51, -6.1%) · stop modelo $4,187 (-3.7%) · stop 1,5×ATR $3,997 (-8.1%) · objetivo $4,845 (+11.4%) · R:R 3.0
+  Pablo: orden a $4,150        entrada $4,150 (US$ 128.32, -10.4%) · stop modelo $3,366 (-18.9%) · stop 1,5×ATR $3,797 (-8.5%) · objetivo $4,845 (+16.7%) · R:R 0.9
+
+=== LAR · spot US$ 4.55 = $7,375 CEDEAR (ratio 1) · ATR diario US$ 0.23 (5.0%) · mínimo 1 año US$ 3.62 · máximo US$ 12.05
+  resistencias arriba (piso de zona → CEDEAR): 4.65→$7,519 (1t D) · 5.05→$8,174 (1tH) · 5.34→$8,635 (1tH) · 5.53→$8,942 (1tH)
+  soportes abajo (techo de zona → CEDEAR):      3.84→$6,209 (1t D) · 3.62→$5,854 (1t D)
+  modelo: soporte 1 toque(s)   entrada $6,209 (US$ 3.84, -15.5%) · stop modelo $5,813 (-6.4%) · stop 1,5×ATR $5,664 (-8.8%) · objetivo $7,519 (+21.1%) · R:R 3.3
+  modelo: soporte 1 toque(s)   entrada $5,854 (US$ 3.62, -20.4%) · stop modelo $5,490 (-6.2%) · stop 1,5×ATR $5,308 (-9.3%) · objetivo $7,519 (+28.5%) · R:R 4.6
+  Pablo: orden a $6,800        entrada $6,800 (US$ 4.21, -7.5%) · stop modelo $6,166 (-9.3%) · stop 1,5×ATR $6,254 (-8.0%) · objetivo $7,519 (+10.6%) · R:R 1.1
+  Pablo: orden a $6,100        entrada $6,100 (US$ 3.77, -17.0%) · stop modelo $5,813 (-4.7%) · stop 1,5×ATR $5,554 (-8.9%) · objetivo $7,519 (+23.3%) · R:R 4.9
+
+=== MP · spot US$ 39.28 = $6,365 CEDEAR (ratio 10) · ATR diario US$ 2.14 (5.5%) · mínimo 1 año US$ 37.81 · máximo US$ 97.00
+  resistencias arriba (piso de zona → CEDEAR): 46.74→$7,559 (2tH) · 47.80→$7,729 (1tH) · 48.56→$7,852 (3tH) · 49.89→$8,067 (1tH)
+  soportes abajo (techo de zona → CEDEAR):      37.81→$6,114 (1t D)
+  modelo: soporte 1 toque(s)   entrada $6,114 (US$ 37.81, -3.7%) · stop modelo $5,767 (-5.7%) · stop 1,5×ATR $5,594 (-8.5%) · objetivo $7,559 (+23.6%) · R:R 4.2
+  Pablo: orden a $5,750        entrada $5,750 (US$ 35.56, -9.5%) · stop modelo $5,403 (-6.0%) · stop 1,5×ATR $5,230 (-9.0%) · objetivo $7,559 (+31.5%) · R:R 5.2
+  Pablo: orden a $5,360        entrada $5,360 (US$ 33.15, -15.6%) · stop modelo $5,013 (-6.5%) · stop 1,5×ATR $4,840 (-9.7%) · objetivo $7,559 (+41.0%) · R:R 6.3
+
+=== SNDK · spot US$ 1300.01 = $12,455 CEDEAR (ratio 169) · ATR diario US$ 86.08 (6.6%) · mínimo 1 año US$ 130.50 · máximo US$ 2354.39
+  resistencias arriba (piso de zona → CEDEAR): 1446.62→$13,841 (1t D) · 1484.00→$14,199 (1tH) · 1497.94→$14,332 (1tH) · 1560.58→$14,932 (1tH)
+  soportes abajo (techo de zona → CEDEAR):      1277.33→$12,222 (1t D) · 998.19→$9,551 (1t D) · 558.58→$5,345 (1t D) · 540.14→$5,168 (1t D) · 517.00→$4,947 (1t D)
+  modelo: soporte 1 toque(s)   entrada $12,222 (US$ 1277.33, -1.7%) · stop modelo $9,484 (-22.4%) · stop 1,5×ATR $10,986 (-10.1%) · objetivo $13,841 (+13.3%) · R:R 0.6
+  modelo: soporte 1 toque(s)   entrada $9,551 (US$ 998.19, -23.2%) · stop modelo $5,307 (-44.4%) · stop 1,5×ATR $8,315 (-12.9%) · objetivo $13,841 (+44.9%) · R:R 1.0
+  modelo: soporte 1 toque(s)   entrada $5,345 (US$ 558.58, -57.0%) · stop modelo $5,132 (-4.0%) · stop 1,5×ATR $4,109 (-23.1%) · objetivo $13,841 (+159.0%) · R:R 40.0
+  Pablo: orden a $12,100       entrada $12,100 (US$ 1264.63, -2.7%) · stop modelo $9,484 (-21.6%) · stop 1,5×ATR $10,865 (-10.2%) · objetivo $13,841 (+14.4%) · R:R 0.7

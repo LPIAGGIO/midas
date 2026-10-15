@@ -1,0 +1,70 @@
+velas horarias 2023-10-19 a 2026-09-24 · corte de mitades 2025-04-08 · 285 papeles con historia completa
+USD con lote de 460 por escalón (5 escalones + refuerzo). Paso base por volatilidad anual: <32% 0,7% · <62% 1% · resto 1,5%
+vol ARS = volumen del CEDEAR hoy en BYMA (data912, foto del 14/10, segmento pesos)
+
+== los 12 de hoy
+MU     vol   65% base 1.5% | 2x: tot   +6353 m1   -513 m2  +5687 peor   -2416 vueltas  793 | 2,5x: tot   +6342 m1   -559 m2  +5764 peor   -2273 | corr semis 0.9 cartera 0.8 | CEDEAR si vol ARS    31322 M
+NVDA   vol   47% base 1.0% | 2x: tot   +4518 m1  +1743 m2  +2006 peor   -1359 vueltas  916 | 2,5x: tot   +4464 m1  +1995 m2  +1782 peor   -1223 | corr semis 0.66 cartera 0.73 | CEDEAR si vol ARS    10818 M
+AMD    vol   59% base 1.0% | 2x: tot   +4225 m1   -972 m2  +5688 peor   -2273 vueltas  737 | 2,5x: tot   +4680 m1   -934 m2  +5470 peor   -2216 | corr semis 0.78 cartera 0.75 | CEDEAR si vol ARS     2315 M
+META   vol   38% base 1.0% | 2x: tot   +2927 m1  +1189 m2  +1060 peor   -1356 vueltas  520 | 2,5x: tot   +3331 m1   +885 m2  +1784 peor   -1162 | corr semis 0.34 cartera 0.56 | CEDEAR si vol ARS     2869 M
+INTC   vol   65% base 1.5% | 2x: tot   +2699 m1  -1911 m2  +4278 peor   -2662 vueltas  380 | 2,5x: tot   +2889 m1  -1838 m2  +4173 peor   -2551 | corr semis 0.59 cartera 0.54 | CEDEAR si vol ARS      950 M
+GOOGL  vol   31% base 0.7% | 2x: tot   +2586 m1   +348 m2  +1654 peor   -1152 vueltas  771 | 2,5x: tot   +2530 m1   +587 m2  +1605 peor    -929 | corr semis 0.34 cartera 0.56 | CEDEAR si vol ARS     5422 M
+AMZN   vol   32% base 1.0% | 2x: tot   +2373 m1   +560 m2  +1306 peor   -1166 vueltas  489 | 2,5x: tot   +2130 m1   +384 m2  +1260 peor   -1095 | corr semis 0.39 cartera 0.62 | CEDEAR si vol ARS     3371 M
+AAPL   vol   27% base 0.7% | 2x: tot   +2180 m1    +54 m2  +1798 peor   -1234 vueltas  685 | 2,5x: tot   +1786 m1   -143 m2  +1542 peor   -1222 | corr semis 0.25 cartera 0.46 | CEDEAR si vol ARS     1732 M
+NU     vol   41% base 1.0% | 2x: tot   +1782 m1   +361 m2   +593 peor   -1713 vueltas  571 | 2,5x: tot   +1716 m1   +317 m2   +626 peor   -1634 | corr semis 0.35 cartera 0.53 | CEDEAR si vol ARS     8201 M
+JNJ    vol   18% base 0.7% | 2x: tot   +1520 m1   +233 m2  +1182 peor    -488 vueltas  535 | 2,5x: tot   +1454 m1   +142 m2  +1093 peor    -359 | corr semis -0.2 cartera -0.13 | CEDEAR si vol ARS      860 M
+MSFT   vol   26% base 0.7% | 2x: tot   +1067 m1    +72 m2   +446 peor   -1500 vueltas  386 | 2,5x: tot   +1632 m1   +404 m2   +627 peor   -1442 | corr semis 0.26 cartera 0.46 | CEDEAR si vol ARS     5398 M
+
+== candidatos: positivos en las dos mitades y en las dos cuentas, CEDEAR con volumen hoy > 300 M, ordenados por resultado / |peor latente| (cuenta 2x)
+CAAP   vol   38% base 1.0% | 2x: tot   +3372 m1  +1783 m2  +1212 peor    -785 vueltas  767 | 2,5x: tot   +3552 m1  +1482 m2  +1602 peor    -783 | corr semis 0.3 cartera 0.4 | CEDEAR si vol ARS      333 M
+PLTR   vol   66% base 1.5% | 2x: tot   +6836 m1  +3753 m2  +2207 peor   -1714 vueltas  869 | 2,5x: tot   +5964 m1  +3154 m2  +2032 peor   -1722 | corr semis 0.34 cartera 0.46 | CEDEAR si vol ARS      575 M
+LLY    vol   36% base 1.0% | 2x: tot   +3059 m1   +799 m2  +1891 peor    -864 vueltas  659 | 2,5x: tot   +2955 m1   +879 m2  +1769 peor    -893 | corr semis 0.05 cartera 0.12 | CEDEAR si vol ARS      961 M
+TSM    vol   40% base 1.0% | 2x: tot   +4738 m1   +962 m2  +3044 peor   -1365 vueltas  839 | 2,5x: tot   +4612 m1   +976 m2  +2892 peor   -1375 | corr semis 0.73 cartera 0.76 | CEDEAR si vol ARS     1901 M
+HUT    vol  105% base 1.5% | 2x: tot   +9074 m1  +1186 m2  +7665 peor   -2683 vueltas 1054 | 2,5x: tot   +8294 m1  +1727 m2  +6350 peor   -2550 | corr semis 0.55 cartera 0.58 | CEDEAR si vol ARS     3915 M
+MMM    vol   30% base 0.7% | 2x: tot   +2485 m1  +1045 m2  +1144 peor    -777 vueltas  761 | 2,5x: tot   +2350 m1  +1117 m2  +1017 peor    -718 | corr semis 0.3 cartera 0.41 | CEDEAR si vol ARS      304 M
+KO     vol   16% base 0.7% | 2x: tot   +1388 m1   +471 m2   +777 peor    -461 vueltas  449 | 2,5x: tot   +1118 m1   +493 m2   +687 peor    -347 | corr semis -0.24 cartera -0.18 | CEDEAR si vol ARS     2036 M
+SMH    vol   38% base 1.0% | 2x: tot   +3574 m1   +515 m2  +2294 peor   -1272 vueltas  743 | 2,5x: tot   +3489 m1   +486 m2  +2253 peor   -1189 | corr semis 0.89 cartera 0.88 | CEDEAR si vol ARS      998 M
+XLE    vol   22% base 0.7% | 2x: tot   +1929 m1   +193 m2  +1446 peor    -702 vueltas  586 | 2,5x: tot   +1730 m1   +221 m2  +1276 peor    -597 | corr semis 0.17 cartera 0.21 | CEDEAR si vol ARS      596 M
+VIST   vol   48% base 1.0% | 2x: tot   +4465 m1  +1540 m2  +2209 peor   -1634 vueltas  907 | 2,5x: tot   +4531 m1  +1199 m2  +2569 peor   -1632 | corr semis 0.18 cartera 0.21 | CEDEAR si vol ARS     6905 M
+V      vol   20% base 0.7% | 2x: tot   +1490 m1   +382 m2   +790 peor    -549 vueltas  494 | 2,5x: tot   +1331 m1   +371 m2   +683 peor    -530 | corr semis 0.06 cartera 0.25 | CEDEAR si vol ARS     1239 M
+AVGO   vol   50% base 1.0% | 2x: tot   +4287 m1  +1359 m2  +2031 peor   -1589 vueltas  847 | 2,5x: tot   +4021 m1  +1409 m2  +1662 peor   -1514 | corr semis 0.62 cartera 0.65 | CEDEAR si vol ARS     3528 M
+IREN   vol  112% base 1.5% | 2x: tot   +6740 m1  +1026 m2  +4891 peor   -2825 vueltas  926 | 2,5x: tot   +7415 m1  +1571 m2  +4918 peor   -2718 | corr semis 0.49 cartera 0.51 | CEDEAR si vol ARS     5399 M
+JPM    vol   23% base 0.7% | 2x: tot   +2070 m1   +417 m2  +1072 peor    -914 vueltas  761 | 2,5x: tot   +2002 m1   +363 m2  +1032 peor    -823 | corr semis 0.35 cartera 0.49 | CEDEAR si vol ARS     1849 M
+XLK    vol   25% base 0.7% | 2x: tot   +2285 m1    +47 m2  +1585 peor   -1009 vueltas  723 | 2,5x: tot   +2090 m1    +78 m2  +1390 peor    -948 | corr semis 0.84 cartera 0.9 | CEDEAR si vol ARS      379 M
+RGTI   vol  136% base 1.5% | 2x: tot   +6476 m1  +5341 m2  +1629 peor   -2908 vueltas  862 | 2,5x: tot   +6711 m1  +5357 m2  +1185 peor   -3261 | corr semis 0.39 cartera 0.44 | CEDEAR si vol ARS      883 M
+TQQQ   vol   61% base 1.0% | 2x: tot   +5255 m1   +460 m2  +3908 peor   -2431 vueltas 1008 | 2,5x: tot   +5449 m1   +528 m2  +4067 peor   -2358 | corr semis 0.8 cartera 0.92 | CEDEAR si vol ARS      569 M
+B      vol   58% base 1.0% | 2x: tot   +3087 m1  +1479 m2  +1781 peor   -1480 vueltas  691 | 2,5x: tot   +2540 m1  +1284 m2  +1509 peor   -1411 | corr semis 0.14 cartera 0.11 | CEDEAR si vol ARS      523 M
+SATL   vol  123% base 1.5% | 2x: tot   +5436 m1  +3415 m2  +1850 peor   -2634 vueltas  809 | 2,5x: tot   +6408 m1  +3789 m2  +2429 peor   -2955 | corr semis 0.28 cartera 0.32 | CEDEAR si vol ARS     4291 M
+GS     vol   30% base 0.7% | 2x: tot   +2450 m1   +428 m2  +1268 peor   -1272 vueltas  954 | 2,5x: tot   +2296 m1   +306 m2  +1293 peor   -1066 | corr semis 0.56 cartera 0.67 | CEDEAR si vol ARS     1728 M
+VST    vol   57% base 1.0% | 2x: tot   +3693 m1  +2142 m2   +621 peor   -1954 vueltas 1008 | 2,5x: tot   +3518 m1  +1891 m2   +740 peor   -1877 | corr semis 0.54 cartera 0.58 | CEDEAR si vol ARS     4659 M
+MRVL   vol   69% base 1.5% | 2x: tot   +4475 m1   +559 m2  +4103 peor   -2479 vueltas  548 | 2,5x: tot   +4939 m1   +558 m2  +4042 peor   -2208 | corr semis 0.61 cartera 0.6 | CEDEAR si vol ARS      923 M
+MP     vol   76% base 1.5% | 2x: tot   +4521 m1  +2217 m2  +2060 peor   -2515 vueltas  683 | 2,5x: tot   +4383 m1  +2196 m2  +2016 peor   -2404 | corr semis 0.33 cartera 0.31 | CEDEAR si vol ARS      316 M
+CVX    vol   23% base 0.7% | 2x: tot   +1522 m1   +167 m2  +1082 peor    -848 vueltas  469 | 2,5x: tot   +1625 m1   +305 m2  +1179 peor    -745 | corr semis 0.06 cartera 0.1 | CEDEAR si vol ARS      519 M
+MA     vol   20% base 0.7% | 2x: tot   +1269 m1   +250 m2   +650 peor    -713 vueltas  427 | 2,5x: tot   +1100 m1   +229 m2   +542 peor    -780 | corr semis 0.04 cartera 0.25 | CEDEAR si vol ARS      332 M
+MELI   vol   38% base 1.0% | 2x: tot   +2275 m1  +1330 m2   +473 peor   -1309 vueltas  560 | 2,5x: tot   +1889 m1  +1016 m2   +362 peor   -1183 | corr semis 0.16 cartera 0.33 | CEDEAR si vol ARS     3056 M
+CEG    vol   54% base 1.0% | 2x: tot   +3540 m1  +1510 m2   +721 peor   -2049 vueltas  782 | 2,5x: tot   +2846 m1  +1335 m2   +188 peor   -1987 | corr semis 0.49 cartera 0.54 | CEDEAR si vol ARS      329 M
+HL     vol   63% base 1.5% | 2x: tot   +3751 m1  +1119 m2  +1820 peor   -2224 vueltas  706 | 2,5x: tot   +3583 m1   +990 m2  +1803 peor   -2118 | corr semis 0.37 cartera 0.38 | CEDEAR si vol ARS      320 M
+WMT    vol   23% base 0.7% | 2x: tot   +1387 m1   +774 m2   +406 peor    -825 vueltas  651 | 2,5x: tot   +1222 m1   +325 m2   +460 peor    -682 | corr semis -0.01 cartera 0.1 | CEDEAR si vol ARS     1144 M
+GLW    vol   49% base 1.0% | 2x: tot   +3511 m1   +485 m2  +2356 peor   -2112 vueltas  901 | 2,5x: tot   +3251 m1   +424 m2  +2224 peor   -2052 | corr semis 0.63 cartera 0.56 | CEDEAR si vol ARS      566 M
+
+== los mismos, solo los de correlación con los semis < 0,5
+CAAP   vol   38% base 1.0% | 2x: tot   +3372 m1  +1783 m2  +1212 peor    -785 vueltas  767 | 2,5x: tot   +3552 m1  +1482 m2  +1602 peor    -783 | corr semis 0.3 cartera 0.4 | CEDEAR si vol ARS      333 M
+PLTR   vol   66% base 1.5% | 2x: tot   +6836 m1  +3753 m2  +2207 peor   -1714 vueltas  869 | 2,5x: tot   +5964 m1  +3154 m2  +2032 peor   -1722 | corr semis 0.34 cartera 0.46 | CEDEAR si vol ARS      575 M
+LLY    vol   36% base 1.0% | 2x: tot   +3059 m1   +799 m2  +1891 peor    -864 vueltas  659 | 2,5x: tot   +2955 m1   +879 m2  +1769 peor    -893 | corr semis 0.05 cartera 0.12 | CEDEAR si vol ARS      961 M
+MMM    vol   30% base 0.7% | 2x: tot   +2485 m1  +1045 m2  +1144 peor    -777 vueltas  761 | 2,5x: tot   +2350 m1  +1117 m2  +1017 peor    -718 | corr semis 0.3 cartera 0.41 | CEDEAR si vol ARS      304 M
+KO     vol   16% base 0.7% | 2x: tot   +1388 m1   +471 m2   +777 peor    -461 vueltas  449 | 2,5x: tot   +1118 m1   +493 m2   +687 peor    -347 | corr semis -0.24 cartera -0.18 | CEDEAR si vol ARS     2036 M
+XLE    vol   22% base 0.7% | 2x: tot   +1929 m1   +193 m2  +1446 peor    -702 vueltas  586 | 2,5x: tot   +1730 m1   +221 m2  +1276 peor    -597 | corr semis 0.17 cartera 0.21 | CEDEAR si vol ARS      596 M
+VIST   vol   48% base 1.0% | 2x: tot   +4465 m1  +1540 m2  +2209 peor   -1634 vueltas  907 | 2,5x: tot   +4531 m1  +1199 m2  +2569 peor   -1632 | corr semis 0.18 cartera 0.21 | CEDEAR si vol ARS     6905 M
+V      vol   20% base 0.7% | 2x: tot   +1490 m1   +382 m2   +790 peor    -549 vueltas  494 | 2,5x: tot   +1331 m1   +371 m2   +683 peor    -530 | corr semis 0.06 cartera 0.25 | CEDEAR si vol ARS     1239 M
+IREN   vol  112% base 1.5% | 2x: tot   +6740 m1  +1026 m2  +4891 peor   -2825 vueltas  926 | 2,5x: tot   +7415 m1  +1571 m2  +4918 peor   -2718 | corr semis 0.49 cartera 0.51 | CEDEAR si vol ARS     5399 M
+JPM    vol   23% base 0.7% | 2x: tot   +2070 m1   +417 m2  +1072 peor    -914 vueltas  761 | 2,5x: tot   +2002 m1   +363 m2  +1032 peor    -823 | corr semis 0.35 cartera 0.49 | CEDEAR si vol ARS     1849 M
+RGTI   vol  136% base 1.5% | 2x: tot   +6476 m1  +5341 m2  +1629 peor   -2908 vueltas  862 | 2,5x: tot   +6711 m1  +5357 m2  +1185 peor   -3261 | corr semis 0.39 cartera 0.44 | CEDEAR si vol ARS      883 M
+B      vol   58% base 1.0% | 2x: tot   +3087 m1  +1479 m2  +1781 peor   -1480 vueltas  691 | 2,5x: tot   +2540 m1  +1284 m2  +1509 peor   -1411 | corr semis 0.14 cartera 0.11 | CEDEAR si vol ARS      523 M
+SATL   vol  123% base 1.5% | 2x: tot   +5436 m1  +3415 m2  +1850 peor   -2634 vueltas  809 | 2,5x: tot   +6408 m1  +3789 m2  +2429 peor   -2955 | corr semis 0.28 cartera 0.32 | CEDEAR si vol ARS     4291 M
+MP     vol   76% base 1.5% | 2x: tot   +4521 m1  +2217 m2  +2060 peor   -2515 vueltas  683 | 2,5x: tot   +4383 m1  +2196 m2  +2016 peor   -2404 | corr semis 0.33 cartera 0.31 | CEDEAR si vol ARS      316 M
+CVX    vol   23% base 0.7% | 2x: tot   +1522 m1   +167 m2  +1082 peor    -848 vueltas  469 | 2,5x: tot   +1625 m1   +305 m2  +1179 peor    -745 | corr semis 0.06 cartera 0.1 | CEDEAR si vol ARS      519 M
+MA     vol   20% base 0.7% | 2x: tot   +1269 m1   +250 m2   +650 peor    -713 vueltas  427 | 2,5x: tot   +1100 m1   +229 m2   +542 peor    -780 | corr semis 0.04 cartera 0.25 | CEDEAR si vol ARS      332 M
+MELI   vol   38% base 1.0% | 2x: tot   +2275 m1  +1330 m2   +473 peor   -1309 vueltas  560 | 2,5x: tot   +1889 m1  +1016 m2   +362 peor   -1183 | corr semis 0.16 cartera 0.33 | CEDEAR si vol ARS     3056 M
+CEG    vol   54% base 1.0% | 2x: tot   +3540 m1  +1510 m2   +721 peor   -2049 vueltas  782 | 2,5x: tot   +2846 m1  +1335 m2   +188 peor   -1987 | corr semis 0.49 cartera 0.54 | CEDEAR si vol ARS      329 M
+HL     vol   63% base 1.5% | 2x: tot   +3751 m1  +1119 m2  +1820 peor   -2224 vueltas  706 | 2,5x: tot   +3583 m1   +990 m2  +1803 peor   -2118 | corr semis 0.37 cartera 0.38 | CEDEAR si vol ARS      320 M
+WMT    vol   23% base 0.7% | 2x: tot   +1387 m1   +774 m2   +406 peor    -825 vueltas  651 | 2,5x: tot   +1222 m1   +325 m2   +460 peor    -682 | corr semis -0.01 cartera 0.1 | CEDEAR si vol ARS     1144 M
