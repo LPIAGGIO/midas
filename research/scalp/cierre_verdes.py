@@ -25,6 +25,20 @@ DIAS = {
                     'META': 48400, 'AAPL': 27500, 'MSFT': 28100, 'AMZN': 2860},           # cierre 08/10 (data912)
                    {'72404': {'AAPL': 7920, 'AMD': -111100, 'AMZN': -38501, 'GOOGL': -3680, 'INTC': -674780, 'META': -114180, 'MSFT': -20160, 'MU': -112175, 'NVDA': -194240, 'SNDK': -289790},
                     '3893': {'AAPL': 4860, 'AMD': -127875, 'AMZN': -45939, 'GOOGL': -2085, 'INTC': -642740, 'META': -94800, 'MSFT': -21360, 'MU': -198350, 'NVDA': -160960, 'SNDK': -318130}}),
+    # 13/10 (lunes 12 feriado): cierre del viernes 09/10 (CL de Primary de los logs de la regla G; MU y NU de Yahoo .BA)
+    # y latente al cierre del 09/10 de scalp_resultados. JNJ y NU arrancan el 13/10 sin latente.
+    '2026-10-13': ({'MU': 331850, 'SNDK': 15020, 'NVDA': 15460, 'GOOGL': 9810, 'AMD': 98175, 'INTC': 33780,
+                    'META': 48400, 'AAPL': 27200, 'MSFT': 28780, 'AMZN': 2950, 'JNJ': 28120, 'NU': 12960},
+                   {'72404': {'AAPL': -2220, 'AMD': -224825, 'AMZN': 0, 'GOOGL': -4465, 'INTC': -812060, 'META': -114000, 'MSFT': 3600, 'MU': -156175, 'NVDA': -225600, 'SNDK': -355130, 'JNJ': 0, 'NU': 0},
+                    '3893': {'AAPL': -8980, 'AMD': -233875, 'AMZN': 5687, 'GOOGL': -1820, 'INTC': -789380, 'META': -94800, 'MSFT': 3960, 'MU': -250600, 'NVDA': -187840, 'SNDK': -380770, 'JNJ': 0, 'NU': 0}}),
+    '2026-10-14': ({'MU': 307000, 'SNDK': 14070, 'NVDA': 15310, 'GOOGL': 9845, 'AMD': 97350, 'INTC': 33200,
+                    'META': 51075, 'AAPL': 27380, 'MSFT': 29100, 'AMZN': 2895, 'JNJ': 26700, 'NU': 12560},
+                   {'72404': {'AAPL': -27800, 'AMD': -164775, 'AMZN': -15751, 'GOOGL': -7650, 'INTC': -942300, 'META': -6000, 'MSFT': -18000, 'MU': -542725, 'NVDA': -297280, 'SNDK': -710870, 'JNJ': -25560, 'NU': -18410},
+                    '3893': {'AAPL': -27800, 'AMD': -268625, 'AMZN': -28439, 'GOOGL': -5015, 'INTC': -928500, 'META': -5250, 'MSFT': -18000, 'MU': -724825, 'NVDA': -242240, 'SNDK': -663810, 'JNJ': -27000, 'NU': -16360}}),
+    '2026-10-15': ({'MU': 296000, 'SNDK': 13370, 'NVDA': 14940, 'GOOGL': 9720, 'AMD': 92400, 'INTC': 31720,
+                    'META': 49740, 'AAPL': 27700, 'MSFT': 28720, 'AMZN': 2860, 'JNJ': 27380, 'NU': 12020},
+                   {'72404': {'AAPL': -5240, 'AMD': -582975, 'AMZN': -74376, 'GOOGL': -30550, 'INTC': -1171100, 'META': -109800, 'MSFT': -82800, 'MU': -780325, 'NVDA': -472000, 'SNDK': -961340, 'JNJ': 3960, 'NU': -190440},
+                    '3893': {'AAPL': -7480, 'AMD': -625625, 'AMZN': -109814, 'GOOGL': -38005, 'INTC': -1172900, 'META': -109850, 'MSFT': -79200, 'MU': -962425, 'NVDA': -416960, 'SNDK': -1003980, 'JNJ': 2520, 'NU': -173810}}),
 }
 PREV, LAT_PREV = DIAS[DIA]
 # Escalón del bot → clave del simulador: 1-5 grilla (0-4), 6 refuerzo (99), 7+ lotes del lateral (100+)

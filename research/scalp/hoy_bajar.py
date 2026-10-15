@@ -6,7 +6,7 @@
 #   python hoy_bajar.py 2026-10-05   → hoy/<TK>.json  [[hhmm, o, h, l, c], ...]
 import json, os, sys, time, urllib.request
 AQUI = os.path.dirname(os.path.abspath(__file__))
-P = ['MU', 'SNDK', 'NVDA', 'GOOGL', 'AMD', 'INTC', 'META', 'AAPL', 'MSFT', 'AMZN', 'JNJ', 'NU']
+P = ['MU', 'SNDK', 'NVDA', 'GOOGL', 'AMD', 'INTC', 'META', 'AAPL', 'MSFT', 'AMZN', 'JNJ', 'NU', 'KO']   # KO desde el 16/10
 DIA = sys.argv[1]
 
 
