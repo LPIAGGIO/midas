@@ -42,7 +42,11 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False, pausa_suba=0.0, bal=None, reent_modo=None):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False, pausa_suba=0.0, bal=None, reent_modo=None, post_ref=None):
+    # post_ref (15/10/2026, LP: "comprar 1 lote más de los que tienen refuerzo y ya no se
+    # mueven"): con el refuerzo hecho, compra UN lote más cuando la vela cierra post_ref
+    # escalones abajo del precio del refuerzo (0 = en cuanto cierra en o bajo ese precio).
+    # Sale con todo en la salida conjunta (promedio + ganancia).
     # reent_modo (15/10/2026, LP): qué hace la grilla después de cerrar un ciclo completo.
     # None = como el bot (vuelve al ancla y si no, sigue al precio). 'b1'/'b2' = espera una
     # baja de 1/2 escalones desde el precio de la última venta, solo ese día; si no baja,
@@ -297,6 +301,10 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
             E['ancla'] = None
             E['reent'] = None
             E['parado'] = fecha
+        if post_ref is not None and X in lots and 200 not in lots and E['parado'] is None and not E['nb']:
+            if c <= lots[X][0] * (1 - post_ref * E['pg'][0]):
+                lots[200] = (c, LOTE * E['lf'] * E['fx'] / c, LOTE * E['lf'])
+                E['extras'] += 1
         # Regla del lateral: tantas velas sin ejecuciones → un lote extra al precio.
         E['idle'] += 1
         # lateral_hasta_esc: solo agrega si tiene esa cantidad de escalones o menos

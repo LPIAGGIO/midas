@@ -1,0 +1,15 @@
+velas 2023-10-19 a 2026-09-17 · corte de mitades 2025-04-04 · USD, lote 460
+
+== cuenta 72404 (2x)
+  variante                              total     1ra mit   2da mit   vueltas  peor lat   capital max   dif total (mitad1 / mitad2)
+  sin lote extra (como hoy)              +40207     +3006    +35418    8577     -19469       55803
+  lote extra en o bajo el refuerzo       +42762     +2735    +37055    8932     -20958       61310    +2555 ( -272 / +1637)
+  lote extra 2 escalones abajo           +42701     +2527    +37111    8889     -20959       61279    +2495 ( -479 / +1693)
+  lote extra 4 escalones abajo           +42629     +2329    +37195    8792     -20902       60794    +2423 ( -677 / +1777)
+
+== cuenta 3893 (2,5x)
+  variante                              total     1ra mit   2da mit   vueltas  peor lat   capital max   dif total (mitad1 / mitad2)
+  sin lote extra (como hoy)              +39976     +3044    +34430    6837     -18416       55083
+  lote extra en o bajo el refuerzo       +41412     +2227    +35226    6992     -19930       60115    +1436 ( -818 /  +796)
+  lote extra 2 escalones abajo           +41296     +2309    +35089    6966     -19770       60089    +1320 ( -736 /  +660)
+  lote extra 4 escalones abajo           +41292     +2286    +35074    6971     -19544       60053    +1316 ( -758 /  +644)
