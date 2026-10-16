@@ -36,6 +36,13 @@ const ws = require("ws");
 
 const BASE = "https://api.cocos.xoms.com.ar";
 const CUENTA = process.env.COCOS_CUENTA || "72404";
+// Varias cuentas (LP 16/10/2026: "no veo que actualice Matriz de Axon"): cada
+// instancia lee UNA comitente con sus credenciales (COCOS_CRED_ENV = .env con
+// COCOS_API_USER_B64/PASS_B64; por defecto el de cocos-sync, la 72404) y graba
+// sus filas en la cuenta de Midas que le corresponde (columna positions.cuenta),
+// para no mezclar la 3893 con la principal.
+const CUENTA_MIDAS = process.env.COCOS_CUENTA_MIDAS || (CUENTA === "72404" ? "principal" : CUENTA);
+const CRED_ENV = process.env.COCOS_CRED_ENV || null;
 const USER_ID = "cafc5a8c-1cee-4d57-a765-6aacf1acc661"; // LP
 const DRY = process.argv.includes("--dry-run");
 const UA = { "User-Agent": "Mozilla/5.0" };
@@ -43,10 +50,15 @@ const log = (...a) => console.log(`[${new Date().toISOString()}]`, ...a);
 const hoyArt = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
 
 function leerEnv() {
-  const txt = fs.readFileSync(path.join(__dirname, ".env"), "utf8");
-  const raw = (k) => { const m = txt.match(new RegExp(`^${k}=(.*)$`, "m")); return m ? m[1].trim() : null; };
-  const b64 = (k) => { const v = raw(k); return v ? Buffer.from(v, "base64").toString("utf8") : null; };
-  return { user: b64("COCOS_API_USER_B64"), pass: b64("COCOS_API_PASS_B64"), sbUrl: raw("SUPABASE_URL"), sbKey: raw("SUPABASE_SERVICE_ROLE_KEY") };
+  const leer = (f) => {
+    const txt = fs.readFileSync(f, "utf8");
+    const raw = (k) => { const m = txt.match(new RegExp(`^${k}=(.*)$`, "m")); return m ? m[1].trim() : null; };
+    const b64 = (k) => { const v = raw(k); return v ? Buffer.from(v, "base64").toString("utf8") : null; };
+    return { raw, b64 };
+  };
+  const base = leer(path.join(__dirname, ".env"));
+  const cred = CRED_ENV ? leer(CRED_ENV) : base;
+  return { user: cred.b64("COCOS_API_USER_B64"), pass: cred.b64("COCOS_API_PASS_B64"), sbUrl: base.raw("SUPABASE_URL"), sbKey: base.raw("SUPABASE_SERVICE_ROLE_KEY") };
 }
 async function token(env) {
   const r = await fetch(`${BASE}/auth/getToken`, { method: "POST", headers: { "X-Username": env.user, "X-Password": env.pass }, redirect: "manual" });
@@ -88,7 +100,7 @@ async function main() {
   if (sinFeed) log("sin feed para clasificar CEDEAR / acción: salteo BYMA en esta corrida");
 
   const sb = createClient(env.sbUrl, env.sbKey, { auth: { persistSession: false, autoRefreshToken: false }, realtime: { transport: ws } });
-  const { data: existentes, error: e0 } = await sb.from("positions").select("id,extra,quantity,entry_price").eq("user_id", USER_ID).eq("broker", "cocos").eq("entry_date", hoy);
+  const { data: existentes, error: e0 } = await sb.from("positions").select("id,extra,quantity,entry_price").eq("user_id", USER_ID).eq("broker", "cocos").eq("cuenta", CUENTA_MIDAS).eq("entry_date", hoy);
   if (e0) throw new Error(`positions: ${e0.message}`);
   const yaCadena = new Set(), yaCl = new Set();
   for (const p of existentes || []) { if (p.extra?.matriz_chain) yaCadena.add(p.extra.matriz_chain); if (p.extra?.matriz_cl_ord_id) yaCl.add(p.extra.matriz_cl_ord_id); if (p.extra?.matriz_order_id) yaCadena.add(String(p.extra.matriz_order_id).split("-")[0]); }
@@ -107,7 +119,7 @@ async function main() {
     const fila = {
       user_id: USER_ID, instrument_type: tipo, operation_type: c.side === "SELL" ? "sell" : "buy",
       ticker: c.ticker, quantity: qty, entry_price: Math.round(px * 10000) / 10000, entry_currency: "ARS",
-      entry_date: hoy, settlement: /24hs/i.test(c.plazo) ? "T1" : /48hs/i.test(c.plazo) ? "T2" : "T0", broker: "cocos", notes: null,
+      entry_date: hoy, settlement: /24hs/i.test(c.plazo) ? "T1" : /48hs/i.test(c.plazo) ? "T2" : "T0", broker: "cocos", cuenta: CUENTA_MIDAS, notes: null,
       extra: { source: "csv_matriz", matriz_account: CUENTA, matriz_order_id: top.orderId, matriz_cl_ord_id: top.clOrdId, matriz_chain: c.pref, via: "api_primary", origen: top.originatingUsername === "ISV_PBCP" ? "bot" : "matriz" },   // ISV_PBCP = la API (el bot); ISV_MATRIZ4 o el numero de usuario = LP desde Matriz
     };
     log(`${DRY ? "(dry) " : ""}cargo ${fila.operation_type} ${qty} ${c.ticker} @ ${fila.entry_price} (${tipo}, ${fila.settlement})`);
@@ -142,7 +154,7 @@ async function main() {
     const fila = {
       user_id: USER_ID, instrument_type: "future", operation_type: o.side === "SELL" ? "sell" : "buy",
       ticker: `${m[1]}${m[2]}`, quantity: qty, entry_price: px, entry_currency: m[1] === "DLR" ? "ARS" : "USD-MEP",
-      entry_date: hoy, settlement: "CI", broker: "cocos", notes: null,
+      entry_date: hoy, settlement: "CI", broker: "cocos", cuenta: CUENTA_MIDAS, notes: null,
       extra: { source: "csv_matriz", matriz_account: CUENTA, matriz_order_id: oid, matriz_cl_ord_id: o.clOrdId, via: "api_primary", origen: o.originatingUsername === "ISV_PBCP" ? "bot" : "matriz",
         ...(m[1] === "ORO" ? { contract_size: 1 } : m[1] === "WTI" ? { contract_size: 10 } : {}) },   // DLR: default 1.000
     };
@@ -152,7 +164,7 @@ async function main() {
     if (error) { log(`insert ${fila.ticker}: ${error.message}`); continue; }
     futNuevas++;
   }
-  log(`operaciones de hoy: ${cadenas.size} cadenas BYMA · ${nuevas} nuevas cargadas · futuros: ${futOrdenes} órdenes con ejecución, ${futNuevas} nuevas, ${futActualizadas} actualizadas`);
+  log(`[${CUENTA} → ${CUENTA_MIDAS}] operaciones de hoy: ${cadenas.size} cadenas BYMA · ${nuevas} nuevas cargadas · futuros: ${futOrdenes} órdenes con ejecución, ${futNuevas} nuevas, ${futActualizadas} actualizadas`);
   // Si entró algo, se refresca la foto de la cuenta para que el cartel de
   // control (Matriz ahora vs Midas ahora) no quede comparando contra una foto vieja.
   if (!DRY && nuevas + futNuevas + futActualizadas > 0) {
