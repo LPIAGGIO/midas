@@ -1,0 +1,21 @@
+velas 2023-10-19 a 2026-09-17 · corte de mitades 2025-04-04 · USD, lote 460 · salida del refuerzo un escalón arriba
+
+== cuenta 72404 (2x)
+  variante                                     total     1ra mit   2da mit   peor lat   capital max   dif total (mitad1 / mitad2)
+  sin lotes extra (como hoy)                     +42924     +3246    +37917     -19469       55796
+  1 lote extra, en o bajo el refuerzo            +45140     +2954    +39374     -21199       61315    +2216 ( -292 / +1457) · peor +9% · capital +10%
+  1 lote extra, 2 escalones abajo                +45265     +3116    +38998     -21031       61294    +2341 ( -130 / +1081) · peor +8% · capital +10%
+  1 lote extra, 4 escalones abajo                +44409     +2939    +38397     -20902       60787    +1485 ( -307 /  +480) · peor +7% · capital +9%
+  2 lotes extra, en o bajo el refuerzo           +46595     +2344    +40492     -22929       66843    +3671 ( -902 / +2575) · peor +18% · capital +20%
+  2 lotes extra, 2 escalones abajo               +46675     +2705    +39548     -22509       66811    +3751 ( -541 / +1631) · peor +16% · capital +20%
+  2 lotes extra, 4 escalones abajo               +46331     +2209    +39810     -22334       65847    +3407 (-1037 / +1893) · peor +15% · capital +18%
+
+== cuenta 3893 (2,5x)
+  variante                                     total     1ra mit   2da mit   peor lat   capital max   dif total (mitad1 / mitad2)
+  sin lotes extra (como hoy)                     +41033     +3271    +34689     -18470       55095
+  1 lote extra, en o bajo el refuerzo            +42694     +2803    +35445     -19989       60127    +1660 ( -468 /  +756) · peor +8% · capital +9%
+  1 lote extra, 2 escalones abajo                +43310     +2725    +36068     -19832       60103    +2277 ( -546 / +1380) · peor +7% · capital +9%
+  1 lote extra, 4 escalones abajo                +43371     +2712    +36064     -19635       60066    +2337 ( -559 / +1375) · peor +6% · capital +9%
+  2 lotes extra, en o bajo el refuerzo           +45671     +2259    +37351     -21443       65187    +4638 (-1012 / +2663) · peor +16% · capital +18%
+  2 lotes extra, 2 escalones abajo               +45449     +2260    +36981     -21195       65163    +4416 (-1011 / +2292) · peor +15% · capital +18%
+  2 lotes extra, 4 escalones abajo               +44948     +1892    +36921     -20800       65126    +3915 (-1379 / +2232) · peor +13% · capital +18%

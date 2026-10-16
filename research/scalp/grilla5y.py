@@ -42,7 +42,7 @@ def ccl(fecha):
     return _ccl[_ccl_k[max(i, 0)]]
 
 
-def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False, pausa_suba=0.0, bal=None, reent_modo=None, post_ref=None, ref_split=None, reent_temprano=False):
+def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido=None, doble=None, frac=1.0, entrada_off=0.0, espera_barras=0, lateral_barras=0, lateral_frac=0.5, lateral_max=4, lateral_hasta_esc=None, dinamico=None, inicial=None, nobuy=None, tope_barras=0, cierre_ganadores=None, cierre_reent=0, cierre_en=None, reent_sube=0.0, senales=None, ventana=14, solo_senales=False, senal_mercado=False, pausa_suba=0.0, bal=None, reent_modo=None, post_ref=None, ref_split=None, reent_temprano=False, post_ref_lotes=1):
     # reent_modo 'v' / 'cc' / 'vd' (15/10/2026, LP, JNJ vendió todo en la apertura y volvió a
     # entrar más caro): 'v' = solo reentra si baja al precio de la última venta, ese día (si no,
     # mañana en la apertura); 'cc' = solo si baja al cierre del día anterior, ese día; 'vd' = al
@@ -331,7 +331,7 @@ def grilla(bars, paso, gan, corte, en_pesos=False, cierre_vende=False, permitido
             E['parado'] = fecha
         if post_ref is not None and X in lots and 200 not in lots and E['parado'] is None and not E['nb']:
             if c <= lots[X][0] * (1 - post_ref * E['pg'][0]):
-                lots[200] = (c, LOTE * E['lf'] * E['fx'] / c, LOTE * E['lf'])
+                lots[200] = (c, post_ref_lotes * LOTE * E['lf'] * E['fx'] / c, post_ref_lotes * LOTE * E['lf'])
                 E['extras'] += 1
         # Regla del lateral: tantas velas sin ejecuciones → un lote extra al precio.
         E['idle'] += 1
