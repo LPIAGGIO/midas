@@ -481,12 +481,15 @@ function AdminUserDetail({ user, onBack, onChanged }) {
 
   const load = useCallback(async () => {
     setLoading(true);
+    // Paginado: PostgREST corta en 1.000 filas y la lista escondia las mas
+    // viejas sin avisar. El id desempata para que el orden sea estable entre paginas.
+    const todo = (armar) => fondosPaginar(armar).catch(() => []);
     const [p, c, l] = await Promise.all([
-      supabase.from("positions").select("id,ticker,instrument_type,operation_type,quantity,entry_price,entry_date,broker").eq("user_id", user.id).order("entry_date", { ascending: false }).limit(1000),
-      supabase.from("cash_movements").select("id,movement_date,movement_type,currency,amount,notes").eq("user_id", user.id).order("movement_date", { ascending: false }).limit(1000),
-      supabase.from("libro_movimientos").select("id,fecha_ejecucion,tipo_operacion,ticker,comision,ddmm,iva,total").eq("user_id", user.id).order("fecha_ejecucion", { ascending: false }).limit(1000),
+      todo(() => supabase.from("positions").select("id,ticker,instrument_type,operation_type,quantity,entry_price,entry_date,broker").eq("user_id", user.id).order("entry_date", { ascending: false }).order("id", { ascending: false })),
+      todo(() => supabase.from("cash_movements").select("id,movement_date,movement_type,currency,amount,notes").eq("user_id", user.id).order("movement_date", { ascending: false }).order("id", { ascending: false })),
+      todo(() => supabase.from("libro_movimientos").select("id,fecha_ejecucion,tipo_operacion,ticker,comision,ddmm,iva,total").eq("user_id", user.id).order("fecha_ejecucion", { ascending: false }).order("id", { ascending: false })),
     ]);
-    setPos(p.data || []); setCash(c.data || []); setLibro(l.data || []);
+    setPos(p); setCash(c); setLibro(l);
     setLoading(false);
   }, [user.id]);
   useEffect(() => { load(); }, [load]);
