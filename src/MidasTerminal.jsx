@@ -35150,6 +35150,7 @@ function SuperinversoresModule() {
   const [sortDir, setSortDir] = useState(-1);
   const [abierto, setAbierto] = useState(null);  // ticker con la fila expandida
   const [pos, setPos] = useState(null);
+  const [ordCartera, setOrdCartera] = useState({ col: "gestores", dir: -1 });   // Mi cartera: columna y sentido
   const [posError, setPosError] = useState(null);
 
   // Hoy en local (no UTC): el atraso se cuenta en días calendario de acá.
@@ -35319,11 +35320,22 @@ function SuperinversoresModule() {
         issuer: r ? r.issuer : null, veredicto: siVeredicto(n),
       });
     }
-    // Ascendente por cantidad de gestores: arriba quedan los papeles donde
-    // estás solo, que son los que hay que mirar de verdad.
-    filas.sort((a, b) => a.nGestores - b.nGestores || (a.ticker < b.ticker ? -1 : 1));
+    filas.sort((a, b) => b.nGestores - a.nGestores || (a.ticker < b.ticker ? -1 : 1));
     return filas;
   }, [pos, ranking]);
+
+  // Mi cartera ordenada por la columna elegida (default: más gestores arriba).
+  const carteraOrd = useMemo(() => {
+    if (!cartera) return cartera;
+    const { col, dir } = ordCartera;
+    const topPct = (f) => (f.top.length ? Math.max(...f.top.map((t) => Number(t.pct) || 0)) : 0);
+    const val = (f) => (col === "papel" ? f.ticker : col === "cantidad" ? Math.abs(f.cantidad) : col === "tenedores" ? topPct(f) : f.nGestores);
+    return [...cartera].sort((a, b) => {
+      const x = val(a), y = val(b);
+      const c = typeof x === "string" ? (x < y ? -1 : x > y ? 1 : 0) : x - y;
+      return c * dir || (a.ticker < b.ticker ? -1 : 1);
+    });
+  }, [cartera, ordCartera]);
 
   const gestoresOrd = useMemo(() => {
     if (!data) return [];
@@ -35337,6 +35349,19 @@ function SuperinversoresModule() {
 
   const th = { padding: "8px 12px", fontSize: 10.5, fontWeight: 500, color: C.dim, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap", textAlign: "right" };
   const thL = { ...th, textAlign: "left" };
+  // Encabezado que ordena Mi cartera: el primer toque va al sentido natural (papel A→Z, números de mayor a menor), el segundo lo invierte.
+  const thOrd = (col, label, base) => {
+    const on = ordCartera.col === col;
+    return (
+      <th
+        style={{ ...base, cursor: "pointer", userSelect: "none", color: on ? C.text : base.color }}
+        title="Ordenar"
+        onClick={() => setOrdCartera((o) => ({ col, dir: o.col === col ? -o.dir : col === "papel" ? 1 : -1 }))}
+      >
+        {label}{on ? (ordCartera.dir > 0 ? " \u2191" : " \u2193") : ""}
+      </th>
+    );
+  };
   const td = { padding: "9px 12px", fontSize: 12.5, color: C.text, whiteSpace: "nowrap", textAlign: "right" };
   const tdL = { ...td, textAlign: "left" };
   const thSort = (k, label, extra = {}) => (
@@ -35600,24 +35625,24 @@ function SuperinversoresModule() {
           ) : (
             <>
               <p style={{ fontSize: 11.5, color: C.muted, margin: "0 0 10px 0", maxWidth: 900, lineHeight: 1.6 }}>
-                Tus papeles ordenados de <b style={{ color: C.text }}>menos a más acompañados</b>: arriba quedan los que
-                no aparecen en ningún 13F del panel. Estar solo no significa estar equivocado — significa que la tesis
-                es tuya y la tenés que sostener sin ayuda.
+                Tus papeles con <b style={{ color: C.text }}>cuántos gestores del panel los tienen</b> (de más a menos;
+                tocá un encabezado para ordenar por otra cosa). Estar solo no significa estar equivocado — significa que la
+                tesis es tuya y la tenés que sostener sin ayuda.
               </p>
               <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.panel, overflow: "hidden" }}>
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
                     <thead>
                       <tr style={{ borderBottom: `1px solid ${C.borderStrong}` }}>
-                        <th style={thL}>Papel</th>
-                        <th style={th}>Cantidad</th>
-                        <th style={th}>Gestores</th>
+                        {thOrd("papel", "Papel", thL)}
+                        {thOrd("cantidad", "Cantidad", th)}
+                        {thOrd("gestores", "Gestores", th)}
                         <th style={{ ...th, textAlign: "left" }}>Veredicto</th>
-                        <th style={{ ...th, textAlign: "left" }}>Principales tenedores</th>
+                        {thOrd("tenedores", "Principales tenedores", { ...th, textAlign: "left" })}
                       </tr>
                     </thead>
                     <tbody>
-                      {cartera.map((f) => (
+                      {carteraOrd.map((f) => (
                         <tr key={f.ticker} style={{ borderTop: `1px solid ${C.border}`, verticalAlign: "top" }}>
                           <td style={tdL}>
                             <b className="eco-mono" style={{ color: C.text, fontSize: 13 }}>{f.ticker}</b>
