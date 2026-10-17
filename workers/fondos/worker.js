@@ -345,7 +345,12 @@ async function modoPerfil() {
       }
       const tr = r?.fundPerformance?.trailingReturns || {};
       const trc = r?.fundPerformance?.trailingReturnsCat || {};
-      const y4 = (o) => ({ m1: raw(o.oneMonth), m3: raw(o.threeMonth), a1: raw(o.oneYear), a5: raw(o.fiveYear) });
+      // Yahoo pone 0 donde no tiene el dato (categoría de EWZ, 5 años de IBIT
+      // que salió en 2024): un 0,0000 exacto se toma como "sin dato".
+      const y4 = (o) => {
+        const v = (x) => { const n = raw(x); return n === 0 ? null : n; };
+        return { m1: v(o.oneMonth), m3: v(o.threeMonth), a1: v(o.oneYear), a5: v(o.fiveYear) };
+      };
       const { vol, caida } = volYCaida(serie.pts);
       const desde12 = restarMeses(HOY, 12);
       const divs = serie.divs.filter((d) => d.fecha > desde12);

@@ -1,5 +1,11 @@
 # Pantalla Fondos: diseño (17/10/2026)
 
+**Estado (17/10/2026, tarde):** LP aprobó todas las recomendaciones de la
+sección 8 (B, A con C, C, fases 1-2-3, SPCX provisorio). **Fase 1 desplegada**:
+Analizadores → Fondos (ETF con CEDEAR, ficha y cruce), worker `fondos` en el
+VPS con tres crons y las cuatro tablas. Fases 2 (FCI) y 3 (ETF EE.UU. + UCITS)
+pendientes.
+
 Pedido de LP del 17/10: una pantalla con tres universos (ETF de EE.UU. sin
 CEDEAR, ETF con CEDEAR en BYMA, FCI argentinos), ficha por fondo y, lo que la
 diferencia, el cruce de la composición contra la cartera real y las grillas de

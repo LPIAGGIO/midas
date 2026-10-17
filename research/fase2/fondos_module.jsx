@@ -115,7 +115,7 @@ function useFondosCartera(user, cedearArs, ccl) {
           .eq("user_id", user.id).eq("instrument_type", "cedear").order("id", { ascending: true }));
         const { data: grillas } = await supabase.from("scalp_estado")
           .select("cuenta,ticker,tenencia,config,ultimo,online").eq("user_id", user.id);
-        const tickers = [...new Set(pos.map((p) => String(p.ticker || "").toUpperCase()).filter(Boolean))];
+        const tickers = [...new Set([...pos, ...(grillas || [])].map((p) => String(p.ticker || "").toUpperCase()).filter(Boolean))];
         const { data: maestro } = tickers.length
           ? await supabase.from("valores_maestro").select("ticker,emisor6,sector").in("ticker", tickers)
           : { data: [] };
@@ -257,17 +257,18 @@ function FondosModule() {
   // Solapamiento de cada fondo con la cartera (para la columna "Ya tenés").
   useEffect(() => {
     let ok = true;
-    if (!base || !cartera || !cartera.filas.length) { setSolapa(null); return () => { ok = false; }; }
+    const hoy = cartera ? { filas: cartera.filas.filter((f) => f.q > 0) } : null; // "ya tenés" = tenencia de hoy
+    if (!base || !hoy || !hoy.filas.length) { setSolapa(null); return () => { ok = false; }; }
     (async () => {
       try {
-        const emis = [...new Set(cartera.filas.map((f) => f.emisor6).filter(Boolean))];
-        const tks = cartera.filas.map((f) => f.ticker);
+        const emis = [...new Set(hoy.filas.map((f) => f.emisor6).filter(Boolean))];
+        const tks = hoy.filas.map((f) => f.ticker);
         const [a, b] = await Promise.all([
           emis.length ? fondosPaginar(() => supabase.from("fondos_holdings").select("fondo,fecha,clave,emisor6,ticker,peso").in("emisor6", emis).order("fondo").order("clave")) : [],
           fondosPaginar(() => supabase.from("fondos_holdings").select("fondo,fecha,clave,emisor6,ticker,peso").in("ticker", tks).order("fondo").order("clave")),
         ]);
         const fechas = new Map(base.fondos.map((f) => [f.ticker, f.holdings_fecha]));
-        const match = fondosMatcher(cartera);
+        const match = fondosMatcher(hoy);
         const visto = new Set(), out = {};
         for (const h of [...a, ...b]) {
           const k = `${h.fondo}|${h.fecha}|${h.clave}`;
@@ -283,7 +284,7 @@ function FondosModule() {
 
   const filas = useMemo(() => {
     if (!base) return [];
-    const match = fondosMatcher(cartera);
+    const match = fondosMatcher(cartera ? { filas: cartera.filas.filter((c) => c.q > 0) } : null);
     return base.fondos.map((f) => {
       const c = base.cedear.get(f.ticker);
       const ars = vivo.cedear[f.ticker] || (c?.cedear_ars ? Number(c.cedear_ars) : null);
@@ -502,7 +503,7 @@ function FondoFicha({ f, base, ccl, cartera, user, onVolver }) {
       const base = (vista === "hoy" ? c?.hoyUsd : c?.techoUsd) || 0;
       const agrega = montoN * peso;
       return { t, peso, c, base, agrega, comb: (base + agrega) / (totBase + montoN || 1), antes: base / (totBase || 1) };
-    }).sort((a, b) => b.peso - a.peso);
+    }).filter((x) => x.base > 0).sort((a, b) => Math.abs(b.peso) - Math.abs(a.peso));
     const pesoYa = filas.reduce((s, r) => s + r.peso, 0);
     return { filas, pesoYa };
   }, [cartera, composicion, vista, montoN, totBase]);
@@ -565,7 +566,7 @@ function FondoFicha({ f, base, ccl, cartera, user, onVolver }) {
         {kpi("Tamaño", fdAum(f.aum_usd), "patrimonio · Yahoo")}
         {kpi("Volatilidad 1a", fdPct(f.vol_1a, 0), `máx. caída 1a ${fdPct(f.max_caida_1a, 1)} · Midas sobre cierres de Yahoo`)}
         {kpi("Dividendos 12m", f.div_12m_usd ? fdUsd(f.div_12m_usd, 2) : "—",
-          f.div_12m_usd ? `${(f.dividendos || []).length} pagos · ${fdPct(divYieldCalc, 2)} del precio · yield Yahoo ${fdPct(f.yield, 2)}` : "no distribuye en 12 meses")}
+          f.div_12m_usd ? `${(f.dividendos || []).length} ${(f.dividendos || []).length === 1 ? "pago" : "pagos"} · ${fdPct(divYieldCalc, 2)} del precio · yield Yahoo ${fdPct(f.yield, 2)}` : "no distribuye en 12 meses")}
         {kpi("CEDEAR", f.ratio ? `${fdNum(f.ratio)}:1` : "—",
           f.c ? <>ratio {f.c.ratio_fuente === "comafi" ? "de Comafi" : "derivado del precio"}{f.c.ratio_dudoso ? <b style={{ color: C.cat.amber }}> · a confirmar</b> : null}</> : "sin CEDEAR")}
         {kpi("Precio implícito", f.implicito ? `$ ${fdNum(f.implicito)}` : "—",
@@ -599,14 +600,15 @@ function FondoFicha({ f, base, ccl, cartera, user, onVolver }) {
         <div style={{ ...card, flex: "2 1 420px", minWidth: 320 }}>
           <div className="flex items-center" style={{ gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>Composición</span>
-            <span style={{ fontSize: 10.5, color: C.dim }}>{fuenteTxt}{completa ? ` · ${fdNum(hold.length)} papeles` : ""}</span>
+            <span style={{ fontSize: 10.5, color: C.dim }}>{fuenteTxt}{completa ? ` · ${fdNum(hold.length)} ${hold.length === 1 ? "papel" : "papeles"}` : ""}</span>
             {atrasoComp != null ? <SiAtrasoBadge dias={atrasoComp} /> : null}
           </div>
           {hold == null ? <Loader2 size={18} color={C.muted} className="eco-spin" /> : (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <tbody>
                 {composicion.slice(0, 10).map((h, i) => {
-                  const mio = match(h);
+                  const t = match(h);
+                  const mio = t && (vista === "techo" || cartera?.porTicker.get(t)?.q > 0);
                   return (
                     <tr key={i} style={{ borderTop: i ? `1px solid ${C.border}` : "none" }}>
                       <td style={{ ...tdr, textAlign: "left", fontWeight: 700, width: 70 }}>{h.ticker || "—"}</td>
@@ -687,10 +689,10 @@ function FondoFicha({ f, base, ccl, cartera, user, onVolver }) {
                 </>
               ) : cruce.pesoYa > 0 ? (
                 <>
-                  <b>{fdPct(cruce.pesoYa, 0)}</b> de lo que comprás de {f.ticker} va a papeles que ya tenés{factor > 1 ? ` (con el apalancamiento ${factor}x)` : ""}
-                  ({fdUsd(montoN * cruce.pesoYa)} de {fdUsd(montoN)}).
+                  <b>{fdPct(cruce.pesoYa, 0)}</b> de lo que comprás de {f.ticker} va a papeles que ya tenés{factor > 1 ? ` contando el apalancamiento ${factor}x` : ""}
+                  {" "}({fdUsd(montoN * cruce.pesoYa)} de {fdUsd(montoN)}).
                   {cruce.filas[0] ? <> El más pesado es <b>{cruce.filas[0].t}</b>, {fdPct(cruce.filas[0].peso, 1)} del fondo
-                    {cruce.filas[0].c?.cuentas ? <>, y ya está en {cruce.filas[0].c.cuentas === 1 ? "una grilla" : `las ${cruce.filas[0].c.cuentas} grillas`}</> : null}.</> : null}
+                    {cruce.filas[0].c?.cuentas ? <>, y {cruce.filas[0].c.qGrilla > 0 ? "ya está en" : "tiene grilla armada en"} {cruce.filas[0].c.cuentas === 1 ? "una cuenta" : `las ${cruce.filas[0].c.cuentas} cuentas`} de Cocos</> : null}.</> : null}
                 </>
               ) : <>Ninguno de los papeles {completa ? "del fondo" : "del top 10"} está en tu cartera: suma diversificación por nombre.</>}
               {!completa ? <span style={{ color: C.dim }}> Ojo: es con el top 10, la composición completa no está disponible.</span> : null}
@@ -711,7 +713,7 @@ function FondoFicha({ f, base, ccl, cartera, user, onVolver }) {
                         </td>
                         <td style={tdr}>{fdPct(x.peso, 1)}</td>
                         <td style={tdr}>{fdUsd(x.base)}</td>
-                        <td style={{ ...tdr, color: C.muted }}>{x.c?.qGrilla ? fdUsd(vista === "hoy" ? x.c.grillaUsd : (x.c.techoUsd - (x.c.hoyUsd - x.c.grillaUsd))) : "—"}</td>
+                        <td style={{ ...tdr, color: C.muted }}>{vista === "hoy" ? (x.c?.qGrilla ? fdUsd(x.c.grillaUsd) : "—") : (x.c?.cuentas ? fdUsd(x.c.techoUsd - Math.max(0, (x.c.hoyUsd || 0) - (x.c.grillaUsd || 0))) : "—")}</td>
                         <td style={tdr}>{fdUsd(x.agrega)}</td>
                         <td style={{ ...tdr, color: C.muted }}>{fdPct(x.antes, 1)}</td>
                         <td style={{ ...tdr, color: x.comb > x.antes ? C.cat.amber : C.text }}>{fdPct(x.comb, 1)}</td>
@@ -726,7 +728,7 @@ function FondoFicha({ f, base, ccl, cartera, user, onVolver }) {
                 <div style={{ fontSize: 11.5, fontWeight: 700, color: C.text, marginBottom: 6 }}>Sectores de tu cartera, antes y después</div>
                 <table style={{ width: "100%", borderCollapse: "collapse", maxWidth: 620 }}>
                   <thead><tr>
-                    {["Sector", `En ${f.ticker}`, "Tu cartera hoy", "Después"].map((h, i) => (
+                    {["Sector", `En ${f.ticker}`, vista === "hoy" ? "Tu cartera hoy" : "Tu cartera al techo", "Después"].map((h, i) => (
                       <th key={h} style={{ ...tdr, textAlign: i ? "right" : "left", fontSize: 9.5, color: C.dim, textTransform: "uppercase" }}>{h}</th>
                     ))}
                   </tr></thead>
