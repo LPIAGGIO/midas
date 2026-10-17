@@ -1,0 +1,4095 @@
+{
+ "ccl_ref": 1618.820241076108,
+ "fecha": "2026-10-17 12:23",
+ "etfs": [
+  {
+   "ticker": "ACWI",
+   "nombre": "iShares MSCI ACWI ETF",
+   "cedear_ars": 9845.0,
+   "usd": 157.74,
+   "vol_cedear": 6166.0,
+   "ratio": 26,
+   "ratio_desvio": -0.0024115918766054456,
+   "ccl_implicito": 1622.7336122733611,
+   "precio_implicito_ars": 9821.257877974818,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Global Large-Stock Blend",
+   "expense": 0.0032,
+   "aum": 32829794304,
+   "yield": 0.014099999,
+   "ret": {
+    "oneMonth": -0.0114036,
+    "threeMonth": 0.0116872005,
+    "oneYear": 0.1649148,
+    "fiveYear": 0.116216294
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NVDA",
+     0.0509292
+    ],
+    [
+     "AAPL",
+     0.047419
+    ],
+    [
+     "MSFT",
+     0.0350959
+    ],
+    [
+     "AMZN",
+     0.023385601
+    ],
+    [
+     "GOOGL",
+     0.0195974
+    ],
+    [
+     "2330.TW",
+     0.0186007
+    ],
+    [
+     "META",
+     0.0154293
+    ],
+    [
+     "GOOG",
+     0.015424401
+    ],
+    [
+     "AVGO",
+     0.015395
+    ],
+    [
+     "MU",
+     0.0116735995
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0147,
+    "consumer_cyclical": 0.081599995,
+    "basic_materials": 0.0339,
+    "consumer_defensive": 0.044699997,
+    "technology": 0.3391,
+    "communication_services": 0.080699995,
+    "financial_services": 0.1596,
+    "utilities": 0.022,
+    "industrials": 0.0996,
+    "energy": 0.0398,
+    "healthcare": 0.0844
+   },
+   "vol_1a": 0.14013309952531947,
+   "solapa_top10": {
+    "NVDA": 0.0509292,
+    "AAPL": 0.047419,
+    "MSFT": 0.0350959,
+    "AMZN": 0.023385601,
+    "GOOGL": 0.0195974,
+    "META": 0.0154293,
+    "MU": 0.0116735995
+   },
+   "solapa_top10_pct": 0.2035300005
+  },
+  {
+   "ticker": "ARKK",
+   "nombre": "ARK Innovation ETF",
+   "cedear_ars": 13200.0,
+   "usd": 81.65,
+   "vol_cedear": 18167.0,
+   "ratio": 10,
+   "ratio_desvio": 0.0013384294232137162,
+   "ccl_implicito": 1616.656460502143,
+   "precio_implicito_ars": 13217.667268386422,
+   "ratio_dudoso": false,
+   "familia": "ARK ETF Trust",
+   "categoria": "Mid-Cap Growth",
+   "expense": 0.0075,
+   "aum": 7916893184,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": 0.0415551,
+    "threeMonth": 0.1039062,
+    "oneYear": 0.0364305,
+    "fiveYear": -0.0405721
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "TSLA",
+     0.0907964
+    ],
+    [
+     "SPCX",
+     0.0618494
+    ],
+    [
+     "TEM",
+     0.0590518
+    ],
+    [
+     "CRCL",
+     0.0457332
+    ],
+    [
+     "CRSP",
+     0.044548202
+    ],
+    [
+     "COIN",
+     0.044038903
+    ],
+    [
+     "TWST",
+     0.0437797
+    ],
+    [
+     "HOOD",
+     0.0386363
+    ],
+    [
+     "TXG",
+     0.034874
+    ],
+    [
+     "SHOP",
+     0.0323825
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.118,
+    "technology": 0.26700002,
+    "communication_services": 0.0387,
+    "financial_services": 0.16,
+    "industrials": 0.1149,
+    "healthcare": 0.3014
+   },
+   "vol_1a": 0.37506499828486944,
+   "solapa_top10": {
+    "SPCX": 0.0618494,
+    "COIN": 0.044038903
+   },
+   "solapa_top10_pct": 0.10588830299999999
+  },
+  {
+   "ticker": "BBAX",
+   "nombre": "JPMorgan BetaBuilders Developed Asia Pacific ex-Japan ETF",
+   "cedear_ars": 7695.0,
+   "usd": 61.67,
+   "vol_cedear": 300.0,
+   "ratio": 13,
+   "ratio_desvio": -0.0020228493310981976,
+   "ccl_implicito": 1622.1015080265931,
+   "precio_implicito_ars": 7679.434174397199,
+   "ratio_dudoso": false,
+   "familia": "JPMorgan",
+   "categoria": "Pacific/Asia ex-Japan Stk",
+   "expense": 0.0019,
+   "aum": 6585480704,
+   "yield": 0.0382,
+   "ret": {
+    "oneMonth": -0.0386555,
+    "threeMonth": 0.043417603,
+    "oneYear": 0.1407295,
+    "fiveYear": 0.0730135
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "BHP.AX",
+     0.098642595
+    ],
+    [
+     "CBA.AX",
+     0.0804014
+    ],
+    [
+     "D05.SI",
+     0.0566188
+    ],
+    [
+     "1299.HK",
+     0.0438805
+    ],
+    [
+     "WBC.AX",
+     0.0380572
+    ],
+    [
+     "NAB.AX",
+     0.0379039
+    ],
+    [
+     "O39.SI",
+     0.0373815
+    ],
+    [
+     "ANZ.AX",
+     0.0365184
+    ],
+    [
+     "MQG.AX",
+     0.028325401
+    ],
+    [
+     "CSL.AX",
+     0.0283163
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0705,
+    "consumer_cyclical": 0.049200002,
+    "basic_materials": 0.16459998,
+    "consumer_defensive": 0.031600002,
+    "technology": 0.002,
+    "communication_services": 0.023699999,
+    "financial_services": 0.458,
+    "utilities": 0.0322,
+    "industrials": 0.0775,
+    "energy": 0.027999999,
+    "healthcare": 0.0627
+   },
+   "vol_1a": 0.15486299631263759,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "BBCA",
+   "nombre": "JPMorgan BetaBuilders Canada ETF",
+   "cedear_ars": 8455.0,
+   "usd": 104.28,
+   "vol_cedear": 247.0,
+   "ratio": 20,
+   "ratio_desvio": -0.0017115627473888173,
+   "ccl_implicito": 1621.595703874185,
+   "precio_implicito_ars": 8440.528736970828,
+   "ratio_dudoso": false,
+   "familia": "JPMorgan",
+   "categoria": "Focused Region",
+   "expense": 0.0019,
+   "aum": 10886654976,
+   "yield": 0.0175,
+   "ret": {
+    "oneMonth": -0.050121002,
+    "threeMonth": 0.0113121,
+    "oneYear": 0.16964,
+    "fiveYear": 0.123153895
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "RY",
+     0.0918758
+    ],
+    [
+     "TD",
+     0.06499
+    ],
+    [
+     "SHOP",
+     0.0601902
+    ],
+    [
+     "BMO.TO",
+     0.0393252
+    ],
+    [
+     "BNS.TO",
+     0.0373878
+    ],
+    [
+     "ENB.TO",
+     0.0348525
+    ],
+    [
+     "CM.TO",
+     0.0337312
+    ],
+    [
+     "CNQ.TO",
+     0.0320677
+    ],
+    [
+     "AEM.TO",
+     0.031162
+    ],
+    [
+     "SU.TO",
+     0.026754798
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.035099998,
+    "basic_materials": 0.14819999,
+    "consumer_defensive": 0.0307,
+    "technology": 0.0945,
+    "communication_services": 0.0098,
+    "financial_services": 0.4,
+    "utilities": 0.0179,
+    "industrials": 0.0955,
+    "energy": 0.1683
+   },
+   "vol_1a": 0.14352613042937715,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "CIBR",
+   "nombre": "First Trust NASDAQ Cybersecurity ETF",
+   "cedear_ars": 16030.0,
+   "usd": 98.82,
+   "vol_cedear": 9162.0,
+   "ratio": 10,
+   "ratio_desvio": -0.00204730989930757,
+   "ccl_implicito": 1622.1412669500103,
+   "precio_implicito_ars": 15997.181622314098,
+   "ratio_dudoso": false,
+   "familia": "First Trust",
+   "categoria": "Technology",
+   "expense": 0.0058,
+   "aum": 17322008576,
+   "yield": 0.0038,
+   "ret": {
+    "oneMonth": 0.029932,
+    "threeMonth": 0.1465475,
+    "oneYear": 0.3625779,
+    "fiveYear": 0.1663232
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "CRWD",
+     0.0889205
+    ],
+    [
+     "FTNT",
+     0.081139095
+    ],
+    [
+     "PANW",
+     0.0806674
+    ],
+    [
+     "CSCO",
+     0.075576805
+    ],
+    [
+     "AVGO",
+     0.073573
+    ],
+    [
+     "OKTA",
+     0.044182703
+    ],
+    [
+     "NET",
+     0.0441543
+    ],
+    [
+     "FFIV",
+     0.0360612
+    ],
+    [
+     "ZS",
+     0.0359388
+    ],
+    [
+     "RBRK",
+     0.0268432
+    ]
+   ],
+   "sectores": {
+    "technology": 0.9489,
+    "communication_services": 0.0221,
+    "industrials": 0.029000001
+   },
+   "vol_1a": 0.2955390091651976,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "COPX",
+   "nombre": "Global X Copper Miners ETF",
+   "cedear_ars": 9260.0,
+   "usd": 79.98,
+   "vol_cedear": 27539.0,
+   "ratio": 14,
+   "ratio_desvio": -0.0012863091540641358,
+   "ccl_implicito": 1620.9052263065767,
+   "precio_implicito_ars": 9248.088777233366,
+   "ratio_dudoso": false,
+   "familia": "Global X Funds",
+   "categoria": "Natural Resources",
+   "expense": 0.0064999997,
+   "aum": 7253978112,
+   "yield": 0.0227,
+   "ret": {
+    "oneMonth": -0.0899539,
+    "threeMonth": 0.1037711,
+    "oneYear": 0.4586856,
+    "fiveYear": 0.22710541
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "HBM.TO",
+     0.0579686
+    ],
+    [
+     "TECK-B.TO",
+     0.0551165
+    ],
+    [
+     "SCCO",
+     0.0532676
+    ],
+    [
+     "BHP.AX",
+     0.0509692
+    ],
+    [
+     "FCX",
+     0.0496336
+    ],
+    [
+     "ANTO.L",
+     0.0474363
+    ],
+    [
+     "GLEN.L",
+     0.0470873
+    ],
+    [
+     "KGH.WA",
+     0.046230797
+    ],
+    [
+     "FM.TO",
+     0.0457731
+    ],
+    [
+     "5713.T",
+     0.0439784
+    ]
+   ],
+   "sectores": {
+    "basic_materials": 0.97440004,
+    "consumer_defensive": 0.0005,
+    "industrials": 0.025
+   },
+   "vol_1a": 0.4734754194259041,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "CORN",
+   "nombre": "Teucrium Corn Fund",
+   "cedear_ars": 7355.0,
+   "usd": 18.19,
+   "vol_cedear": 729.0,
+   "ratio": 4,
+   "ratio_desvio": 0.0008953156075597324,
+   "ccl_implicito": 1617.3721825178668,
+   "precio_implicito_ars": 7361.585046293601,
+   "ratio_dudoso": false,
+   "familia": "Teucrium",
+   "categoria": "Commodities Focused",
+   "expense": 0.01,
+   "aum": 130198560,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": -0.0502671,
+    "threeMonth": 0.1354844,
+    "oneYear": 0.0889575,
+    "fiveYear": -0.012439299
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "FGTXX",
+     0.3832349
+    ]
+   ],
+   "sectores": {},
+   "vol_1a": 0.17173782790242778,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "DIA",
+   "nombre": "State Street SPDR Dow Jones Industrial Average ETF Trust",
+   "cedear_ars": 42040.0,
+   "usd": 519.1,
+   "vol_cedear": 21137.0,
+   "ratio": 20,
+   "ratio_desvio": -0.0005594824659755915,
+   "ccl_implicito": 1619.7264496243497,
+   "precio_implicito_ars": 42016.47935713038,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Large Value",
+   "expense": 0.0016,
+   "aum": 43860340736,
+   "yield": 0.014199999,
+   "ret": {
+    "oneMonth": -0.0412689,
+    "threeMonth": -0.0237615,
+    "oneYear": 0.1120271,
+    "fiveYear": 0.103794
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "GS",
+     0.1048086
+    ],
+    [
+     "CAT",
+     0.094382
+    ],
+    [
+     "MSFT",
+     0.0597054
+    ],
+    [
+     "AMGN",
+     0.0490669
+    ],
+    [
+     "UNH",
+     0.042730797
+    ],
+    [
+     "V",
+     0.0418287
+    ],
+    [
+     "TRV",
+     0.0415004
+    ],
+    [
+     "GOOGL",
+     0.0400535
+    ],
+    [
+     "AAPL",
+     0.038766
+    ],
+    [
+     "JPM",
+     0.0385111
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.0934,
+    "basic_materials": 0.0377,
+    "consumer_defensive": 0.039100002,
+    "technology": 0.19049999,
+    "communication_services": 0.052399997,
+    "financial_services": 0.2628,
+    "industrials": 0.1602,
+    "energy": 0.0238,
+    "healthcare": 0.1399
+   },
+   "vol_1a": 0.12573205972829193,
+   "solapa_top10": {
+    "MSFT": 0.0597054,
+    "UNH": 0.042730797,
+    "GOOGL": 0.0400535,
+    "AAPL": 0.038766
+   },
+   "solapa_top10_pct": 0.181255697
+  },
+  {
+   "ticker": "EEM",
+   "nombre": "iShares MSCI Emerging Markets ETF",
+   "cedear_ars": 20370.0,
+   "usd": 62.85,
+   "vol_cedear": 16925.0,
+   "ratio": 5,
+   "ratio_desvio": -0.0010520161842574316,
+   "ccl_implicito": 1620.5250596658711,
+   "precio_implicito_ars": 20348.570430326676,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Diversified Emerging Mkts",
+   "expense": 0.0072000003,
+   "aum": 31071397888,
+   "yield": 0.0167,
+   "ret": {
+    "oneMonth": -0.0043465,
+    "threeMonth": -0.023696499,
+    "oneYear": 0.28074458,
+    "fiveYear": 0.083148606
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "2330.TW",
+     0.1557268
+    ],
+    [
+     "005930.KQ",
+     0.0752625
+    ],
+    [
+     "000660.KQ",
+     0.0587966
+    ],
+    [
+     "0700.HK",
+     0.0273374
+    ],
+    [
+     "9988.HK",
+     0.0184878
+    ],
+    [
+     "2454.TW",
+     0.018096
+    ],
+    [
+     "005935",
+     0.0093926005
+    ],
+    [
+     "2308.TW",
+     0.0093786
+    ],
+    [
+     "00939",
+     0.008547899
+    ],
+    [
+     "2317.TW",
+     0.0078614
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0094,
+    "consumer_cyclical": 0.0749,
+    "basic_materials": 0.0572,
+    "consumer_defensive": 0.024400001,
+    "technology": 0.4418,
+    "communication_services": 0.0585,
+    "financial_services": 0.1915,
+    "utilities": 0.018,
+    "industrials": 0.060500003,
+    "energy": 0.0352,
+    "healthcare": 0.0287
+   },
+   "vol_1a": 0.253506573444207,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "EFA",
+   "nombre": "iShares MSCI EAFE ETF",
+   "cedear_ars": 9335.0,
+   "usd": 103.55,
+   "vol_cedear": 19688.0,
+   "ratio": 18,
+   "ratio_desvio": -0.0023874548388325145,
+   "ccl_implicito": 1622.6943505552874,
+   "precio_implicito_ars": 9312.7131090795,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Foreign Large Blend",
+   "expense": 0.0032,
+   "aum": 76699582464,
+   "yield": 0.0324,
+   "ret": {
+    "oneMonth": -0.0330007,
+    "threeMonth": -0.0010661,
+    "oneYear": 0.14713101,
+    "fiveYear": 0.092973
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "ASML.AS",
+     0.032539
+    ],
+    [
+     "HSBA.L",
+     0.0157853
+    ],
+    [
+     "ROP.SW",
+     0.0135772005
+    ],
+    [
+     "SHEL.L",
+     0.0126731
+    ],
+    [
+     "NOVN.SW",
+     0.0121491
+    ],
+    [
+     "8306.T",
+     0.011624499
+    ],
+    [
+     "AZN.L",
+     0.0113911
+    ],
+    [
+     "NESN.SW",
+     0.010831799
+    ],
+    [
+     "SIE.DE",
+     0.0104623
+    ],
+    [
+     "BHP.AX",
+     0.0099377
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0152,
+    "consumer_cyclical": 0.0718,
+    "basic_materials": 0.0583,
+    "consumer_defensive": 0.0642,
+    "technology": 0.1204,
+    "communication_services": 0.047399998,
+    "financial_services": 0.26,
+    "utilities": 0.0356,
+    "industrials": 0.187,
+    "energy": 0.0394,
+    "healthcare": 0.1007
+   },
+   "vol_1a": 0.15827780429011973,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "ESGU",
+   "nombre": "iShares ESG Aware MSCI USA ETF",
+   "cedear_ars": 8985.0,
+   "usd": 166.85,
+   "vol_cedear": 103.0,
+   "ratio": 30,
+   "ratio_desvio": 0.002041021048223346,
+   "ccl_implicito": 1615.522924782739,
+   "precio_implicito_ars": 9003.338574118288,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Large Blend",
+   "expense": 0.0015,
+   "aum": 17903245312,
+   "yield": 0.0093,
+   "ret": {
+    "oneMonth": -0.0064872997,
+    "threeMonth": 0.0205552,
+    "oneYear": 0.1564771,
+    "fiveYear": 0.1255712
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NVDA",
+     0.080030404
+    ],
+    [
+     "AAPL",
+     0.0731744
+    ],
+    [
+     "MSFT",
+     0.055498198
+    ],
+    [
+     "AMZN",
+     0.0357907
+    ],
+    [
+     "GOOG",
+     0.0349781
+    ],
+    [
+     "AVGO",
+     0.0243544
+    ],
+    [
+     "META",
+     0.022259701
+    ],
+    [
+     "GOOGL",
+     0.0192725
+    ],
+    [
+     "MU",
+     0.0178248
+    ],
+    [
+     "AMD",
+     0.0154462
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0199,
+    "consumer_cyclical": 0.081199996,
+    "basic_materials": 0.0178,
+    "consumer_defensive": 0.0399,
+    "technology": 0.4086,
+    "communication_services": 0.0929,
+    "financial_services": 0.11310001,
+    "utilities": 0.0165,
+    "industrials": 0.0761,
+    "energy": 0.0357,
+    "healthcare": 0.098400004
+   },
+   "vol_1a": 0.13016709902056897,
+   "solapa_top10": {
+    "NVDA": 0.080030404,
+    "AAPL": 0.0731744,
+    "MSFT": 0.055498198,
+    "AMZN": 0.0357907,
+    "META": 0.022259701,
+    "GOOGL": 0.0192725,
+    "MU": 0.0178248,
+    "AMD": 0.0154462
+   },
+   "solapa_top10_pct": 0.319296903
+  },
+  {
+   "ticker": "ETHA",
+   "nombre": "iShares Ethereum Trust ETF",
+   "cedear_ars": 17670.0,
+   "usd": 54.51,
+   "vol_cedear": 36423.0,
+   "ratio": 5,
+   "ratio_desvio": -0.0012236407350465495,
+   "ccl_implicito": 1620.8035222894882,
+   "precio_implicito_ars": 17648.378268211727,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Digital Assets",
+   "expense": 0.0025,
+   "aum": 9825040384,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": 0.076514505,
+    "threeMonth": 0.69488823,
+    "oneYear": -0.3546536,
+    "fiveYear": 0.0
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [],
+   "sectores": {},
+   "vol_1a": 0.6330378131698097
+  },
+  {
+   "ticker": "EWJ",
+   "nombre": "iShares MSCI Japan ETF",
+   "cedear_ars": 10950.0,
+   "usd": 94.88,
+   "vol_cedear": 5438.0,
+   "ratio": 14,
+   "ratio_desvio": 0.0019156195257736819,
+   "ccl_implicito": 1615.7251264755482,
+   "precio_implicito_ars": 10970.976033807223,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Japan Stock",
+   "expense": 0.0049,
+   "aum": 23533963264,
+   "yield": 0.0366,
+   "ret": {
+    "oneMonth": 0.016700799,
+    "threeMonth": 0.042297903,
+    "oneYear": 0.258094,
+    "fiveYear": 0.0936753
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "8306.T",
+     0.046620697
+    ],
+    [
+     "7203.T",
+     0.0326775
+    ],
+    [
+     "8035.T",
+     0.030988801
+    ],
+    [
+     "8316.T",
+     0.029778099
+    ],
+    [
+     "6857.T",
+     0.029584201
+    ],
+    [
+     "6501.T",
+     0.028635599
+    ],
+    [
+     "9984.T",
+     0.028157402
+    ],
+    [
+     "6098.T",
+     0.026252
+    ],
+    [
+     "6758.T",
+     0.0257911
+    ],
+    [
+     "285A.T",
+     0.02456
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0173,
+    "consumer_cyclical": 0.1114,
+    "basic_materials": 0.028399998,
+    "consumer_defensive": 0.0344,
+    "technology": 0.2204,
+    "communication_services": 0.0956,
+    "financial_services": 0.1934,
+    "utilities": 0.0095999995,
+    "industrials": 0.2275,
+    "energy": 0.0095,
+    "healthcare": 0.0525
+   },
+   "vol_1a": 0.2081352311235649,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "EWY",
+   "nombre": "iShares MSCI South Korea ETF",
+   "cedear_ars": 4892.5,
+   "usd": 150.44,
+   "vol_cedear": 49286.0,
+   "ratio": 50,
+   "ratio_desvio": -0.0044545035565061175,
+   "ccl_implicito": 1626.0635469290082,
+   "precio_implicito_ars": 4870.706341349794,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Focused Region",
+   "expense": 0.0058999998,
+   "aum": 26213310464,
+   "yield": 0.0111,
+   "ret": {
+    "oneMonth": 0.0068734996,
+    "threeMonth": -0.0956407,
+    "oneYear": 1.339908,
+    "fiveYear": 0.2031404
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "000660.KQ",
+     0.23720409
+    ],
+    [
+     "005930.KQ",
+     0.2277623
+    ],
+    [
+     "402340.KQ",
+     0.031131301
+    ],
+    [
+     "009150.KQ",
+     0.0273247
+    ],
+    [
+     "105560.KQ",
+     0.0192147
+    ],
+    [
+     "055550.KQ",
+     0.0155854
+    ],
+    [
+     "005380.KQ",
+     0.014609099
+    ],
+    [
+     "086790.KQ",
+     0.0129916
+    ],
+    [
+     "034020.KQ",
+     0.0126044
+    ],
+    [
+     "012450.KQ",
+     0.0118654
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.044899996,
+    "basic_materials": 0.014199999,
+    "consumer_defensive": 0.0223,
+    "technology": 0.569,
+    "communication_services": 0.0294,
+    "financial_services": 0.109,
+    "utilities": 0.0032,
+    "industrials": 0.16409999,
+    "energy": 0.0146,
+    "healthcare": 0.0292
+   },
+   "vol_1a": 0.5790980658701642,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "EWZ",
+   "nombre": "iShares MSCI Brazil ETF",
+   "cedear_ars": 34000.0,
+   "usd": 41.83,
+   "vol_cedear": 76626.0,
+   "ratio": 2,
+   "ratio_desvio": -0.004187489938035416,
+   "ccl_implicito": 1625.6275400430313,
+   "precio_implicito_ars": 33857.625342106796,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Focused Region",
+   "expense": 0.0058999998,
+   "aum": 8635897856,
+   "yield": 0.0394,
+   "ret": {
+    "oneMonth": 0.032011498,
+    "threeMonth": 0.076280296,
+    "oneYear": 0.2544144,
+    "fiveYear": 0.112803094
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "VALE3.SA",
+     0.0892114
+    ],
+    [
+     "ITUB4",
+     0.084110096
+    ],
+    [
+     "NU",
+     0.0805826
+    ],
+    [
+     "PETR4",
+     0.0750735
+    ],
+    [
+     "PETR3.SA",
+     0.069594696
+    ],
+    [
+     "BBDC4",
+     0.0380926
+    ],
+    [
+     "B3SA3.SA",
+     0.037174102
+    ],
+    [
+     "WEGE3.SA",
+     0.0319813
+    ],
+    [
+     "AXIA3.SA",
+     0.031785
+    ],
+    [
+     "BPAC11",
+     0.0298879
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.0168,
+    "basic_materials": 0.1296,
+    "consumer_defensive": 0.0417,
+    "communication_services": 0.016900001,
+    "financial_services": 0.3443,
+    "utilities": 0.128,
+    "industrials": 0.1188,
+    "energy": 0.18110001,
+    "healthcare": 0.0228
+   },
+   "vol_1a": 0.2809736496133221,
+   "solapa_top10": {
+    "NU": 0.0805826
+   },
+   "solapa_top10_pct": 0.0805826
+  },
+  {
+   "ticker": "FXI",
+   "nombre": "iShares China Large-Cap ETF",
+   "cedear_ars": 10940.0,
+   "usd": 33.84,
+   "vol_cedear": 17212.0,
+   "ratio": 5,
+   "ratio_desvio": 0.0014785549911426887,
+   "ccl_implicito": 1616.430260047281,
+   "precio_implicito_ars": 10956.1753916031,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Greater China Region",
+   "expense": 0.0073,
+   "aum": 3926357504,
+   "yield": 0.02,
+   "ret": {
+    "oneMonth": -0.0405966,
+    "threeMonth": 0.0722439,
+    "oneYear": -0.1577875,
+    "fiveYear": -0.0032940998
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "00939",
+     0.0912513
+    ],
+    [
+     "0700.HK",
+     0.0911506
+    ],
+    [
+     "9988.HK",
+     0.0898423
+    ],
+    [
+     "01398",
+     0.0642382
+    ],
+    [
+     "1810.HK",
+     0.0453184
+    ],
+    [
+     "03988",
+     0.0453013
+    ],
+    [
+     "3690.HK",
+     0.043249603
+    ],
+    [
+     "9999.HK",
+     0.0393188
+    ],
+    [
+     "02318",
+     0.0357914
+    ],
+    [
+     "01211",
+     0.0314834
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.01,
+    "consumer_cyclical": 0.2558,
+    "basic_materials": 0.036,
+    "consumer_defensive": 0.0081,
+    "technology": 0.0634,
+    "communication_services": 0.1517,
+    "financial_services": 0.36380002,
+    "utilities": 0.0037,
+    "industrials": 0.0235,
+    "energy": 0.0512,
+    "healthcare": 0.0326
+   },
+   "vol_1a": 0.1899381349931644,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "GDX",
+   "nombre": "VanEck Gold Miners ETF",
+   "cedear_ars": 14200.0,
+   "usd": 87.71,
+   "vol_cedear": 8611.0,
+   "ratio": 10,
+   "ratio_desvio": -9.349757193355401e-05,
+   "ccl_implicito": 1618.9716109907652,
+   "precio_implicito_ars": 14198.672334478542,
+   "ratio_dudoso": false,
+   "familia": "VanEck",
+   "categoria": "Equity Precious Metals",
+   "expense": 0.0050999997,
+   "aum": 26254737408,
+   "yield": 0.0072000003,
+   "ret": {
+    "oneMonth": -0.1101875,
+    "threeMonth": 0.1646544,
+    "oneYear": 0.1585507,
+    "fiveYear": 0.2615347
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NEM",
+     0.110980704
+    ],
+    [
+     "AEM.TO",
+     0.1100437
+    ],
+    [
+     "ABX.TO",
+     0.0792943
+    ],
+    [
+     "WPM.TO",
+     0.055310797
+    ],
+    [
+     "FNV.TO",
+     0.0522735
+    ],
+    [
+     "AU",
+     0.048793897
+    ],
+    [
+     "K.TO",
+     0.0383352
+    ],
+    [
+     "GFI",
+     0.0381367
+    ],
+    [
+     "NST.AX",
+     0.027490001
+    ],
+    [
+     "PAAS.TO",
+     0.0269922
+    ]
+   ],
+   "sectores": {
+    "basic_materials": 1.0
+   },
+   "vol_1a": 0.5112944880953626,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "GLD",
+   "nombre": "SPDR Gold Shares",
+   "cedear_ars": 12390.0,
+   "usd": 382.01,
+   "vol_cedear": 115550.0,
+   "ratio": 50,
+   "ratio_desvio": -0.0017667146190735172,
+   "ccl_implicito": 1621.6852961964346,
+   "precio_implicito_ars": 12368.11040586968,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Commodities Focused",
+   "expense": 0.004,
+   "aum": 141702414336,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": -0.0850222,
+    "threeMonth": 0.036285702,
+    "oneYear": 0.0874499,
+    "fiveYear": 0.18630251
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [],
+   "sectores": {},
+   "vol_1a": 0.2957535127050519
+  },
+  {
+   "ticker": "GSG",
+   "nombre": "iShares S&P GSCI Commodity-Indexed Trust",
+   "cedear_ars": 10000.0,
+   "usd": 37.11,
+   "vol_cedear": 12399.0,
+   "ratio": 6,
+   "ratio_desvio": 0.0012403191055727625,
+   "ccl_implicito": 1616.8148746968473,
+   "precio_implicito_ars": 10012.403191055728,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Commodities Broad Basket",
+   "expense": 0.0075,
+   "aum": 1027415552,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": 0.0466966,
+    "threeMonth": 0.24745569,
+    "oneYear": 0.5521057,
+    "fiveYear": 0.16090891
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [],
+   "sectores": {},
+   "vol_1a": 0.2550743859396601
+  },
+  {
+   "ticker": "IBB",
+   "nombre": "iShares Biotechnology ETF",
+   "cedear_ars": 12100.0,
+   "usd": 201.99,
+   "vol_cedear": 4105.0,
+   "ratio": 27,
+   "ratio_desvio": 0.000873891934383586,
+   "ccl_implicito": 1617.4068023169464,
+   "precio_implicito_ars": 12110.57409240604,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Health",
+   "expense": 0.0044,
+   "aum": 11196648448,
+   "yield": 0.0016,
+   "ret": {
+    "oneMonth": 0.006669,
+    "threeMonth": 0.1070891,
+    "oneYear": 0.46074972,
+    "fiveYear": 0.0568753
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "GILD",
+     0.0808347
+    ],
+    [
+     "AMGN",
+     0.0777723
+    ],
+    [
+     "VRTX",
+     0.076168396
+    ],
+    [
+     "REGN",
+     0.0527537
+    ],
+    [
+     "MRNA",
+     0.049385298
+    ],
+    [
+     "NTRA",
+     0.039062902
+    ],
+    [
+     "ARGX",
+     0.0374136
+    ],
+    [
+     "ILMN",
+     0.028934501
+    ],
+    [
+     "RVMD",
+     0.0277792
+    ],
+    [
+     "BIIB",
+     0.0232543
+    ]
+   ],
+   "sectores": {
+    "healthcare": 1.0
+   },
+   "vol_1a": 0.22451453471891578,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "IBIT",
+   "nombre": "iShares Bitcoin Trust ETF",
+   "cedear_ars": 7485.0,
+   "usd": 46.15,
+   "vol_cedear": 335768.0,
+   "ratio": 10,
+   "ratio_desvio": -0.0018897244400483126,
+   "ccl_implicito": 1621.8851570964248,
+   "precio_implicito_ars": 7470.855412566239,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Digital Assets",
+   "expense": 0.0025,
+   "aum": 67060465664,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": 0.058794998,
+    "threeMonth": 0.42775163,
+    "oneYear": -0.2680435,
+    "fiveYear": 0.0
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [],
+   "sectores": {},
+   "vol_1a": 0.45290812302181355
+  },
+  {
+   "ticker": "ICLN",
+   "nombre": "iShares Global Clean Energy ETF",
+   "cedear_ars": 5305.0,
+   "usd": 16.33,
+   "vol_cedear": 1302.0,
+   "ratio": 5,
+   "ratio_desvio": -0.003380413316763864,
+   "ccl_implicito": 1624.3110838946725,
+   "precio_implicito_ars": 5287.066907354568,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Miscellaneous Sector",
+   "expense": 0.0038,
+   "aum": 2225109248,
+   "yield": 0.0108,
+   "ret": {
+    "oneMonth": -0.019027099,
+    "threeMonth": -0.17039049,
+    "oneYear": 0.1132898,
+    "fiveYear": -0.0339325
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "BE",
+     0.0970532
+    ],
+    [
+     "600900.SS",
+     0.080453195
+    ],
+    [
+     "FSLR",
+     0.0695846
+    ],
+    [
+     "NXT",
+     0.0632688
+    ],
+    [
+     "ENPH",
+     0.0419576
+    ],
+    [
+     "VWS.CO",
+     0.0417887
+    ],
+    [
+     "EQTL3.SA",
+     0.0354176
+    ],
+    [
+     "EDP.LS",
+     0.030051898
+    ],
+    [
+     "PLUG",
+     0.0261465
+    ],
+    [
+     "9502.T",
+     0.0260885
+    ]
+   ],
+   "sectores": {
+    "basic_materials": 0.0195,
+    "technology": 0.3013,
+    "utilities": 0.4085,
+    "industrials": 0.2706
+   },
+   "vol_1a": 0.3079775461303576,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "IEMG",
+   "nombre": "iShares Core MSCI Emerging Markets ETF",
+   "cedear_ars": 10380.0,
+   "usd": 76.79,
+   "vol_cedear": 2721.0,
+   "ratio": 12,
+   "ratio_desvio": -0.002013436799660151,
+   "ccl_implicito": 1622.0862091418153,
+   "precio_implicito_ars": 10359.100526019529,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Diversified Emerging Mkts",
+   "expense": 0.00090000004,
+   "aum": 160075055104,
+   "yield": 0.0221,
+   "ret": {
+    "oneMonth": -0.0054242,
+    "threeMonth": -0.0203955,
+    "oneYear": 0.2684235,
+    "fiveYear": 0.087879695
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "2330.TW",
+     0.1370609
+    ],
+    [
+     "005930.KQ",
+     0.066248
+    ],
+    [
+     "000660.KQ",
+     0.0517509
+    ],
+    [
+     "0700.HK",
+     0.0240606
+    ],
+    [
+     "9988.HK",
+     0.016271401
+    ],
+    [
+     "2454.TW",
+     0.0159361
+    ],
+    [
+     "2308.TW",
+     0.0082578
+    ],
+    [
+     "005935",
+     0.0082577
+    ],
+    [
+     "00939",
+     0.0075314
+    ],
+    [
+     "2317.TW",
+     0.006917
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.015,
+    "consumer_cyclical": 0.078099996,
+    "basic_materials": 0.061,
+    "consumer_defensive": 0.0272,
+    "technology": 0.41970003,
+    "communication_services": 0.055,
+    "financial_services": 0.18129998,
+    "utilities": 0.0191,
+    "industrials": 0.0749,
+    "energy": 0.0334,
+    "healthcare": 0.035099998
+   },
+   "vol_1a": 0.2455178853146596,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "IEUR",
+   "nombre": "iShares Core MSCI Europe ETF",
+   "cedear_ars": 10930.0,
+   "usd": 74.09,
+   "vol_cedear": 6731.0,
+   "ratio": 11,
+   "ratio_desvio": -0.002425420765791886,
+   "ccl_implicito": 1622.756107436901,
+   "precio_implicito_ars": 10903.490151029895,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Europe Stock",
+   "expense": 0.001,
+   "aum": 9244934144,
+   "yield": 0.0325,
+   "ret": {
+    "oneMonth": -0.0496134,
+    "threeMonth": -0.0190007,
+    "oneYear": 0.1123839,
+    "fiveYear": 0.090493806
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "ASML.AS",
+     0.045987602
+    ],
+    [
+     "HSBA.L",
+     0.022327
+    ],
+    [
+     "ROP.SW",
+     0.019175
+    ],
+    [
+     "SHEL.L",
+     0.0179092
+    ],
+    [
+     "NOVN.SW",
+     0.0171782
+    ],
+    [
+     "AZN.L",
+     0.0160911
+    ],
+    [
+     "NESN.SW",
+     0.0153294
+    ],
+    [
+     "SIE.DE",
+     0.0148114
+    ],
+    [
+     "SAP.DE",
+     0.0139728
+    ],
+    [
+     "SAN.MC",
+     0.0130469
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0138,
+    "consumer_cyclical": 0.0654,
+    "basic_materials": 0.056599997,
+    "consumer_defensive": 0.0775,
+    "technology": 0.0958,
+    "communication_services": 0.035099998,
+    "financial_services": 0.2402,
+    "utilities": 0.0433,
+    "industrials": 0.19700001,
+    "energy": 0.0535,
+    "healthcare": 0.121800005
+   },
+   "vol_1a": 0.1580154895042488,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "IJH",
+   "nombre": "iShares Core S&P Mid-Cap ETF",
+   "cedear_ars": 9735.0,
+   "usd": 72.35,
+   "vol_cedear": 385.0,
+   "ratio": 12,
+   "ratio_desvio": 0.002582130130597493,
+   "ccl_implicito": 1614.651002073255,
+   "precio_implicito_ars": 9760.137036821367,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Mid-Cap Blend",
+   "expense": 0.0005,
+   "aum": 120931426304,
+   "yield": 0.0125,
+   "ret": {
+    "oneMonth": -0.0422008,
+    "threeMonth": -0.06346,
+    "oneYear": 0.1165999,
+    "fiveYear": 0.0799409
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "TWLO",
+     0.0132348
+    ],
+    [
+     "OKTA",
+     0.0102359
+    ],
+    [
+     "FTI",
+     0.0078486
+    ],
+    [
+     "NVT",
+     0.0076487
+    ],
+    [
+     "ATI",
+     0.0075996
+    ],
+    [
+     "ENTG",
+     0.0069365
+    ],
+    [
+     "UTHR",
+     0.0068487
+    ],
+    [
+     "XPO",
+     0.0060715
+    ],
+    [
+     "THC",
+     0.0060635
+    ],
+    [
+     "SNX",
+     0.0060517
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0785,
+    "consumer_cyclical": 0.1012,
+    "basic_materials": 0.048699997,
+    "consumer_defensive": 0.0319,
+    "technology": 0.18120001,
+    "communication_services": 0.0152,
+    "financial_services": 0.1358,
+    "utilities": 0.028299998,
+    "industrials": 0.22209999,
+    "energy": 0.0525,
+    "healthcare": 0.104499996
+   },
+   "vol_1a": 0.1507364754353539,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "ILF",
+   "nombre": "iShares Latin America 40 ETF",
+   "cedear_ars": 10130.0,
+   "usd": 37.55,
+   "vol_cedear": 22830.0,
+   "ratio": 6,
+   "ratio_desvio": 0.00011023449173830357,
+   "ccl_implicito": 1618.641810918775,
+   "precio_implicito_ars": 10131.116675401308,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Focused Region",
+   "expense": 0.0047,
+   "aum": 3843521792,
+   "yield": 0.0342,
+   "ret": {
+    "oneMonth": -0.013153501,
+    "threeMonth": 0.0209461,
+    "oneYear": 0.238905,
+    "fiveYear": 0.1324272
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NU",
+     0.074723
+    ],
+    [
+     "ITUB",
+     0.0715138
+    ],
+    [
+     "VALE",
+     0.0710451
+    ],
+    [
+     "GMEXICOB.MX",
+     0.0610348
+    ],
+    [
+     "PBR",
+     0.0601838
+    ],
+    [
+     "GFNORTEO.MX",
+     0.0401523
+    ],
+    [
+     "BAP",
+     0.040009998
+    ],
+    [
+     "FEMSAUBD.MX",
+     0.030869901
+    ],
+    [
+     "BBD",
+     0.0305017
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0069999998,
+    "consumer_cyclical": 0.0197,
+    "basic_materials": 0.2091,
+    "consumer_defensive": 0.0858,
+    "communication_services": 0.048899997,
+    "financial_services": 0.3465,
+    "utilities": 0.0424,
+    "industrials": 0.0959,
+    "energy": 0.13260001,
+    "healthcare": 0.0119
+   },
+   "vol_1a": 0.24061747220000892,
+   "solapa_top10": {
+    "NU": 0.074723
+   },
+   "solapa_top10_pct": 0.074723
+  },
+  {
+   "ticker": "ITA",
+   "nombre": "iShares U.S. Aerospace & Defense ETF",
+   "cedear_ars": 6785.0,
+   "usd": 209.07,
+   "vol_cedear": 12624.0,
+   "ratio": 50,
+   "ratio_desvio": -0.0023677293978426883,
+   "ccl_implicito": 1622.6622662266227,
+   "precio_implicito_ars": 6768.934956035638,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Industrials",
+   "expense": 0.0037,
+   "aum": 12136253440,
+   "yield": 0.0027,
+   "ret": {
+    "oneMonth": -0.0917259,
+    "threeMonth": -0.1451577,
+    "oneYear": -0.0080234995,
+    "fiveYear": 0.1563389
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "GE",
+     0.20971821
+    ],
+    [
+     "RTX",
+     0.1619488
+    ],
+    [
+     "BA",
+     0.0748927
+    ],
+    [
+     "HWM",
+     0.046097297
+    ],
+    [
+     "LMT",
+     0.046026804
+    ],
+    [
+     "TDG",
+     0.0455961
+    ],
+    [
+     "GD",
+     0.0445964
+    ],
+    [
+     "NOC",
+     0.044456802
+    ],
+    [
+     "HONA",
+     0.038183402
+    ],
+    [
+     "LHX",
+     0.034270898
+    ]
+   ],
+   "sectores": {
+    "industrials": 1.0
+   },
+   "vol_1a": 0.23100394310877542,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "IVE",
+   "nombre": "iShares S&P 500 Value ETF",
+   "cedear_ars": 9505.0,
+   "usd": 235.46,
+   "vol_cedear": 5372.0,
+   "ratio": 40,
+   "ratio_desvio": 0.0025444870167816713,
+   "ccl_implicito": 1614.711628302047,
+   "precio_implicito_ars": 9529.18534909451,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Large Value",
+   "expense": 0.0018000001,
+   "aum": 48203206656,
+   "yield": 0.015800001,
+   "ret": {
+    "oneMonth": -0.031169,
+    "threeMonth": 0.0085582,
+    "oneYear": 0.1230606,
+    "fiveYear": 0.1150115
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "AAPL",
+     0.0833272
+    ],
+    [
+     "AMZN",
+     0.039412998
+    ],
+    [
+     "XOM",
+     0.0229473
+    ],
+    [
+     "INTC",
+     0.0204853
+    ],
+    [
+     "WMT",
+     0.0158804
+    ],
+    [
+     "COST",
+     0.0138436
+    ],
+    [
+     "CVX",
+     0.013835
+    ],
+    [
+     "TSLA",
+     0.0130295
+    ],
+    [
+     "MRK",
+     0.012284401
+    ],
+    [
+     "BAC",
+     0.0121377
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.031,
+    "consumer_cyclical": 0.098900005,
+    "basic_materials": 0.0312,
+    "consumer_defensive": 0.0855,
+    "technology": 0.22700001,
+    "communication_services": 0.0299,
+    "financial_services": 0.14739999,
+    "utilities": 0.0385,
+    "industrials": 0.1016,
+    "energy": 0.0769,
+    "healthcare": 0.1321
+   },
+   "vol_1a": 0.09514784138704444,
+   "solapa_top10": {
+    "AAPL": 0.0833272,
+    "AMZN": 0.039412998,
+    "XOM": 0.0229473,
+    "INTC": 0.0204853,
+    "WMT": 0.0158804
+   },
+   "solapa_top10_pct": 0.182053198
+  },
+  {
+   "ticker": "IVV",
+   "nombre": "iShares Core S&P 500 ETF",
+   "cedear_ars": 1795.0,
+   "usd": 766.67,
+   "vol_cedear": 52948.0,
+   "ratio": 691,
+   "ratio_desvio": 0.0006094386850592493,
+   "ccl_implicito": 1617.8342702857815,
+   "precio_implicito_ars": 1796.0939424396813,
+   "ratio_dudoso": true,
+   "familia": "iShares",
+   "categoria": "Large Blend",
+   "expense": 0.00029999999,
+   "aum": 881268883456,
+   "yield": 0.011,
+   "ret": {
+    "oneMonth": -0.00348,
+    "threeMonth": 0.0229518,
+    "oneYear": 0.1570069,
+    "fiveYear": 0.137588
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NVDA",
+     0.0837008
+    ],
+    [
+     "AAPL",
+     0.0736048
+    ],
+    [
+     "MSFT",
+     0.0576789
+    ],
+    [
+     "AMZN",
+     0.037036702
+    ],
+    [
+     "GOOGL",
+     0.030578101
+    ],
+    [
+     "AVGO",
+     0.0253036
+    ],
+    [
+     "GOOG",
+     0.024528401
+    ],
+    [
+     "META",
+     0.0242176
+    ],
+    [
+     "MU",
+     0.0182182
+    ],
+    [
+     "TSLA",
+     0.0151438
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.017,
+    "consumer_cyclical": 0.0874,
+    "basic_materials": 0.0156,
+    "consumer_defensive": 0.0433,
+    "technology": 0.4045,
+    "communication_services": 0.0995,
+    "financial_services": 0.111999996,
+    "utilities": 0.0188,
+    "industrials": 0.0754,
+    "energy": 0.034,
+    "healthcare": 0.0926
+   },
+   "vol_1a": 0.12723274499268675,
+   "solapa_top10": {
+    "NVDA": 0.0837008,
+    "AAPL": 0.0736048,
+    "MSFT": 0.0576789,
+    "AMZN": 0.037036702,
+    "GOOGL": 0.030578101,
+    "META": 0.0242176,
+    "MU": 0.0182182
+   },
+   "solapa_top10_pct": 0.325035103
+  },
+  {
+   "ticker": "IVW",
+   "nombre": "iShares S&P 500 Growth ETF",
+   "cedear_ars": 11270.0,
+   "usd": 138.93,
+   "vol_cedear": 2523.0,
+   "ratio": 20,
+   "ratio_desvio": -0.0022063172462125635,
+   "ccl_implicito": 1622.3997696681781,
+   "precio_implicito_ars": 11245.134804635185,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Large Growth",
+   "expense": 0.0018000001,
+   "aum": 78179057664,
+   "yield": 0.0034,
+   "ret": {
+    "oneMonth": 0.019377,
+    "threeMonth": 0.033873502,
+    "oneYear": 0.1820552,
+    "fiveYear": 0.1471556
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NVDA",
+     0.1499552
+    ],
+    [
+     "MSFT",
+     0.1033354
+    ],
+    [
+     "AAPL",
+     0.0659339
+    ],
+    [
+     "GOOGL",
+     0.054782
+    ],
+    [
+     "AVGO",
+     0.0453294
+    ],
+    [
+     "GOOG",
+     0.0439439
+    ],
+    [
+     "META",
+     0.0433878
+    ],
+    [
+     "AMZN",
+     0.0351673
+    ],
+    [
+     "MU",
+     0.0326383
+    ],
+    [
+     "AMD",
+     0.027096601
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0058,
+    "consumer_cyclical": 0.0783,
+    "basic_materials": 0.0033000002,
+    "consumer_defensive": 0.0099,
+    "technology": 0.5449,
+    "communication_services": 0.1545,
+    "financial_services": 0.084,
+    "utilities": 0.0031,
+    "industrials": 0.0547,
+    "healthcare": 0.0614
+   },
+   "vol_1a": 0.18065170539352687,
+   "solapa_top10": {
+    "NVDA": 0.1499552,
+    "MSFT": 0.1033354,
+    "AAPL": 0.0659339,
+    "GOOGL": 0.054782,
+    "META": 0.0433878,
+    "AMZN": 0.0351673,
+    "MU": 0.0326383,
+    "AMD": 0.027096601
+   },
+   "solapa_top10_pct": 0.512296501
+  },
+  {
+   "ticker": "IWM",
+   "nombre": "iShares Russell 2000 ETF",
+   "cedear_ars": 43760.0,
+   "usd": 270.44,
+   "vol_cedear": 14997.0,
+   "ratio": 10,
+   "ratio_desvio": 0.00044274679301326003,
+   "ccl_implicito": 1618.1038307942613,
+   "precio_implicito_ars": 43779.37459966227,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Small Blend",
+   "expense": 0.0019,
+   "aum": 78041726976,
+   "yield": 0.0098,
+   "ret": {
+    "oneMonth": -0.052444402,
+    "threeMonth": -0.0723716,
+    "oneYear": 0.16065879,
+    "fiveYear": 0.062180802
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "XTSLA",
+     0.004783
+    ],
+    [
+     "TWST",
+     0.0042932
+    ],
+    [
+     "MOG-A",
+     0.0036658002
+    ],
+    [
+     "FROG",
+     0.0035605002
+    ],
+    [
+     "TXG",
+     0.0035516
+    ],
+    [
+     "UMBF",
+     0.0032458
+    ],
+    [
+     "BTSG",
+     0.0032107
+    ],
+    [
+     "GKOS",
+     0.0031835
+    ],
+    [
+     "VSAT",
+     0.0030450001
+    ],
+    [
+     "HUT",
+     0.0029879
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0641,
+    "consumer_cyclical": 0.086,
+    "basic_materials": 0.0428,
+    "consumer_defensive": 0.0257,
+    "technology": 0.1455,
+    "communication_services": 0.0233,
+    "financial_services": 0.17969999,
+    "utilities": 0.027,
+    "industrials": 0.1329,
+    "energy": 0.0636,
+    "healthcare": 0.2093
+   },
+   "vol_1a": 0.1823650206083934,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "PSQ",
+   "nombre": "ProShares Short QQQ",
+   "cedear_ars": 5250.0,
+   "usd": 25.91,
+   "vol_cedear": 11104.0,
+   "ratio": 8,
+   "ratio_desvio": -0.0013420846123342045,
+   "ccl_implicito": 1620.9957545349287,
+   "precio_implicito_ars": 5242.954055785245,
+   "ratio_dudoso": false,
+   "familia": "ProShares",
+   "categoria": "Trading--Inverse Equity",
+   "expense": 0.0095,
+   "aum": 593677120,
+   "yield": 0.0419,
+   "ret": {
+    "oneMonth": -0.028682102,
+    "threeMonth": 0.0015765999,
+    "oneYear": -0.1701887,
+    "fiveYear": -0.131717
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "IQMM",
+     0.7662231
+    ]
+   ],
+   "sectores": {},
+   "vol_1a": 0.1981089541640588,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "QQQ",
+   "nombre": "Invesco QQQ Trust",
+   "cedear_ars": 57575.0,
+   "usd": 709.8,
+   "vol_cedear": 52109.0,
+   "ratio": 20,
+   "ratio_desvio": -0.002137553525122571,
+   "ccl_implicito": 1622.2879684418147,
+   "precio_implicito_ars": 57451.930355791075,
+   "ratio_dudoso": false,
+   "familia": "Invesco",
+   "categoria": "Large Growth",
+   "expense": 0.0018000001,
+   "aum": 498945982464,
+   "yield": 0.0042,
+   "ret": {
+    "oneMonth": 0.0327665,
+    "threeMonth": 0.0053359997,
+    "oneYear": 0.2375263,
+    "fiveYear": 0.16323669
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NVDA",
+     0.0832742
+    ],
+    [
+     "AAPL",
+     0.073533505
+    ],
+    [
+     "MSFT",
+     0.057623
+    ],
+    [
+     "MU",
+     0.050244797
+    ],
+    [
+     "AMD",
+     0.0417138
+    ],
+    [
+     "AMZN",
+     0.0406602
+    ],
+    [
+     "META",
+     0.032625798
+    ],
+    [
+     "GOOGL",
+     0.0305482
+    ],
+    [
+     "GOOG",
+     0.0284936
+    ],
+    [
+     "TSLA",
+     0.0282008
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.1007,
+    "basic_materials": 0.0092,
+    "consumer_defensive": 0.0556,
+    "technology": 0.60330003,
+    "communication_services": 0.1259,
+    "financial_services": 0.0019,
+    "utilities": 0.0101,
+    "industrials": 0.0511,
+    "energy": 0.0045,
+    "healthcare": 0.0379
+   },
+   "vol_1a": 0.19823614738930664,
+   "solapa_top10": {
+    "NVDA": 0.0832742,
+    "AAPL": 0.073533505,
+    "MSFT": 0.057623,
+    "MU": 0.050244797,
+    "AMD": 0.0417138,
+    "AMZN": 0.0406602,
+    "META": 0.032625798,
+    "GOOGL": 0.0305482
+   },
+   "solapa_top10_pct": 0.4102235
+  },
+  {
+   "ticker": "RSP",
+   "nombre": "Invesco S&P 500 Equal Weight ETF",
+   "cedear_ars": 11570.0,
+   "usd": 214.09,
+   "vol_cedear": 8158.0,
+   "ratio": 30,
+   "ratio_desvio": -0.001517645024534775,
+   "ccl_implicito": 1621.280769769723,
+   "precio_implicito_ars": 11552.440847066133,
+   "ratio_dudoso": false,
+   "familia": "Invesco",
+   "categoria": "Large Blend",
+   "expense": 0.002,
+   "aum": 96059047936,
+   "yield": 0.0153,
+   "ret": {
+    "oneMonth": -0.0482542,
+    "threeMonth": -0.0192765,
+    "oneYear": 0.1133145,
+    "fiveYear": 0.085655496
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "MRNA",
+     0.0029185
+    ],
+    [
+     "P",
+     0.0027695
+    ],
+    [
+     "ILMN",
+     0.0027438
+    ],
+    [
+     "CRWD",
+     0.0026184
+    ],
+    [
+     "RVTY",
+     0.0025371
+    ],
+    [
+     "DDOG",
+     0.0024988
+    ],
+    [
+     "A",
+     0.0024466
+    ],
+    [
+     "PANW",
+     0.0024368
+    ],
+    [
+     "AMD",
+     0.0024132999
+    ],
+    [
+     "MTD",
+     0.0024053
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0581,
+    "consumer_cyclical": 0.1073,
+    "basic_materials": 0.0385,
+    "consumer_defensive": 0.063200004,
+    "technology": 0.18,
+    "communication_services": 0.04,
+    "financial_services": 0.1353,
+    "utilities": 0.0592,
+    "industrials": 0.1523,
+    "energy": 0.0398,
+    "healthcare": 0.1261
+   },
+   "vol_1a": 0.11464439652481284,
+   "solapa_top10": {
+    "AMD": 0.0024132999
+   },
+   "solapa_top10_pct": 0.0024132999
+  },
+  {
+   "ticker": "SH",
+   "nombre": "ProShares Short S&P500",
+   "cedear_ars": 6565.0,
+   "usd": 32.47,
+   "vol_cedear": 11806.0,
+   "ratio": 8,
+   "ratio_desvio": 0.0008205108100005631,
+   "ccl_implicito": 1617.49307052664,
+   "precio_implicito_ars": 6570.386653467654,
+   "ratio_dudoso": false,
+   "familia": "ProShares",
+   "categoria": "Trading--Inverse Equity",
+   "expense": 0.0088,
+   "aum": 1015440704,
+   "yield": 0.0392,
+   "ret": {
+    "oneMonth": 0.0079504,
+    "threeMonth": -0.0087891,
+    "oneYear": -0.0902257,
+    "fiveYear": -0.0869068
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [],
+   "sectores": {},
+   "vol_1a": 0.12642706052698374
+  },
+  {
+   "ticker": "SLV",
+   "nombre": "iShares Silver Trust",
+   "cedear_ars": 13930.0,
+   "usd": 51.51,
+   "vol_cedear": 25026.0,
+   "ratio": 6,
+   "ratio_desvio": -0.0023279418780770555,
+   "ccl_implicito": 1622.5975538730345,
+   "precio_implicito_ars": 13897.571769638387,
+   "ratio_dudoso": false,
+   "familia": "iShares",
+   "categoria": "Commodities Focused",
+   "expense": 0.005,
+   "aum": 29961824256,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": -0.1360483,
+    "threeMonth": 0.0315709,
+    "oneYear": 0.3086291,
+    "fiveYear": 0.2244087
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [],
+   "sectores": {},
+   "vol_1a": 0.6592594949763714
+  },
+  {
+   "ticker": "SMH",
+   "nombre": "VanEck Semiconductor ETF",
+   "cedear_ars": 17510.0,
+   "usd": 539.79,
+   "vol_cedear": 83540.0,
+   "ratio": 50,
+   "ratio_desvio": -0.001915502078272735,
+   "ccl_implicito": 1621.9270457029586,
+   "precio_implicito_ars": 17476.459558609444,
+   "ratio_dudoso": false,
+   "familia": "VanEck",
+   "categoria": "Technology",
+   "expense": 0.0034999999,
+   "aum": 74879844352,
+   "yield": 0.0018000001,
+   "ret": {
+    "oneMonth": 0.092960596,
+    "threeMonth": -0.0733751,
+    "oneYear": 0.86898977,
+    "fiveYear": 0.37379003
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NVDA",
+     0.1931036
+    ],
+    [
+     "TSM",
+     0.0927951
+    ],
+    [
+     "AMD",
+     0.0554102
+    ],
+    [
+     "AVGO",
+     0.0526573
+    ],
+    [
+     "MU",
+     0.0492491
+    ],
+    [
+     "AMAT",
+     0.0466008
+    ],
+    [
+     "INTC",
+     0.046564598
+    ],
+    [
+     "TXN",
+     0.0459514
+    ],
+    [
+     "KLAC",
+     0.0458501
+    ],
+    [
+     "ASML",
+     0.0453647
+    ]
+   ],
+   "sectores": {
+    "technology": 1.0
+   },
+   "vol_1a": 0.3968680403800603,
+   "solapa_top10": {
+    "NVDA": 0.1931036,
+    "AMD": 0.0554102,
+    "MU": 0.0492491,
+    "INTC": 0.046564598
+   },
+   "solapa_top10_pct": 0.34432749799999995
+  },
+  {
+   "ticker": "SOYB",
+   "nombre": "Teucrium Soybean Fund",
+   "cedear_ars": 8715.0,
+   "usd": 26.88,
+   "vol_cedear": 337.0,
+   "ratio": 5,
+   "ratio_desvio": -0.001402453697629702,
+   "ccl_implicito": 1621.09375,
+   "precio_implicito_ars": 8702.777616025156,
+   "ratio_dudoso": false,
+   "familia": "Teucrium",
+   "categoria": "Commodities Focused",
+   "expense": 0.01,
+   "aum": 45388196,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": 0.0080363,
+    "threeMonth": 0.1273447,
+    "oneYear": 0.2796561,
+    "fiveYear": 0.0457689
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "FGTXX",
+     0.4589964
+    ]
+   ],
+   "sectores": {},
+   "vol_1a": 0.13882922783907367,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "SPHQ",
+   "nombre": "Invesco S&P 500 Quality ETF",
+   "cedear_ars": 9715.0,
+   "usd": 83.96,
+   "vol_cedear": 3557.0,
+   "ratio": 14,
+   "ratio_desvio": -0.0006900416090728223,
+   "ccl_implicito": 1619.9380657455933,
+   "precio_implicito_ars": 9708.296245767857,
+   "ratio_dudoso": false,
+   "familia": "Invesco",
+   "categoria": "Large Blend",
+   "expense": 0.0015,
+   "aum": 18644170752,
+   "yield": 0.010299999,
+   "ret": {
+    "oneMonth": -0.0136645995,
+    "threeMonth": -0.065312,
+    "oneYear": 0.16028509,
+    "fiveYear": 0.1315468
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "AAPL",
+     0.0567674
+    ],
+    [
+     "MA",
+     0.056044
+    ],
+    [
+     "V",
+     0.0553008
+    ],
+    [
+     "LRCX",
+     0.0449714
+    ],
+    [
+     "GEV",
+     0.0400916
+    ],
+    [
+     "COST",
+     0.0386092
+    ],
+    [
+     "NFLX",
+     0.036405798
+    ],
+    [
+     "CSCO",
+     0.0350072
+    ],
+    [
+     "GE",
+     0.0346564
+    ],
+    [
+     "SNDK",
+     0.0343545
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.055,
+    "basic_materials": 0.0296,
+    "consumer_defensive": 0.0789,
+    "technology": 0.3953,
+    "communication_services": 0.0517,
+    "financial_services": 0.1688,
+    "industrials": 0.1702,
+    "energy": 0.0139,
+    "healthcare": 0.0365
+   },
+   "vol_1a": 0.14700782079756622,
+   "solapa_top10": {
+    "AAPL": 0.0567674,
+    "SNDK": 0.0343545
+   },
+   "solapa_top10_pct": 0.0911219
+  },
+  {
+   "ticker": "SPXL",
+   "nombre": "Direxion Daily S&P500 Bull 3X Shares",
+   "cedear_ars": 18170.0,
+   "usd": 280.17,
+   "vol_cedear": 17884.0,
+   "ratio": 25,
+   "ratio_desvio": -0.001552301723074967,
+   "ccl_implicito": 1621.3370453653138,
+   "precio_implicito_ars": 18141.794677691727,
+   "ratio_dudoso": false,
+   "familia": "Direxion Funds",
+   "categoria": "Trading--Leveraged Equity",
+   "expense": 0.0084,
+   "aum": 6937290752,
+   "yield": 0.0052,
+   "ret": {
+    "oneMonth": -0.0212413,
+    "threeMonth": 0.0348113,
+    "oneYear": 0.33211398,
+    "fiveYear": 0.2225173
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NVDA",
+     0.0193386
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.017,
+    "consumer_cyclical": 0.0874,
+    "basic_materials": 0.0156,
+    "consumer_defensive": 0.0433,
+    "technology": 0.4045,
+    "communication_services": 0.0995,
+    "financial_services": 0.111999996,
+    "utilities": 0.0188,
+    "industrials": 0.0754,
+    "energy": 0.034,
+    "healthcare": 0.0926
+   },
+   "vol_1a": 0.38109972303854833,
+   "solapa_top10": {
+    "NVDA": 0.0193386
+   },
+   "solapa_top10_pct": 0.0193386
+  },
+  {
+   "ticker": "SPY",
+   "nombre": "State Street SPDR S&P 500 ETF Trust",
+   "cedear_ars": 20620.0,
+   "usd": 763.25,
+   "vol_cedear": 350731.0,
+   "ratio": 60,
+   "ratio_desvio": -0.0013218970244589512,
+   "ccl_implicito": 1620.9629872256796,
+   "precio_implicito_ars": 20592.742483355654,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Large Blend",
+   "expense": 0.000945,
+   "aum": 809216114688,
+   "yield": 0.0099,
+   "ret": {
+    "oneMonth": -0.0035159,
+    "threeMonth": 0.0227941,
+    "oneYear": 0.156348,
+    "fiveYear": 0.1368657
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NVDA",
+     0.0836162
+    ],
+    [
+     "AAPL",
+     0.0735303
+    ],
+    [
+     "MSFT",
+     0.0576201
+    ],
+    [
+     "AMZN",
+     0.0370001
+    ],
+    [
+     "GOOGL",
+     0.030545799
+    ],
+    [
+     "AVGO",
+     0.0252788
+    ],
+    [
+     "GOOG",
+     0.024504
+    ],
+    [
+     "META",
+     0.0241938
+    ],
+    [
+     "MU",
+     0.0182
+    ],
+    [
+     "TSLA",
+     0.0151269
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.017,
+    "consumer_cyclical": 0.0874,
+    "basic_materials": 0.0156,
+    "consumer_defensive": 0.0433,
+    "technology": 0.4045,
+    "communication_services": 0.0995,
+    "financial_services": 0.111999996,
+    "utilities": 0.0188,
+    "industrials": 0.0754,
+    "energy": 0.034,
+    "healthcare": 0.0926
+   },
+   "vol_1a": 0.12712766133812475,
+   "solapa_top10": {
+    "NVDA": 0.0836162,
+    "AAPL": 0.0735303,
+    "MSFT": 0.0576201,
+    "AMZN": 0.0370001,
+    "GOOGL": 0.030545799,
+    "META": 0.0241938,
+    "MU": 0.0182
+   },
+   "solapa_top10_pct": 0.32470629900000003
+  },
+  {
+   "ticker": "TQQQ",
+   "nombre": "ProShares UltraPro QQQ",
+   "cedear_ars": 4430.0,
+   "usd": 68.21,
+   "vol_cedear": 447658.0,
+   "ratio": 25,
+   "ratio_desvio": -0.002982134141748971,
+   "ccl_implicito": 1623.6622196158924,
+   "precio_implicito_ars": 4416.789145752053,
+   "ratio_dudoso": false,
+   "familia": "ProShares",
+   "categoria": "Trading--Leveraged Equity",
+   "expense": 0.0078,
+   "aum": 37923700736,
+   "yield": 0.0062,
+   "ret": {
+    "oneMonth": 0.085713394,
+    "threeMonth": -0.0375174,
+    "oneYear": 0.5185063,
+    "fiveYear": 0.2141866
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "IQMM",
+     0.1848737
+    ],
+    [
+     "NVDA",
+     0.027920999
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.1007,
+    "basic_materials": 0.0092,
+    "consumer_defensive": 0.0556,
+    "technology": 0.6032,
+    "communication_services": 0.1259,
+    "financial_services": 0.0019,
+    "utilities": 0.0101,
+    "industrials": 0.051,
+    "energy": 0.0045,
+    "healthcare": 0.0379
+   },
+   "vol_1a": 0.5900425614159991,
+   "solapa_top10": {
+    "NVDA": 0.027920999
+   },
+   "solapa_top10_pct": 0.027920999
+  },
+  {
+   "ticker": "URA",
+   "nombre": "Global X Uranium ETF",
+   "cedear_ars": 11480.0,
+   "usd": 35.43,
+   "vol_cedear": 11687.0,
+   "ratio": 5,
+   "ratio_desvio": -0.0007874365622561053,
+   "ccl_implicito": 1620.0959638724246,
+   "precio_implicito_ars": 11470.960228265301,
+   "ratio_dudoso": false,
+   "familia": "Global X Funds",
+   "categoria": "Natural Resources",
+   "expense": 0.0069,
+   "aum": 5591713280,
+   "yield": 0.0521,
+   "ret": {
+    "oneMonth": -0.1225877,
+    "threeMonth": -0.08001839,
+    "oneYear": -0.1258464,
+    "fiveYear": 0.1560815
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "CCO.TO",
+     0.2203107
+    ],
+    [
+     "NXE.TO",
+     0.0598025
+    ],
+    [
+     "OKLO",
+     0.057244703
+    ],
+    [
+     "UEC",
+     0.046645597
+    ],
+    [
+     "KAP",
+     0.0437246
+    ],
+    [
+     "PDN.AX",
+     0.030891098
+    ],
+    [
+     "EFR.TO",
+     0.028880201
+    ],
+    [
+     "SMR",
+     0.0280872
+    ],
+    [
+     "LEU",
+     0.0268538
+    ]
+   ],
+   "sectores": {
+    "basic_materials": 0.0507,
+    "technology": 0.0070999996,
+    "utilities": 0.060900003,
+    "industrials": 0.2576,
+    "energy": 0.62369996
+   },
+   "vol_1a": 0.5150447790565862,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "USO",
+   "nombre": "United States Oil Fund, LP",
+   "cedear_ars": 17450.0,
+   "usd": 161.76,
+   "vol_cedear": 11163.0,
+   "ratio": 15,
+   "ratio_desvio": 0.00042163207820911097,
+   "ccl_implicito": 1618.1379821958458,
+   "precio_implicito_ars": 17457.35747976475,
+   "ratio_dudoso": false,
+   "familia": "USCF Investments",
+   "categoria": "Commodities Focused",
+   "expense": 0.0086,
+   "aum": 1690582144,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": 0.090431996,
+    "threeMonth": 0.37868148,
+    "oneYear": 0.9767053,
+    "fiveYear": 0.22536671
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [],
+   "sectores": {},
+   "vol_1a": 0.49312181732565336
+  },
+  {
+   "ticker": "VEA",
+   "nombre": "Vanguard FTSE Developed Markets Index Fund ETF Shares",
+   "cedear_ars": 11280.0,
+   "usd": 69.49,
+   "vol_cedear": 22773.0,
+   "ratio": 10,
+   "ratio_desvio": -0.0027321050321033047,
+   "ccl_implicito": 1623.2551446251261,
+   "precio_implicito_ars": 11249.181855237874,
+   "ratio_dudoso": false,
+   "familia": "Vanguard",
+   "categoria": "Foreign Large Blend",
+   "expense": 0.00029999999,
+   "aum": 313543393280,
+   "yield": 0.0241,
+   "ret": {
+    "oneMonth": -0.0289954,
+    "threeMonth": -0.0065184,
+    "oneYear": 0.2077257,
+    "fiveYear": 0.1031849
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "005930.KQ",
+     0.028148701
+    ],
+    [
+     "000660.KQ",
+     0.022973198
+    ],
+    [
+     "ASML.AS",
+     0.021403302
+    ],
+    [
+     "HSBA.L",
+     0.0104945
+    ],
+    [
+     "ROP.SW",
+     0.0090485
+    ],
+    [
+     "SHEL.L",
+     0.0085662
+    ],
+    [
+     "RY",
+     0.0085177
+    ],
+    [
+     "NOVN.SW",
+     0.0082329
+    ],
+    [
+     "8306.T",
+     0.007828
+    ],
+    [
+     "AZN.L",
+     0.0074962
+    ]
+   ],
+   "sectores": {
+    "realestate": 0.0233,
+    "consumer_cyclical": 0.0705,
+    "basic_materials": 0.073,
+    "consumer_defensive": 0.0521,
+    "technology": 0.16700001,
+    "communication_services": 0.035099998,
+    "financial_services": 0.24350001,
+    "utilities": 0.0299,
+    "industrials": 0.17709999,
+    "energy": 0.0506,
+    "healthcare": 0.078
+   },
+   "vol_1a": 0.1760889006883238,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "VIG",
+   "nombre": "Vanguard Dividend Appreciation Index Fund ETF Shares",
+   "cedear_ars": 10050.0,
+   "usd": 241.77,
+   "vol_cedear": 12442.0,
+   "ratio": 39,
+   "ratio_desvio": -0.0014487315091959996,
+   "ccl_implicito": 1621.1688795135872,
+   "precio_implicito_ars": 10035.440248332581,
+   "ratio_dudoso": false,
+   "familia": "Vanguard",
+   "categoria": "Large Blend",
+   "expense": 0.0004,
+   "aum": 127597993984,
+   "yield": 0.0156,
+   "ret": {
+    "oneMonth": -0.0327276,
+    "threeMonth": -0.0111528,
+    "oneYear": 0.097703196,
+    "fiveYear": 0.1071902
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "MSFT",
+     0.049085304
+    ],
+    [
+     "AAPL",
+     0.0489014
+    ],
+    [
+     "AVGO",
+     0.043037
+    ],
+    [
+     "LLY",
+     0.0410396
+    ],
+    [
+     "JPM",
+     0.0389813
+    ],
+    [
+     "XOM",
+     0.0296641
+    ],
+    [
+     "JNJ",
+     0.0282804
+    ],
+    [
+     "V",
+     0.0253272
+    ],
+    [
+     "WMT",
+     0.0205287
+    ],
+    [
+     "ABBV",
+     0.020490501
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.0387,
+    "basic_materials": 0.031600002,
+    "consumer_defensive": 0.090500005,
+    "technology": 0.2742,
+    "financial_services": 0.2074,
+    "utilities": 0.026600001,
+    "industrials": 0.1084,
+    "energy": 0.036,
+    "healthcare": 0.1866
+   },
+   "vol_1a": 0.09906719253959,
+   "solapa_top10": {
+    "MSFT": 0.049085304,
+    "AAPL": 0.0489014,
+    "XOM": 0.0296641,
+    "JNJ": 0.0282804,
+    "WMT": 0.0205287
+   },
+   "solapa_top10_pct": 0.176459904
+  },
+  {
+   "ticker": "VXX",
+   "nombre": "iPath Series B S&P 500 VIX Short-Term Futures ETN",
+   "cedear_ars": 6030.0,
+   "usd": 18.38,
+   "vol_cedear": 80748.0,
+   "ratio": 5,
+   "ratio_desvio": -0.013137113400369271,
+   "ccl_implicito": 1640.3699673558217,
+   "precio_implicito_ars": 5950.783206195772,
+   "ratio_dudoso": true,
+   "familia": "iPath",
+   "categoria": "Trading--Miscellaneous",
+   "expense": 0.0089,
+   "aum": 527790176,
+   "yield": 0.0,
+   "ret": {
+    "oneMonth": -0.0249599,
+    "threeMonth": -0.20449579,
+    "oneYear": -0.4692055,
+    "fiveYear": -0.4758462
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [],
+   "sectores": {},
+   "vol_1a": 0.5298511000314232
+  },
+  {
+   "ticker": "XLB",
+   "nombre": "State Street Materials Select Sector SPDR ETF",
+   "cedear_ars": 4565.0,
+   "usd": 50.92,
+   "vol_cedear": 5463.0,
+   "ratio": 18,
+   "ratio_desvio": 0.003168147445484104,
+   "ccl_implicito": 1613.7077769049488,
+   "precio_implicito_ars": 4579.462593088635,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Natural Resources",
+   "expense": 0.0008,
+   "aum": 7776858624,
+   "yield": 0.0177,
+   "ret": {
+    "oneMonth": -0.071951,
+    "threeMonth": -0.0384863,
+    "oneYear": 0.10549,
+    "fiveYear": 0.063213
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "LIN",
+     0.1223234
+    ],
+    [
+     "NEM",
+     0.0679442
+    ],
+    [
+     "FCX",
+     0.0561973
+    ],
+    [
+     "ECL",
+     0.0474993
+    ],
+    [
+     "SHW",
+     0.0474764
+    ],
+    [
+     "VMC",
+     0.0460976
+    ],
+    [
+     "MLM",
+     0.0445324
+    ],
+    [
+     "APD",
+     0.044376
+    ],
+    [
+     "CRH",
+     0.0436374
+    ],
+    [
+     "STLD",
+     0.0433578
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.16780001,
+    "basic_materials": 0.8322
+   },
+   "vol_1a": 0.177710590931369,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "XLC",
+   "nombre": "State Street Communication Services Select Sector SPDR ETF",
+   "cedear_ars": 9375.0,
+   "usd": 110.32,
+   "vol_cedear": 6747.0,
+   "ratio": 19,
+   "ratio_desvio": 0.002600696115178769,
+   "ccl_implicito": 1614.6211022480059,
+   "precio_implicito_ars": 9399.3815260798,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Communications",
+   "expense": 0.0008,
+   "aum": 22528514048,
+   "yield": 0.0124,
+   "ret": {
+    "oneMonth": -0.0016085,
+    "threeMonth": 0.038171202,
+    "oneYear": -0.0512359,
+    "fiveYear": 0.0785241
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "META",
+     0.2215855
+    ],
+    [
+     "GOOGL",
+     0.1163416
+    ],
+    [
+     "GOOG",
+     0.093324296
+    ],
+    [
+     "WBD",
+     0.0493856
+    ],
+    [
+     "DIS",
+     0.0448427
+    ],
+    [
+     "TTWO",
+     0.0437669
+    ],
+    [
+     "T",
+     0.043206703
+    ],
+    [
+     "APP",
+     0.0423991
+    ],
+    [
+     "VZ",
+     0.0410698
+    ],
+    [
+     "TMUS",
+     0.040953398
+    ]
+   ],
+   "sectores": {
+    "communication_services": 1.0
+   },
+   "vol_1a": 0.16175506585090516,
+   "solapa_top10": {
+    "META": 0.2215855,
+    "GOOGL": 0.1163416
+   },
+   "solapa_top10_pct": 0.3379271
+  },
+  {
+   "ticker": "XLE",
+   "nombre": "State Street Energy Select Sector SPDR ETF",
+   "cedear_ars": 55300.0,
+   "usd": 68.24,
+   "vol_cedear": 8058.0,
+   "ratio": 2,
+   "ratio_desvio": -0.0011908385982495329,
+   "ccl_implicito": 1620.7502930832356,
+   "precio_implicito_ars": 55234.1466255168,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Equity Energy",
+   "expense": 0.0008,
+   "aum": 39130157056,
+   "yield": 0.0248,
+   "ret": {
+    "oneMonth": -0.0328607,
+    "threeMonth": 0.1626792,
+    "oneYear": 0.414713,
+    "fiveYear": 0.22936991
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "XOM",
+     0.2403092
+    ],
+    [
+     "CVX",
+     0.1805232
+    ],
+    [
+     "COP",
+     0.0672689
+    ],
+    [
+     "VLO",
+     0.0472815
+    ],
+    [
+     "MPC",
+     0.0469679
+    ],
+    [
+     "PSX",
+     0.0464494
+    ],
+    [
+     "WMB",
+     0.0429116
+    ],
+    [
+     "SLB",
+     0.0385537
+    ],
+    [
+     "EOG",
+     0.0385277
+    ],
+    [
+     "KMI",
+     0.0315017
+    ]
+   ],
+   "sectores": {
+    "energy": 1.0
+   },
+   "vol_1a": 0.22032468517054773,
+   "solapa_top10": {
+    "XOM": 0.2403092
+   },
+   "solapa_top10_pct": 0.2403092
+  },
+  {
+   "ticker": "XLF",
+   "nombre": "State Street Financial Select Sector SPDR ETF",
+   "cedear_ars": 44960.0,
+   "usd": 55.52,
+   "vol_cedear": 10081.0,
+   "ratio": 2,
+   "ratio_desvio": -0.0004793173426878017,
+   "ccl_implicito": 1619.5965417867435,
+   "precio_implicito_ars": 44938.44989227276,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Financial",
+   "expense": 0.0008,
+   "aum": 50968727552,
+   "yield": 0.0155,
+   "ret": {
+    "oneMonth": -0.0716762,
+    "threeMonth": -0.0014006,
+    "oneYear": 0.0060803997,
+    "fiveYear": 0.0914359
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "BRK-B",
+     0.1230021
+    ],
+    [
+     "JPM",
+     0.116633795
+    ],
+    [
+     "V",
+     0.0812156
+    ],
+    [
+     "MA",
+     0.0591425
+    ],
+    [
+     "BAC",
+     0.0469476
+    ],
+    [
+     "GS",
+     0.0347638
+    ],
+    [
+     "WFC",
+     0.0321059
+    ],
+    [
+     "MS",
+     0.0297763
+    ],
+    [
+     "C",
+     0.028806701
+    ],
+    [
+     "AXP",
+     0.0212442
+    ]
+   ],
+   "sectores": {
+    "technology": 0.0155,
+    "financial_services": 0.9821,
+    "industrials": 0.0023999999
+   },
+   "vol_1a": 0.14427465823047597,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "XLI",
+   "nombre": "State Street Industrial Select Sector SPDR ETF",
+   "cedear_ars": 9670.0,
+   "usd": 167.76,
+   "vol_cedear": 6069.0,
+   "ratio": 28,
+   "ratio_desvio": 0.0030037067621802027,
+   "ccl_implicito": 1613.9723414401526,
+   "precio_implicito_ars": 9699.04584439028,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Industrials",
+   "expense": 0.0008,
+   "aum": 29827448832,
+   "yield": 0.0113,
+   "ret": {
+    "oneMonth": -0.044210702,
+    "threeMonth": -0.0967684,
+    "oneYear": 0.0942218,
+    "fiveYear": 0.1296605
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "CAT",
+     0.0700805
+    ],
+    [
+     "GE",
+     0.0609275
+    ],
+    [
+     "GEV",
+     0.0476018
+    ],
+    [
+     "RTX",
+     0.0470502
+    ],
+    [
+     "DE",
+     0.031696603
+    ],
+    [
+     "ETN",
+     0.0313853
+    ],
+    [
+     "UNP",
+     0.030395301
+    ],
+    [
+     "BA",
+     0.0276472
+    ],
+    [
+     "UBER",
+     0.0263096
+    ],
+    [
+     "PH",
+     0.0226495
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.0017,
+    "basic_materials": 0.0033000002,
+    "technology": 0.061100002,
+    "industrials": 0.9339
+   },
+   "vol_1a": 0.17198698351376998,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "XLK",
+   "nombre": "State Street Technology Select Sector SPDR ETF",
+   "cedear_ars": 6470.0,
+   "usd": 183.47,
+   "vol_cedear": 37628.0,
+   "ratio": 46,
+   "ratio_desvio": -0.0020665626294149586,
+   "ccl_implicito": 1622.172562271761,
+   "precio_implicito_ars": 6456.629339787685,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Technology",
+   "expense": 0.0008,
+   "aum": 127297691648,
+   "yield": 0.0043,
+   "ret": {
+    "oneMonth": 0.050732598,
+    "threeMonth": 0.028166002,
+    "oneYear": 0.3946479,
+    "fiveYear": 0.2214158
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NVDA",
+     0.154659
+    ],
+    [
+     "AAPL",
+     0.136004
+    ],
+    [
+     "MSFT",
+     0.10657679
+    ],
+    [
+     "AMD",
+     0.050590202
+    ],
+    [
+     "AVGO",
+     0.0467552
+    ],
+    [
+     "MU",
+     0.0446581
+    ],
+    [
+     "INTC",
+     0.0338494
+    ],
+    [
+     "PLTR",
+     0.0243834
+    ],
+    [
+     "CSCO",
+     0.024036
+    ],
+    [
+     "LRCX",
+     0.0232913
+    ]
+   ],
+   "sectores": {
+    "technology": 1.0
+   },
+   "vol_1a": 0.26464997440229304,
+   "solapa_top10": {
+    "NVDA": 0.154659,
+    "AAPL": 0.136004,
+    "MSFT": 0.10657679,
+    "AMD": 0.050590202,
+    "MU": 0.0446581,
+    "INTC": 0.0338494,
+    "PLTR": 0.0243834
+   },
+   "solapa_top10_pct": 0.550720892
+  },
+  {
+   "ticker": "XLP",
+   "nombre": "State Street Consumer Staples Select Sector SPDR ETF",
+   "cedear_ars": 8860.0,
+   "usd": 87.62,
+   "vol_cedear": 96878.0,
+   "ratio": 16,
+   "ratio_desvio": 0.0005715965229162734,
+   "ccl_implicito": 1617.8954576580688,
+   "precio_implicito_ars": 8865.064345193037,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Consumer Defensive",
+   "expense": 0.0008,
+   "aum": 13445566464,
+   "yield": 0.0273,
+   "ret": {
+    "oneMonth": -0.0455711,
+    "threeMonth": -0.024169499,
+    "oneYear": 0.0562013,
+    "fiveYear": 0.0596183
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "WMT",
+     0.105412506
+    ],
+    [
+     "COST",
+     0.091891296
+    ],
+    [
+     "PG",
+     0.0768635
+    ],
+    [
+     "KO",
+     0.0758694
+    ],
+    [
+     "PM",
+     0.0676958
+    ],
+    [
+     "TGT",
+     0.045702
+    ],
+    [
+     "MO",
+     0.0455716
+    ],
+    [
+     "CL",
+     0.044526502
+    ],
+    [
+     "PEP",
+     0.042593002
+    ],
+    [
+     "MDLZ",
+     0.042558
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.0148,
+    "consumer_defensive": 0.9852
+   },
+   "vol_1a": 0.14701376882242434,
+   "solapa_top10": {
+    "WMT": 0.105412506,
+    "KO": 0.0758694
+   },
+   "solapa_top10_pct": 0.181281906
+  },
+  {
+   "ticker": "XLRE",
+   "nombre": "State Street Real Estate Select Sector SPDR ETF",
+   "cedear_ars": 7580.0,
+   "usd": 42.16,
+   "vol_cedear": 1858.0,
+   "ratio": 9,
+   "ratio_desvio": 0.0004318581613709238,
+   "ccl_implicito": 1618.1214421252373,
+   "precio_implicito_ars": 7583.273484863191,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Real Estate",
+   "expense": 0.0008,
+   "aum": 7652509696,
+   "yield": 0.0353,
+   "ret": {
+    "oneMonth": -0.0649939,
+    "threeMonth": -0.063176796,
+    "oneYear": 0.0042051,
+    "fiveYear": 0.0173237
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "WELL",
+     0.1167547
+    ],
+    [
+     "PLD",
+     0.0868159
+    ],
+    [
+     "EQIX",
+     0.070227295
+    ],
+    [
+     "AMT",
+     0.053663902
+    ],
+    [
+     "SPG",
+     0.046486203
+    ],
+    [
+     "PSA",
+     0.04547
+    ],
+    [
+     "VTR",
+     0.0450492
+    ],
+    [
+     "VMRK",
+     0.0442846
+    ],
+    [
+     "DLR",
+     0.043967098
+    ],
+    [
+     "CBRE",
+     0.043067798
+    ]
+   ],
+   "sectores": {
+    "realestate": 1.0
+   },
+   "vol_1a": 0.1424467032662295,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "XLU",
+   "nombre": "State Street Utilities Select Sector SPDR ETF",
+   "cedear_ars": 4572.5,
+   "usd": 42.21,
+   "vol_cedear": 83680.0,
+   "ratio": 15,
+   "ratio_desvio": -0.003748461806852177,
+   "ccl_implicito": 1624.911158493248,
+   "precio_implicito_ars": 4555.360158388168,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Utilities",
+   "expense": 0.0008,
+   "aum": 21327450112,
+   "yield": 0.0307,
+   "ret": {
+    "oneMonth": -0.0590383,
+    "threeMonth": -0.123992205,
+    "oneYear": -0.0703708,
+    "fiveYear": 0.0747097
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "NEE",
+     0.1271499
+    ],
+    [
+     "SO",
+     0.0767391
+    ],
+    [
+     "DUK",
+     0.0715404
+    ],
+    [
+     "CEG",
+     0.0673604
+    ],
+    [
+     "AEP",
+     0.051979598
+    ],
+    [
+     "D",
+     0.0428375
+    ],
+    [
+     "SRE",
+     0.0410261
+    ],
+    [
+     "ETR",
+     0.0372756
+    ],
+    [
+     "XEL",
+     0.0354302
+    ],
+    [
+     "VST",
+     0.035127297
+    ]
+   ],
+   "sectores": {
+    "utilities": 1.0
+   },
+   "vol_1a": 0.15440837530603838,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  },
+  {
+   "ticker": "XLV",
+   "nombre": "State Street Health Care Select Sector SPDR ETF",
+   "cedear_ars": 9880.0,
+   "usd": 176.71,
+   "vol_cedear": 71050.0,
+   "ratio": 29,
+   "ratio_desvio": -0.0015994527413127901,
+   "ccl_implicito": 1621.4136155282665,
+   "precio_implicito_ars": 9864.19740691583,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Health",
+   "expense": 0.0008,
+   "aum": 43393187840,
+   "yield": 0.0152,
+   "ret": {
+    "oneMonth": -0.0089706,
+    "threeMonth": 0.0643571,
+    "oneYear": 0.2289952,
+    "fiveYear": 0.074796
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "LLY",
+     0.15103911
+    ],
+    [
+     "JNJ",
+     0.1040806
+    ],
+    [
+     "ABBV",
+     0.0754117
+    ],
+    [
+     "MRK",
+     0.0584853
+    ],
+    [
+     "UNH",
+     0.053751603
+    ],
+    [
+     "TMO",
+     0.0407183
+    ],
+    [
+     "AMGN",
+     0.0371758
+    ],
+    [
+     "GILD",
+     0.0301498
+    ],
+    [
+     "ABT",
+     0.0278986
+    ],
+    [
+     "PFE",
+     0.0265186
+    ]
+   ],
+   "sectores": {
+    "healthcare": 1.0
+   },
+   "vol_1a": 0.16048338792957087,
+   "solapa_top10": {
+    "JNJ": 0.1040806,
+    "UNH": 0.053751603
+   },
+   "solapa_top10_pct": 0.157832203
+  },
+  {
+   "ticker": "XLY",
+   "nombre": "State Street Consumer Discretionary Select Sector SPDR ETF",
+   "cedear_ars": 4220.0,
+   "usd": 112.46,
+   "vol_cedear": 3105.0,
+   "ratio": 43,
+   "ratio_desvio": 0.003265316386085626,
+   "ccl_implicito": 1613.5514849724348,
+   "precio_implicito_ars": 4233.779635149281,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Consumer Cyclical",
+   "expense": 0.0008,
+   "aum": 21273047040,
+   "yield": 0.0086,
+   "ret": {
+    "oneMonth": -0.0645572,
+    "threeMonth": -0.0701518,
+    "oneYear": -0.084359,
+    "fiveYear": 0.047958497
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "AMZN",
+     0.2339043
+    ],
+    [
+     "TSLA",
+     0.176681
+    ],
+    [
+     "HD",
+     0.050122
+    ],
+    [
+     "MCD",
+     0.042238403
+    ],
+    [
+     "TJX",
+     0.0407091
+    ],
+    [
+     "BKNG",
+     0.0340926
+    ],
+    [
+     "SBUX",
+     0.0298332
+    ],
+    [
+     "LOW",
+     0.02878
+    ],
+    [
+     "MAR",
+     0.0211818
+    ],
+    [
+     "ROST",
+     0.0208527
+    ]
+   ],
+   "sectores": {
+    "consumer_cyclical": 0.9867,
+    "technology": 0.013300001
+   },
+   "vol_1a": 0.19207698284042793,
+   "solapa_top10": {
+    "AMZN": 0.2339043
+   },
+   "solapa_top10_pct": 0.2339043
+  },
+  {
+   "ticker": "XME",
+   "nombre": "State Street SPDR S&P Metals & Mining ETF",
+   "cedear_ars": 5430.0,
+   "usd": 100.92,
+   "vol_cedear": 4342.0,
+   "ratio": 30,
+   "ratio_desvio": 0.002893423753227875,
+   "ccl_implicito": 1614.1498216409036,
+   "precio_implicito_ars": 5445.711290980028,
+   "ratio_dudoso": false,
+   "familia": "State Street Investment Management",
+   "categoria": "Natural Resources",
+   "expense": 0.0034999999,
+   "aum": 4094420480,
+   "yield": 0.0033000002,
+   "ret": {
+    "oneMonth": -0.1231748,
+    "threeMonth": -0.0310191,
+    "oneYear": 0.114674196,
+    "fiveYear": 0.20989901
+   },
+   "ret_fecha": "2026-10-15",
+   "top10": [
+    [
+     "RS",
+     0.0530973
+    ],
+    [
+     "MTRN",
+     0.0507899
+    ],
+    [
+     "STLD",
+     0.0501896
+    ],
+    [
+     "FCX",
+     0.050056
+    ],
+    [
+     "CLF",
+     0.0496414
+    ],
+    [
+     "NUE",
+     0.0494042
+    ],
+    [
+     "CMC",
+     0.049074
+    ],
+    [
+     "RGLD",
+     0.049000703
+    ],
+    [
+     "NEM",
+     0.0488486
+    ],
+    [
+     "MP",
+     0.0474737
+    ]
+   ],
+   "sectores": {
+    "basic_materials": 0.8031,
+    "industrials": 0.061100002,
+    "energy": 0.1357
+   },
+   "vol_1a": 0.38014942810725094,
+   "solapa_top10": {},
+   "solapa_top10_pct": 0
+  }
+ ]
+}
