@@ -27336,7 +27336,9 @@ function ResearchDelDiaModule() {
       const [{ data: br }, { data: al }, { data: po }, { data: cxd }] = await Promise.all([
         supabase.from("ticker_brief").select("*").order("updated_at", { ascending: false }),
         supabase.from("price_alerts").select("ticker").eq("canal", "screen").eq("user_id", user.id),
-        supabase.from("positions").select("ticker,operation_type,quantity,instrument_type,broker").in("instrument_type", ["cedear", "stock"]).neq("broker", "iol").eq("user_id", user.id),
+        // Paginado: sin esto PostgREST corta en 1.000 filas y el neteo miente.
+        fondosPaginar(() => supabase.from("positions").select("ticker,operation_type,quantity,instrument_type,broker").in("instrument_type", ["cedear", "stock"]).neq("broker", "iol").eq("user_id", user.id).order("id", { ascending: true }))
+          .then((data) => ({ data }), () => ({ data: null })),
         supabase.from("ticker_context").select("ticker,earnings_date,target_mean,news,fund"),
       ]);
       if (c) return;
@@ -35204,12 +35206,17 @@ function SuperinversoresModule() {
     if (!user) { setPos([]); setPosError(null); return () => { vivo = false; }; }
     setPos(null); setPosError(null);
     (async () => {
-      const { data: d, error: e } = await supabase
-        .from("positions")
-        .select("ticker,instrument_type,operation_type,quantity")
-        .eq("user_id", user.id)
-        .in("instrument_type", ["cedear", "stock"])
-        .limit(5000);
+      // Paginado: PostgREST corta en 1.000 filas aunque se pida mas y el neteo
+      // por ticker saldria falso sin avisar.
+      let d = null, e = null;
+      try {
+        d = await fondosPaginar(() => supabase
+          .from("positions")
+          .select("ticker,instrument_type,operation_type,quantity")
+          .eq("user_id", user.id)
+          .in("instrument_type", ["cedear", "stock"])
+          .order("id", { ascending: true }));
+      } catch (err) { e = err; }
       if (!vivo) return;
       if (e) { setPosError(e.message); setPos([]); return; }
       setPos(d || []);
